@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="PrtScr.App.Views.CaptureOverlayWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid x:Name="Root" Background="Black">
+        <!-- 冻结的屏幕画面 -->
+        <Image
+            x:Name="Frozen"
+            Stretch="Fill" />
+
+        <!-- 交互层：遮罩 / 悬浮高亮 / 选区 / 尺寸提示 -->
+        <Canvas
+            x:Name="Layer"
+            Background="Transparent"
+            PointerMoved="Layer_PointerMoved"
+            PointerPressed="Layer_PointerPressed"
+            PointerReleased="Layer_PointerReleased"
+            PointerWheelChanged="Layer_PointerWheelChanged">
+            <Rectangle x:Name="MaskTop" Fill="#60000000" />
+            <Rectangle x:Name="MaskLeft" Fill="#60000000" />
+            <Rectangle x:Name="MaskRight" Fill="#60000000" />
+            <Rectangle x:Name="MaskBottom" Fill="#60000000" />
+            <Rectangle
+                x:Name="HoverBorder"
+                Stroke="#FF00C8FF"
+                StrokeThickness="1.5" />
+            <Rectangle
+                x:Name="SelectionBorder"
+                Stroke="#FFFFFFFF"
+                StrokeThickness="1.5" />
+            <Border
+                x:Name="SizeTip"
+                Background="#E6202020"
+                CornerRadius="3"
+                Padding="6,2">
+                <TextBlock
+                    x:Name="SizeText"
+                    Foreground="White"
+                    FontSize="12" />
+            </Border>
+        </Canvas>
+
+        <!-- 焦点锚：隐形按钮，亮窗即聚焦——Esc/回车/Tab 的 KeyDown 全部由它直达，不依赖焦点漂移 -->
+        <Button
+            x:Name="FocusSink"
+            Width="1"
+            Height="1"
+            Opacity="0"
+            IsTabStop="True"
+            KeyDown="FocusSink_KeyDown" />
+
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="Escape" Invoked="OnEscape" />
+            <KeyboardAccelerator Key="Enter" Invoked="OnEnter" />
+        </Grid.KeyboardAccelerators>
+    </Grid>
+</Window>

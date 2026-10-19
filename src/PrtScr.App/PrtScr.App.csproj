@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>PrtScr.App</RootNamespace>
+    <!-- 对外产品名：实践小梅IshWY（IshWY）。程序集/exe 用 IshWY，命名空间保留内部代号 PrtScr。 -->
+    <AssemblyName>IshWY</AssemblyName>
+    <Product>实践小梅IshWY</Product>
+    <AssemblyTitle>实践小梅IshWY</AssemblyTitle>
+    <Description>Ishmael is watching you · 分窗口截屏截图工具</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.4.1" />
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.363" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PrtScr.Capture\PrtScr.Capture.csproj" />
+    <ProjectReference Include="..\PrtScr.Ocr\PrtScr.Ocr.csproj" />
+    <ProjectReference Include="..\PrtScr.Interop\PrtScr.Interop.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    未打包发布（WindowsPackageType=None）时，Windows App SDK 的 PRI 生成目标只在
+    AppxPackage=true 时把 <TargetName>.pri 加入发布清单，dotnet publish 会漏掉
+    <TargetName>.pri（程序集名 IshWY，即 IshWY.pri）与 .xbf，导致启动即
+    XamlParseException（XAML 解析失败）。
+    这里在 Publish 之后把编译输出里的 PRI/XBF 原样补进发布目录。
+  -->
+  <Target Name="CopyPriAndXbfToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <_PriXbfFiles Include="$(TargetDir)$(TargetName).pri" Condition="Exists('$(TargetDir)$(TargetName).pri')" />
+      <_PriXbfFiles Include="$(TargetDir)**\*.xbf" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PriXbfFiles)"
+          DestinationFiles="@(_PriXbfFiles->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

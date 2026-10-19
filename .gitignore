@@ -1,0 +1,12 @@
+bin/
+obj/
+Generated/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+publish/
+artifacts/
+*.log
+clip_probe*.png

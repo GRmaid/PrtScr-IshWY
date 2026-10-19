@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build (Debug)
+        run: dotnet build PrtScr.sln -c Debug --nologo
+
+      # 便携发布是关键路径：未打包发布容易漏 PRI/XBF，这里用脚本校验发布产物。
+      # GitHub 托管 runner 没有交互桌面，WinUI 的 --smoke 不可靠，故跳过启动冒烟。
+      - name: Portable package check
+        run: pwsh -NoProfile -File scripts/publish.ps1 -Version 0.0.0-ci -SkipSmoke -NoZip

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="PrtScr.App.Views.AnnotationWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid x:Name="Root" Background="#FF1E1E1E">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ScrollViewer
+            Grid.Row="0"
+            Background="#FF262626"
+            HorizontalScrollBarVisibility="Auto"
+            VerticalScrollBarVisibility="Disabled"
+            HorizontalScrollMode="Auto">
+        <StackPanel
+            x:Name="Toolbar"
+            Orientation="Horizontal"
+            Spacing="6"
+            Padding="10,8"
+            Background="#FF262626"
+            PointerPressed="Toolbar_PointerPressed"
+            PointerMoved="Toolbar_PointerMoved"
+            PointerReleased="Toolbar_PointerReleased">
+            <ToggleButton x:Name="ToolRectangle" Content="矩形" Tag="Rectangle" Click="Tool_Click" IsChecked="True" Padding="8,3" FontSize="12" />
+            <ToggleButton x:Name="ToolArrow" Content="箭头" Tag="Arrow" Click="Tool_Click" Padding="8,3" FontSize="12" />
+            <ToggleButton x:Name="ToolPen" Content="画笔" Tag="Pen" Click="Tool_Click" Padding="8,3" FontSize="12" />
+            <ToggleButton x:Name="ToolText" Content="文字" Tag="Text" Click="Tool_Click" Padding="8,3" FontSize="12" />
+            <ToggleButton x:Name="ToolMosaic" Content="马赛克" Tag="Mosaic" Click="Tool_Click" Padding="8,3" FontSize="12" />
+            <ToggleButton x:Name="ToolNumber" Content="序号" Tag="Number" Click="Tool_Click" Padding="8,3" FontSize="12" />
+
+            <Border Width="1" Background="#40FFFFFF" Margin="6,4" />
+
+            <Button x:Name="ColorRed" Width="20" Height="20" Background="#FFFF3B30" Padding="0" Click="Color_Click" Tag="#FFFF3B30" />
+            <Button x:Name="ColorYellow" Width="20" Height="20" Background="#FFFFCC00" Padding="0" Click="Color_Click" Tag="#FFFFCC00" />
+            <Button x:Name="ColorGreen" Width="20" Height="20" Background="#FF34C759" Padding="0" Click="Color_Click" Tag="#FF34C759" />
+            <Button x:Name="ColorBlue" Width="20" Height="20" Background="#FF007AFF" Padding="0" Click="Color_Click" Tag="#FF007AFF" />
+            <Button x:Name="ColorBlack" Width="20" Height="20" Background="#FF000000" Padding="0" Click="Color_Click" Tag="#FF000000" />
+
+            <Border Width="1" Background="#40FFFFFF" Margin="6,4" />
+
+            <Button Content="撤销" Click="Undo_Click" Padding="9,3" FontSize="12" />
+            <Button Content="清空" Click="Clear_Click" Padding="9,3" FontSize="12" />
+
+            <Border Width="1" Background="#40FFFFFF" Margin="6,4" />
+
+            <Button Content="复制" Click="Copy_Click" Padding="9,3" FontSize="12" Style="{StaticResource AccentButtonStyle}" />
+            <Button Content="关闭" Click="Close_Click" Padding="9,3" FontSize="12" />
+        </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" x:Name="ImageHost" Background="#FF111111">
+            <Grid x:Name="ImageContainer" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Image x:Name="BaseImage" Stretch="Fill" />
+            <Canvas
+                x:Name="DrawLayer"
+                Background="Transparent"
+                PointerPressed="DrawLayer_PointerPressed"
+                PointerMoved="DrawLayer_PointerMoved"
+                PointerReleased="DrawLayer_PointerReleased" />
+            <Button
+                x:Name="FocusSink"
+                Width="1"
+                Height="1"
+                Opacity="0"
+                IsTabStop="True"
+                KeyDown="FocusSink_KeyDown" />
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

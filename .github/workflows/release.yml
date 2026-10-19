@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（例如 0.1.0）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $raw = if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            '${{ inputs.version }}'
+          } else {
+            '${{ github.ref_name }}'
+          }
+          $version = $raw.Trim().TrimStart('v')
+          if (-not $version) { throw '版本号为空' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "版本: $version"
+
+      # 托管 runner 无交互桌面，--smoke 不可靠；本地发布默认会跑冒烟。
+      - name: Publish portable zip
+        run: pwsh -NoProfile -File scripts/publish.ps1 -Version ${{ steps.version.outputs.version }} -SkipSmoke
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IshWY-${{ steps.version.outputs.version }}-win-x64
+          path: artifacts/IshWY-${{ steps.version.outputs.version }}-win-x64.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ github.ref_name }}' "artifacts/IshWY-${{ steps.version.outputs.version }}-win-x64.zip" --title "实践小梅IshWY ${{ github.ref_name }}" --generate-notes
