@@ -178,7 +178,7 @@ FullscreenBypass: 已归还原前台
 - `MainWindow.OnHotkeyPressed` 的顺序：倒计时中再按一次 → 取消；取景器已打开 → 走原有取消取景；否则按配置延时。延时用 `StartDelayedCaptureAsync`：`CancellationTokenSource` + 每秒更新托盘提示/`HotkeyStatusText`，到点只调用一次 `CaptureService.StartCaptureAsync()`；`finally` 清理 cts、隐藏取消项、恢复托盘提示。全屏快速截图不走延时，保持即时。
 - 鼠标指针：`CaptureService.DrawCursorIfEnabled(Bitmap, WindowRect)` 在 `StartCaptureAsync` 的引擎采集之后、`CaptureFullScreenPngAsync` 写 PNG 之前调用。用 `GetCursorInfo`（只处理 `CURSOR_SHOWING`）取屏幕坐标与 HICON，`GetIconInfo` 得到 hotspot 并扣掉偏移，`DrawIconEx(..., DI_NORMAL)` 画进同一张 Bitmap，最后 `DeleteObject(hbmMask/hbmColor)`。任何失败只记 `Capture: 光标合成失败`，不影响截图。
 - WGC 会话的 `IsCursorCaptureEnabled` 仍保持 false，统一由 GDI 合成，避免 WGC 与 BitBlt 引擎出现双指针/行为不一致。
-- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误，`IshWY.exe --smoke` 退出 0（四个热键均 `register=0x1`）；真实热键、倒计时与指针合成待主人实测（按约定不做合成输入测试）。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误，`IshWY.exe --smoke` 退出 0（四个热键均 `register=0x1`）；真实热键、倒计时与指针合成已由主人实测通过（按约定不做合成输入测试）。
 
 ### 常规截图与放大取色器（2026-10-20 晚）
 
@@ -190,7 +190,7 @@ FullscreenBypass: 已归还原前台
 - 资源：取色器只多 190×190 的 WriteableBitmap（约 145 KB）与两块 byte 缓冲，没有新增整屏位图；锁的是 19×19 小块，不逐像素 `GetPixel`。选区存在或拖拽中隐藏放大镜；`Dismiss()` 一并隐藏并停掉 toast 计时器。
 - 复制色值：`Ctrl+C` 有选区 → `ConfirmAsync()`（仍复制截图）；无选区 → `CopyLoupeColorAsync()` 调 `ClipboardService.SetTextAsync(_loupeHex)`，日志 `Overlay: color copied #RRGGBB`，底部 `CopyToast` 显示 1.4s。
 - 图标：`tools/gen_icon.py` 改为以 256×256 为基底再 `save(..., sizes=[16,20,24,30,32,40,48,64,128,256])`；旧代码把 16×16 当基底，`sizes` 参数实际只产出 16×16，所以标题栏/托盘发糊。新 `Assets/app.ico` 155941 字节，Pillow 校验含 10 档。
-- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误；Debug `IshWY.exe --smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。Tab/取色器/Ctrl+C 的真实交互待主人实测（按约定不做合成输入）。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误；Debug `IshWY.exe --smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。Tab/取色器/Ctrl+C 已由主人实测通过（按约定不做合成输入）。
 
 ### 默认截图模式、子对话框与重操作内存回收（2026-10-20 晚补）
 
@@ -199,7 +199,7 @@ FullscreenBypass: 已归还原前台
 - 边界起拖：取景器的 Pointer 事件从 `Layer` 移到根 `Root`，避免点在非命中子元素时丢事件；`HandlePressed` 不再立即把整窗矩形设为选区，而是先清空选区，等到 `HandleReleased` 且 `!_dragMoved` 时才把 `_clickedWindow` 的整窗矩形设为选区。单击（未拖动）才选整窗。**仅移动 Pointer 事件不够**：取景窗 Win32 非客户区 1px 仍会把屏幕边缘按下截走，真正修复见下一节 `MakeClientAreaFullWindow()`。
 - 命中日志：`UpdateHover` 在悬停目标变化时输出 `Overlay: hover 0x... class="..." child=false rect=... title="..."` 或 `Overlay: hover none`，排查「为什么选不到某个窗口」先看这行。
 - 重操作内存：贴图拖动 `SetWindowPos` 增加 `SWP_NOREDRAW`；`ExitEditMode` 在重绘前调用 `MaybeShrinkDestDib()`，回收标注工具栏撑大的 DIB；`ApplyEdit` 先释放 `_baseScaled` 再解码全分辨率源图，避免三张大图同时存活；`WindowsOcrEngine` 的 `InMemoryRandomAccessStream` / `DataWriter` 改为 `using`，`OcrResultWindow.Closed` 清空 `TextOutput/StatusText/EngineText`。
-- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067 ×2），`IshWY.exe --smoke` 退出 0。主人报的「移动/标注/OCR 后停在 ~177 MB、重复到 184–192 MB」待本轮实测复核；不做合成输入测试。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067 ×2），`IshWY.exe --smoke` 退出 0。主人复测：重复操作峰值约 200 MB，停止约 5 分钟后回落到约 100 MB，属工作集裁剪/GC，不是无界泄漏。
 
 ### 取景窗非客户边框与全屏点击穿透层（2026-10-20 深夜补）
 
@@ -208,14 +208,14 @@ FullscreenBypass: 已归还原前台
 - 根因二：`Prepare` 只过滤 cloaked/自身/零宽窗口，Z 序最前的全屏点击穿透层（DSH 歌词插件 `dancing-lyrics-toast`，ex-style `0x08080028` = `NOACTIVATE|LAYERED|TRANSPARENT|TOPMOST`，rect 0,0 2561×1529）永远是 `_hoverCandidates[0]`，高亮画在屏幕边缘看不见；滚轮能循环到真实窗口，于是表现为「只能用滚轮选」。
 - 修复：`Prepare` 增加 `w.ProcessId != Environment.ProcessId` 与 `!IsFullScreenClickThrough(w)`；后者只排除面积 ≥ 显示器 85% 的 `IsClickThrough` 窗口，桌面歌词/宠物等小点击穿透窗仍保留为滚轮候选（普通悬停不会选中它们，`WS_EX_TRANSPARENT` 本就不收鼠标）。
 - 取色器：`UpdateColorLoupe` 改用 `Root.ActualWidth/ActualHeight` 把 DIP 映射到 `_full` 像素（`dipX * _full.Width / rootW`），并把取样点夹在 `_full.Width-1/Height-1`；不再依赖 `_scale`，客户区与冻结图差 1–2px 时也不漂移。面板翻转/夹取逻辑不变。
-- 验证：构建 0 错误（仅既有 CS0067 ×2），`--smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。对运行中 PID 13932 的取景 hwnd `0x3A140C` 发 `WM_NCHITTEST`，`(0,0)/(1,1)/四边/中心` 全部返回 1（修复前为 18）。该窗口当时隐藏停在 `-10000,-10000 202×56`，所以只验证了 hit-test 分支；真实取景尺寸下的边缘拖拽与悬停待主人实测。
+- 验证：构建 0 错误（仅既有 CS0067 ×2），`--smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。对运行中 PID 13932 的取景 hwnd `0x3A140C` 发 `WM_NCHITTEST`，`(0,0)/(1,1)/四边/中心` 全部返回 1（修复前为 18）。该窗口当时隐藏停在 `-10000,-10000 202×56`，所以只验证了 hit-test 分支；真实取景尺寸下的边缘拖拽、单击选窗与悬停高亮已由主人实测通过。
 
 ### 取景器键盘直达：Tab / Ctrl+C / Esc 不依赖焦点（2026-10-20 深夜）
 - 症状：按 F1 后立刻连按 Tab 多次没反应；先单击选窗或拖一次选区，再快速按两次 Tab 才切换；无选区 Ctrl+C 复制色值同样要“先点一下”；Esc 偶发关不掉。不是按键映射问题，而是取景窗亮窗后不保证拿到前台/XAML 焦点：`InitializeFrozen` 的 `Activate()` 与 `FocusSink.Focus()` 都可能被系统静默拒绝；顶层 `KeyInterceptor` 只挂 top-level WndProc，WinUI 的键盘焦点实际落在 `InputSiteWindowClass` 子窗（`GetGUIThreadInfo` 实测 active=0/focus=0 时消息到不了）；全局 Esc 的 `RegisterHotKey` 又是在 `Prepare` 之后才注册且失败不记日志，留下启动空窗。
 - 修复：复用 `EscOverPinHook` 的 `WH_KEYBOARD_LL`，取景窗可见且激活时由钩子直接吞键并投递 UI 线程。`TryHandleOverlayKey` 白名单：Tab 仅无修饰；Esc/Enter/O 仅无 Ctrl/Shift；C/S 仅 Ctrl 无 Shift；Alt/Win 组合一律放行（Alt+Tab / Win+Tab 仍可切走），Ctrl+Tab 与 Shift+Tab 也放行。命中时返回 1 消费按键，否则底下的 Chrome/编辑器还会收到同一个 Tab/Ctrl+C；钩子回调只 `DispatcherQueue.TryEnqueue`，不写盘、不等待。
 - 生命周期：构造时 `SetOverlayKeyHandler(OnOverlayHotkey)`；`InitializeFrozen` 在 `Activate()` 前 `SetOverlayKeysActive(true)`；`Dismiss` 与 `Closed` 立刻置 false 并清 handler；`Activated` 失活（Alt+Tab、另存为对话框）置 false，重新激活且未关闭再置 true。若不在失活时放行，会把别的程序的 Tab/Ctrl+C/Esc 一起吞掉。
 - 分发：`HandleOverlayHotkey` 先守 `_closed`，然后 Esc→`Cancel()`、Enter→有选区 `ConfirmAsync()`、Tab→`ToggleCaptureMode()`、O→有选区 `OcrSelectionAsync()`、Ctrl+C→有选区 `ConfirmAsync()` 无选区 `CopyLoupeColorAsync()`、Ctrl+S→有选区 `SaveSelectionAsync()`。原 `KeyInterceptor`/`FocusSink`/`KeyboardAccelerator` 保留兜底；钩子消费后不会二次触发。
-- 验证：构建 0 错误（仅既有 CS0067 ×2），`--smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。日志新增 `Hook: overlay key vk=0x9 ctrl=False`，可确认按键走的是钩子而不是焦点路径。真实按键待主人实测（按约定不做合成输入）。
+- 验证：构建 0 错误（仅既有 CS0067 ×2），`--smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。日志新增 `Hook: overlay key vk=0x9 ctrl=False`，可确认按键走的是钩子而不是焦点路径。主人 2026-10-20 23:17 真键复测：连续 Tab、无选区 Ctrl+C、Esc、拖选/选窗后重复按键、Alt+Tab 透传全部通过。
 
 ### 贴图滚轮缩放内存（2026-10-20 晚）
 
@@ -283,12 +283,12 @@ FullscreenBypass: 已归还原前台
 - [x] 多屏 DPI：按主人决定取消（无第二显示器，不使用虚拟显示器）
 - [x] 清理：`clip_probe*.png` 已删除（含桌面/内部对话截图，不入库）；旧 `AnnotationWindow` 待清理。`tools/DxgiProbe`、`tools/WgcProbe`、`tools/KbProbe` 保留，作为采集引擎与键盘钩子排障工具
 - [x] 发布体积裁剪：`scripts/publish.ps1` 删除未加载的 AI/ML/Search/Widgets 组件（39 文件 55.3 MB），zip 92.5→69.6 MB；细粒度替换元包因 H.NotifyIcon targets 冲突不可行，保留元包+裁剪
-- [ ] 主人实测延时截图（设置 3/5/10 秒、按热键后开菜单/悬停、再按取消、托盘入口）与鼠标指针开关（F1 + 全屏）；构建已 0 错误、`--smoke` 通过，未做合成输入测试
-- [x] 实现「取景器跟随鼠标的放大取色器 + Ctrl+C 复制色值」：19×19 放大、HEX/RGB、十字准星、无选区复制色值（有选区仍复制截图）；构建 0 错误，待主人实测
-- [ ] 主人复测 2026-10-20 深夜二次修复：从屏幕绝对边缘（0,0/右/下）与窗口边框起拖、单击选窗、悬停预高亮、屏幕中间 `#32770` 与其他悬浮窗可悬停高亮、滚轮循环仍可用、取色器在右/下边缘不漂移且 `Ctrl+C` 色值正常。已修 1px 非客户边框 + 全屏点击穿透层过滤；构建 0 错误、`--smoke` 通过，未做合成输入测试
-- [ ] 主人复测贴图滚轮缩放内存：已去掉 `MoveWindow` 双提交、高清结算 350ms、不透明 `SourceCopy`、缩小后回收 DIB；峰值是否下降待任务管理器实测；若仍偏高再评估「只渲染可见区域」的视口化改造
-- [ ] 主人复测取景器键盘直达：F1 后**不点鼠标**连续按 Tab（应每次切换并弹提示）、无选区 Ctrl+C（应复制色值）、Esc（应关闭）；再拖选区/选窗后重复 Tab 与 Ctrl+C；切到别的程序（例如 Alt+Tab）后按 Tab/Ctrl+C/Esc，确认不再被取景窗吞掉。构建 0 错误、`--smoke` 通过；未做合成输入测试
+- [x] 主人实测延时截图（设置 3/5/10 秒、按热键后开菜单/悬停、再按取消、托盘入口）与鼠标指针开关（F1 + 全屏）—— 2026-10-20 已通过，无双指针
+- [x] 实现「取景器跟随鼠标的放大取色器 + Ctrl+C 复制色值」：19×19 放大、HEX/RGB、十字准星、无选区复制色值（有选区仍复制截图）；构建 0 错误；2026-10-20 主人实测取色器与 Ctrl+C 通过
+- [x] 主人复测 2026-10-20 深夜二次修复通过：屏幕绝对边缘与窗口边框起拖、单击选窗、悬停预高亮、`#32770` 与其他悬浮窗悬停、滚轮循环、取色器边缘与 `Ctrl+C` 色值均正常。1px 非客户边框 + 全屏点击穿透层过滤已验证
+- [x] 贴图滚轮缩放内存：已去掉 `MoveWindow` 双提交、高清结算 350ms、不透明 `SourceCopy`、缩小后回收 DIB；主人接受当前峰值（约 145 MB）。若后续仍偏高，再评估「只渲染可见区域」的视口化改造
+- [x] 主人复测取景器键盘直达 —— 2026-10-20 23:17 全部通过：F1 后不点鼠标连续 Tab、无选区 Ctrl+C 复制色值、Esc 关闭；拖选区/选窗后重复按键正常；Alt+Tab 到其他程序不被取景窗吞键
 - [x] 主人实测取景器 Tab 在窗口截图/常规截图间切换 —— 2026-10-20 深夜确认切换与提示正常，窗口模式仍吸附抗遮挡、常规模式能截到右键菜单/悬停提示/指针
-- [ ] 主人复测取色器跟随与 `Ctrl+C` 色值（右/下边缘漂移已修）、标题栏/托盘图标清晰度
+- [x] 主人实测取色器跟随与 `Ctrl+C` 色值（右/下边缘不漂移）、标题栏/托盘图标清晰度 —— 已通过
 - [x] 主人实测默认截图模式设置 —— 2026-10-20 深夜确认：设置 → 常规切到常规/窗口后，每次按截图热键从对应模式起步，Tab 临时切换与提示正常；`data/config.json` 的 `defaultCaptureMode` 随选择更新
-- [ ] 主人复测重操作内存：移动贴图、标注、OCR 后是否仍停在 ~177 MB 并随重复操作升到 ~200 MB；2026-10-20 深夜主人实测峰值后约 5 分钟回落到 ~100 MB，符合 Windows 工作集裁剪/GC，不是无界泄漏。本轮已加 `SWP_NOREDRAW`、退出标注回收 DIB、`ApplyEdit` 提前释放 `_baseScaled`、OCR 流 using 与结果清空
+- [x] 主人实测重操作内存：移动贴图、标注、OCR 后峰值约 200 MB，停止约 5 分钟后回落到约 100 MB，属 Windows 工作集裁剪/GC，不是无界泄漏。本轮已加 `SWP_NOREDRAW`、退出标注回收 DIB、`ApplyEdit` 提前释放 `_baseScaled`、OCR 流 using 与结果清空
