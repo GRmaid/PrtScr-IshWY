@@ -13,6 +13,7 @@ UnregisterHotKey
 ExitProcess
 GetMonitorInfo
 GetDpiForWindow
+GetCursorPos
 IsWindowVisible
 ShowWindow
 SetForegroundWindow

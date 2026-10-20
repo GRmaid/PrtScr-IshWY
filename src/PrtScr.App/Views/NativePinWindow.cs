@@ -4,6 +4,7 @@ using System.Drawing.Imaging;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
+using PrtScr.App.Services;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Streams;
 using Windows.Win32;
@@ -27,21 +28,23 @@ public sealed unsafe partial class NativePinWindow
     private const uint WM_LBUTTONDOWN = 0x0201;
     private const uint WM_LBUTTONUP = 0x0202;
     private const uint WM_LBUTTONDBLCLK = 0x0203;
+    private const uint WM_RBUTTONDOWN = 0x0204;
     private const uint WM_RBUTTONUP = 0x0205;
+    private const uint WM_MBUTTONDOWN = 0x0207;
+    private const uint WM_MBUTTONUP = 0x0208;
     private const uint WM_MOUSEWHEEL = 0x020A;
     private const uint WM_NULL = 0x0000;
     private const uint WM_APP_ZOOM_SETTLED = 0x8000 + 10;
     private const uint WM_APP_REASSERT_TOPMOST = 0x8000 + 11;
+    private const uint WM_APP_ENTER_EDIT = 0x8000 + 12;
     private const uint WM_HOTKEY = 0x0312;
-    private const int EditEscapeHotkeyId = 100;
-    private long _ocrStartTick;
+
 
     // 贴图自己轮询 Esc：不依赖低级键盘钩子（钩子会被系统静默摘除），也不抢焦点。
     private Thread? _escPollThread;
     private volatile bool _escPollStop;
     private bool _escWasDown;
-    private bool _escNeedsRelease;
-    private bool _escClosing;
+    private volatile bool _escNeedsRelease;
     private volatile bool _menuOpen;
 
     private const int VK_ESCAPE = 0x1B;
@@ -49,12 +52,33 @@ public sealed unsafe partial class NativePinWindow
     private const int CmdClose = 2;
     private const int CmdEdit = 3;
     private const int CmdOcr = 4;
+    private const int CmdSaveAs = 5;
     private const int CmdOpacity100 = 10;
     private const int CmdOpacity75 = 11;
     private const int CmdOpacity50 = 12;
     private const int CmdOpacity25 = 13;
 
     private const uint WM_CLASS_STYLE = 0x0008;   // CS_DBLCLKS
+
+    /// <summary>解码后的源图：Image 直接引用 PNG 流，流必须与图同生命周期。</summary>
+    private sealed class DecodedSource : IDisposable
+    {
+        private readonly MemoryStream _stream;
+
+        public DecodedSource(Image image, MemoryStream stream)
+        {
+            Image = image;
+            _stream = stream;
+        }
+
+        public Image Image { get; }
+
+        public void Dispose()
+        {
+            Image.Dispose();
+            _stream.Dispose();
+        }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
@@ -167,7 +191,7 @@ public sealed unsafe partial class NativePinWindow
     private void PollEscape()
     {
         var hwnd = _hwnd;
-        if (hwnd.IsNull || _escClosing)
+        if (hwnd.IsNull)
             return;
 
         try
@@ -178,26 +202,18 @@ public sealed unsafe partial class NativePinWindow
             if (!down)
                 _escNeedsRelease = false;
 
-            // OCR 结果窗打开期间 Esc 归它；它关闭后必须先看到一次抬起，
-            // 否则“关掉 OCR 的那一下”会把贴图一起关掉。最多让路 2 分钟，避免 OCR 异常时永久失效。
-            var ocrOpen = _ocrStartTick != 0
-                && Environment.TickCount64 - _ocrStartTick < 120_000
-                && PrtScr.App.Services.OcrUiService.LastWindowClosedTick <= _ocrStartTick;
-            if (ocrOpen)
-            {
-                _escNeedsRelease = true;
+            if (_escNeedsRelease || !isNewPress || _menuOpen)
                 return;
+
+            // 标注模式下即使光标在工具栏上也应能退出
+            if (!_editMode)
+            {
+                if (!GetCursorPos(out var pt) || WindowFromPoint(pt) != (nint)hwnd.Value)
+                    return;
             }
 
-            if (_escNeedsRelease || !isNewPress || _editMode || _menuOpen)
-                return;
-
-            if (!GetCursorPos(out var pt) || WindowFromPoint(pt) != (nint)hwnd.Value)
-                return;
-
-            _escClosing = true;
-            App.Log("Pin: esc polled over pin, closing");
-            _ = PInvoke.PostMessage(hwnd, WM_CLOSE, default, default);
+            // 由仲裁器决定关贴图、关 OCR 还是只退出标注；同一次按键只派发一次
+            EscRouter.Dispatch();
         }
         catch
         {
@@ -239,13 +255,14 @@ public sealed unsafe partial class NativePinWindow
     private int _winY;
     private int _winW;
     private int _winH;
+    private int _maxWinW = 8192;
+    private int _maxWinH = 8192;
     private bool _dragging;
     private NativePoint _dragStartCursor;
     private int _dragStartX;
     private int _dragStartY;
     private bool _ok;
 
-    private Bitmap? _source;
     private System.Threading.Timer? _settleTimer;
     private System.Threading.Timer? _topmostTimer;
     private int _renderedW;
@@ -278,14 +295,18 @@ public sealed unsafe partial class NativePinWindow
         return pin._ready.Wait(TimeSpan.FromSeconds(3)) && pin._ok ? pin : null;
     }
 
+    /// <summary>请求贴图线程进入标注模式（跨线程安全：只投递窗口消息）。</summary>
+    public void RequestEditMode()
+    {
+        if (!_hwnd.IsNull)
+            _ = PInvoke.PostMessage(_hwnd, WM_APP_ENTER_EDIT, default, default);
+    }
+
     private void Run()
     {
         try
         {
             RegisterClassOnce();
-
-            // 源 PNG 只解码一次
-            _source = Image.FromStream(new MemoryStream(_pngBytes)) as Bitmap;
 
             GetCursorPos(out var cursor);
             var monitor = MonitorFromPoint(cursor, 2 /* MONITOR_DEFAULTTONEAREST */);
@@ -299,6 +320,9 @@ public sealed unsafe partial class NativePinWindow
             var workH = info.rcWork.bottom - info.rcWork.top;
             var maxW = workW * 0.8;
             var maxH = workH * 0.8;
+            // 滚轮放大上限 = 工作区；避免贴图 DIB/分层表面随缩放无限膨胀（旧实现可到 8× = 数百 MB）
+            _maxWinW = Math.Min(8192, workW);
+            _maxWinH = Math.Min(8192, workH);
             _zoom = Math.Min(1, Math.Min(maxW / _pixelWidth, maxH / _pixelHeight));
             _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
             _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
@@ -319,6 +343,13 @@ public sealed unsafe partial class NativePinWindow
 
             lock (ClassLock)
                 ByHwnd[(nint)_hwnd.Value] = this;
+
+            EscRouter.RegisterPin(
+                (nint)_hwnd.Value,
+                () => _editMode,
+                () => _menuOpen,
+                () => _ = PInvoke.PostMessage(_hwnd, EscRouter.ExitEditMessage, default, default),
+                () => _ = PInvoke.PostMessage(_hwnd, WM_CLOSE, default, default));
 
             RenderAndPresent(highQuality: true);
             _ = PInvoke.ShowWindow(_hwnd, SHOW_WINDOW_CMD.SW_SHOW);
@@ -353,9 +384,9 @@ public sealed unsafe partial class NativePinWindow
             _topmostTimer?.Dispose();
             _escPollStop = true;
             ReleaseGdiResources();
-            _source?.Dispose();
             if (!_hwnd.IsNull)
             {
+                EscRouter.Unregister((nint)_hwnd.Value);
                 lock (ClassLock)
                     ByHwnd.Remove((nint)_hwnd.Value);
             }
@@ -405,6 +436,10 @@ public sealed unsafe partial class NativePinWindow
                     self.OnEditPointerDown(lParam);
                     return default;
 
+                case WM_MOUSEMOVE when self._editMode && self._editPanning:
+                    self.MoveEditPan();
+                    return default;
+
                 case WM_MOUSEMOVE when self._editMode:
                     self.OnEditPointerMove(lParam);
                     return default;
@@ -413,20 +448,31 @@ public sealed unsafe partial class NativePinWindow
                     self.OnEditPointerUp(lParam);
                     return default;
 
+                case WM_MBUTTONDOWN when self._editMode:
+                    self.BeginEditPan(lParam);
+                    return default;
+
+                case WM_MBUTTONUP when self._editPanning:
+                    self.EndEditPan();
+                    return default;
+
+                case WM_RBUTTONDOWN when self._editMode:
+                    self.BeginEditPan(lParam);
+                    return default;
+
+                case WM_RBUTTONUP when self._editMode && self._editPanning:
+                    if (!self.EndEditPan())
+                        self.ShowMenu();
+                    return default;
+
                 case WM_KEYDOWN when (int)wParam.Value == VK_ESCAPE:
-                    if (self._editMode)
-                        self.ExitEditMode(apply: false);
-                    else
-                        _ = PInvoke.DestroyWindow(hwnd);
+                    // 不直接关窗：交给 EscRouter 判断该关贴图、关 OCR，还是只退出标注
+                    EscRouter.Dispatch();
                     return default;
 
                 case WM_KEYDOWN when self._editMode && (int)wParam.Value == 0x5A
                     && (GetKeyState(0x11) & 0x8000) != 0:
                     self.UndoEdit();
-                    return default;
-
-                case WM_HOTKEY when (int)wParam.Value == EditEscapeHotkeyId:
-                    self.ExitEditMode(apply: false);
                     return default;
 
                 case WM_LBUTTONDOWN:
@@ -463,12 +509,18 @@ public sealed unsafe partial class NativePinWindow
                     self.OnWheel((short)((long)wParam.Value >> 16));
                     return default;
 
-                case WM_KEYDOWN when (int)wParam.Value == VK_ESCAPE:
-                    _ = PInvoke.DestroyWindow(hwnd);
-                    return default;
-
                 case WM_APP_ZOOM_SETTLED:
                     self.RenderAndPresent(highQuality: true);
+                    return default;
+
+                case WM_APP_ENTER_EDIT:
+                    if (!self._editMode)
+                        self.EnterEditMode();
+                    return default;
+
+                case EscRouter.ExitEditMessage:
+                    if (self._editMode)
+                        self.ExitEditMode(apply: false);
                     return default;
 
                 case WM_APP_REASSERT_TOPMOST:
@@ -558,7 +610,11 @@ public sealed unsafe partial class NativePinWindow
             return;
 
         var factor = delta > 0 ? 1.1 : 1 / 1.1;
-        var newZoom = Math.Clamp(_zoom * factor, 0.1, 8);
+        var maxZoom = Math.Min(8, Math.Min(
+            _maxWinW / (double)Math.Max(1, _pixelWidth),
+            _maxWinH / (double)Math.Max(1, _pixelHeight)));
+        maxZoom = Math.Max(0.1, maxZoom);
+        var newZoom = Math.Clamp(_zoom * factor, 0.1, maxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.0001)
             return;
 
@@ -591,6 +647,7 @@ public sealed unsafe partial class NativePinWindow
             fixed (char* copy = "复制图片")
             fixed (char* edit = "标注…")
             fixed (char* ocr = "识别文字")
+            fixed (char* saveAs = "另存为…")
             fixed (char* close = "关闭贴图")
             fixed (char* opacity = "不透明度")
             fixed (char* p100 = "100%")
@@ -601,6 +658,7 @@ public sealed unsafe partial class NativePinWindow
                 _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdCopy, new PCWSTR(copy));
                 _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdEdit, new PCWSTR(edit));
                 _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdOcr, new PCWSTR(ocr));
+                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdSaveAs, new PCWSTR(saveAs));
                 _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity100, new PCWSTR(p100));
                 _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity75, new PCWSTR(p75));
                 _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity50, new PCWSTR(p50));
@@ -642,9 +700,14 @@ public sealed unsafe partial class NativePinWindow
                 EnterEditMode();
                 break;
             case CmdOcr:
-                _ocrStartTick = Environment.TickCount64;
-                App.Log($"Pin: ocr menu clicked, tick={_ocrStartTick}");
+                App.Log("Pin: ocr menu clicked");
                 PinClipboardHelper.OpenOcr(_pngBytes, _uiQueue, (nint)_hwnd.Value);
+                break;
+            case CmdSaveAs:
+                if (_editMode)
+                    ApplyEdit(saveAs: true);
+                else
+                    SaveAs();
                 break;
             case CmdOpacity100:
                 SetOpacity(1);
@@ -664,6 +727,13 @@ public sealed unsafe partial class NativePinWindow
         }
     }
 
+    /// <summary>在当前贴图上打开系统另存为对话框。unsafe 类里不能写 async，因此只 fire-and-forget。</summary>
+    private void SaveAs()
+    {
+        _ = PrtScr.App.Services.FileSaveService.SavePngAsync(
+            (nint)_hwnd.Value, _pngBytes, PrtScr.App.Services.FileSaveService.SuggestedName("pin"));
+    }
+
     private void SetOpacity(double value)
     {
         _opacity = value;
@@ -674,7 +744,7 @@ public sealed unsafe partial class NativePinWindow
     /// <summary>交互期：GDI StretchBlt 快速缩放；停手后 GDI+ 双三次高清精修。</summary>
     private void RenderAndPresent(bool highQuality)
     {
-        if (_hwnd.IsNull || _winW <= 0 || _winH <= 0 || _source is null)
+        if (_hwnd.IsNull || _winW <= 0 || _winH <= 0)
             return;
         if (_renderedW == _winW && _renderedH == _winH && highQuality && !_needsRedrawAfterZoom)
             return;
@@ -763,16 +833,31 @@ public sealed unsafe partial class NativePinWindow
         }
     }
 
+    /// <summary>
+    /// 直接从 PNG 解码绘制到常驻 DIB，不再常驻一份全分辨率 Bitmap。
+    /// 贴图闲置时只保留压缩 PNG + 目标 DIB（各一张），内存从 ~70MB 降到 ~25MB。
+    /// </summary>
     private void RenderHighQuality()
     {
+        EnsureScreenDc();
         EnsureDestDib(_winW, _winH);
-        if (_destBits == 0 || _source is null)
+        if (_destBits == 0)
         {
             RenderPlaceholder();
             return;
         }
 
-        using var bitmap = new Bitmap(_winW, _winH, PixelFormat.Format32bppPArgb);
+        using var source = DecodeSource();
+        if (source is null)
+        {
+            RenderPlaceholder();
+            return;
+        }
+
+        using var bitmap = CreateDestBitmap();
+        if (bitmap is null)
+            return;
+
         using (var graphics = Graphics.FromImage(bitmap))
         using (var attributes = new ImageAttributes())
         {
@@ -782,46 +867,38 @@ public sealed unsafe partial class NativePinWindow
             graphics.CompositingQuality = CompositingQuality.HighQuality;
             var matrix = new ColorMatrix { Matrix33 = (float)_opacity };
             attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-            graphics.DrawImage(_source, new Rectangle(0, 0, _winW, _winH),
-                0, 0, _source.Width, _source.Height, GraphicsUnit.Pixel, attributes);
-        }
-
-        var data = bitmap.LockBits(new Rectangle(0, 0, _winW, _winH),
-            ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-        try
-        {
-            var destStride = _destAllocW * 4;
-            for (var y = 0; y < _winH; y++)
-                Gdi.Copy(_destBits + y * destStride, data.Scan0 + y * data.Stride, _winW * 4);
-        }
-        finally
-        {
-            bitmap.UnlockBits(data);
+            graphics.DrawImage(source.Image, new Rectangle(0, 0, _winW, _winH),
+                0, 0, source.Image.Width, source.Image.Height, GraphicsUnit.Pixel, attributes);
         }
     }
 
-    /// <summary>把一张位图拷进常驻目标 DIB 并呈现（原位编辑用）。</summary>
-    private void CopyToDestAndPresent(Bitmap bitmap)
+    /// <summary>按需解码 PNG，不再复制一份全分辨率位图（省约 16 MB 瞬时占用）。调用方负责 Dispose。</summary>
+    private DecodedSource? DecodeSource()
     {
-        EnsureScreenDc();
-        EnsureDestDib(bitmap.Width, bitmap.Height);
-        if (_destBits == 0)
-            return;
-
-        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
-            ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        MemoryStream? stream = null;
         try
         {
-            var destStride = _destAllocW * 4;
-            for (var y = 0; y < bitmap.Height; y++)
-                Gdi.Copy(_destBits + y * destStride, data.Scan0 + y * data.Stride, bitmap.Width * 4);
+            stream = new MemoryStream(_pngBytes, writable: false);
+            var image = Image.FromStream(stream);
+            return new DecodedSource(image, stream);
         }
-        finally
+        catch (Exception ex)
         {
-            bitmap.UnlockBits(data);
+            stream?.Dispose();
+            App.Log($"Pin 解码源图失败: {ex}");
+            return null;
         }
+    }
 
-        Present();
+    /// <summary>把常驻 DIB 包装成 Bitmap 直接绘制，避免每帧再分配一张全窗口位图。</summary>
+    private Bitmap? CreateDestBitmap()
+    {
+        EnsureScreenDc();
+        EnsureDestDib(_winW, _winH);
+        if (_destBits == 0 || _destAllocW <= 0 || _destAllocH <= 0)
+            return null;
+
+        return new Bitmap(_winW, _winH, _destAllocW * 4, PixelFormat.Format32bppPArgb, _destBits);
     }
 
     private void Present()

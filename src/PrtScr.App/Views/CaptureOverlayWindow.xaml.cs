@@ -49,6 +49,7 @@ public sealed partial class CaptureOverlayWindow : Window
     private readonly List<WindowInfo> _hoverCandidates = new();   // 光标下按 Z 序排列的全部候选窗口（复用，零分配）
     private DateTimeOffset _lastPress;
     private bool _closed;
+    private bool _saving;
     private PrtScr.App.Services.KeyInterceptor? _keys;
 
     private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _normalHoverBrush =
@@ -104,7 +105,10 @@ public sealed partial class CaptureOverlayWindow : Window
         Activated += (_, args) =>
         {
             if (args.WindowActivationState != WindowActivationState.Deactivated)
+            {
                 _ = FocusSink.Focus(FocusState.Programmatic);
+                RefreshHoverFromCursor();
+            }
         };
 
         // 注：不做“失焦自动取消”——在 Activated 事件回调里调 Close() 会触发 XAML
@@ -167,10 +171,13 @@ public sealed partial class CaptureOverlayWindow : Window
         _subregionCandidate = null;
         _lastTipWindow = null;
         _hoverCandidates.Clear();
+        _lastHoverPoint = default;
         _lastPress = default;
+        _saving = false;
         SelectionBorder.Visibility = Visibility.Collapsed;
         HoverBorder.Visibility = Visibility.Collapsed;
         SizeTip.Visibility = Visibility.Collapsed;
+        SaveButton.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>
@@ -271,12 +278,17 @@ public sealed partial class CaptureOverlayWindow : Window
             _scale = Root.XamlRoot?.RasterizationScale ?? _scale;
             if (_scale <= 0)
                 _scale = 1;
+            RefreshHoverFromCursor();
             _ = FocusSink.Focus(FocusState.Programmatic);
             DispatcherQueue.TryEnqueue(() => _ = FocusSink.Focus(FocusState.Programmatic));
             var focusRetry = DispatcherQueue.CreateTimer();
             focusRetry.Interval = TimeSpan.FromMilliseconds(60);
             focusRetry.IsRepeating = false;
-            focusRetry.Tick += (_, _) => _ = FocusSink.Focus(FocusState.Programmatic);
+            focusRetry.Tick += (_, _) =>
+            {
+                _ = FocusSink.Focus(FocusState.Programmatic);
+                RefreshHoverFromCursor();
+            };
             focusRetry.Start();
             DispatcherQueue.TryEnqueue(UpdateVisuals);
         }
@@ -444,6 +456,29 @@ public sealed partial class CaptureOverlayWindow : Window
         UpdateVisuals();
     }
 
+    /// <summary>
+    /// 取景窗亮起时鼠标往往没有移动，PointerMoved 不会触发；
+    /// 主动按当前光标做一次命中，避免“必须先动一下鼠标才认窗口”。
+    /// </summary>
+    private void RefreshHoverFromCursor()
+    {
+        try
+        {
+            if (_closed || _scale <= 0)
+                return;
+            if (!PInvoke.GetCursorPos(out var pt))
+                return;
+            var dip = new Windows.Foundation.Point(
+                (pt.X - _monitor.X) / _scale,
+                (pt.Y - _monitor.Y) / _scale);
+            UpdateHover(dip);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Overlay 初始命中异常: {ex.Message}");
+        }
+    }
+
     private void HitTestHover(Windows.Foundation.Point dipPoint)
     {
         // DIP → 虚拟屏物理坐标
@@ -582,6 +617,26 @@ public sealed partial class CaptureOverlayWindow : Window
             return;
         _closed = true;
         AppWindow.Hide();
+
+        // 取景器常驻复用，但冻结图（2560×1600 WriteableBitmap + GDI Bitmap 各约 16 MB）
+        // 不能一直挂在窗口上；隐藏后立即释放，下次 Prepare 会重新填充。
+        try
+        {
+            Frozen.Source = null;
+            _full.Dispose();
+            // 这两块（WriteableBitmap + GDI Bitmap）各约 16 MB，且 PixelBuffer 会进大对象堆。
+            // 不主动收一次，下次截图前私有内存会一直停在 ~120 MB；收一次回到 ~60 MB。
+            var managedBefore = GC.GetTotalMemory(false);
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            var managedAfter = GC.GetTotalMemory(false);
+            App.Log($"Overlay: frozen buffers released, managed={managedBefore / 1048576}->{managedAfter / 1048576}MB");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Overlay cleanup 异常: {ex.Message}");
+        }
+        _full = new Bitmap(1, 1);
+
         Dismissed?.Invoke();
     }
 
@@ -724,6 +779,64 @@ public sealed partial class CaptureOverlayWindow : Window
         }
     }
 
+    private void Save_Click(object sender, RoutedEventArgs e) => _ = SaveSelectionAsync();
+
+    private void OnSaveShortcut(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        if (_hasSelection)
+            _ = SaveSelectionAsync();
+    }
+
+    /// <summary>选区另存为 PNG/JPEG；保存成功后同样复制到剪贴板并写入历史，再关闭取景。</summary>
+    private async Task SaveSelectionAsync()
+    {
+        if (!_hasSelection || _closed || _saving)
+            return;
+
+        _saving = true;
+        Bitmap? captured = null;
+        try
+        {
+            captured = await CaptureSelectionAsync();
+            if (captured is null)
+                return;
+
+            using var ms = new MemoryStream();
+            captured.Save(ms, ImageFormat.Png);
+            var bytes = ms.ToArray();
+
+            var path = await PrtScr.App.Services.FileSaveService.SavePngAsync(
+                WindowNative.GetWindowHandle(this), bytes, PrtScr.App.Services.FileSaveService.SuggestedName("shot"));
+            if (path is null)
+            {
+                FocusSink.Focus(FocusState.Programmatic);
+                return;
+            }
+
+            // 另存为不是“只写文件”：保存成功后仍要进剪贴板和截图历史，保持与回车确认一致
+            var copyTask = PrtScr.App.Services.ClipboardService.SetImageAsync(bytes);
+            var historyTask = PrtScr.App.Services.CaptureHistoryService.Instance.AddAsync(bytes, fullScreen: false);
+            await Task.WhenAll(copyTask, historyTask);
+
+            var copied = copyTask.Result;
+            App.Log(copied ? "Capture: copied" : "Capture: clipboard final failure");
+            App.Log($"Capture: saved as {path}");
+            if (historyTask.Result is { } historyPath)
+                App.Log($"Capture: history saved {historyPath}");
+            Dismiss();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"另存为失败: {ex}");
+        }
+        finally
+        {
+            captured?.Dispose();
+            _saving = false;
+        }
+    }
+
     // ---------- 绘制 ----------
 
     private void UpdateVisuals()
@@ -788,17 +901,27 @@ public sealed partial class CaptureOverlayWindow : Window
             SelectionBorder.Visibility = Visibility.Visible;
 
             var prefix = _subregionWindow is not null ? "窗口内容 " : "";
-            SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)} · 回车复制 / O 识别";
+            SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)} · 回车复制 / Ctrl+S 保存 / O 识别";
             var tipX = Math.Clamp(sel.Right - SizeTip.ActualWidth - 8, 4, Math.Max(4, width - 120));
             var tipY = sel.Bottom + 6 < height - 30 ? sel.Bottom + 6 : sel.Y - 30;
             Canvas.SetLeft(SizeTip, tipX);
             Canvas.SetTop(SizeTip, Math.Max(4, tipY));
             SizeTip.Visibility = Visibility.Visible;
+
+            // 保存按钮贴在选区右上角内侧；选区太矮时挪到下方，避免压住尺寸提示
+            var saveW = SaveButton.ActualWidth > 0 ? SaveButton.ActualWidth : 56;
+            var saveH = Math.Max(26, SaveButton.ActualHeight);
+            var saveX = Math.Clamp(sel.Right - saveW - 6, 4, Math.Max(4, width - saveW - 4));
+            var saveY = sel.Height >= saveH + 12 ? sel.Y + 6 : sel.Bottom + 6;
+            Canvas.SetLeft(SaveButton, saveX);
+            Canvas.SetTop(SaveButton, Math.Clamp(saveY, 4, Math.Max(4, height - saveH - 4)));
+            SaveButton.Visibility = Visibility.Visible;
         }
         else
         {
             SelectionBorder.Visibility = Visibility.Collapsed;
             SizeTip.Visibility = Visibility.Collapsed;
+            SaveButton.Visibility = Visibility.Collapsed;
         }
     }
 

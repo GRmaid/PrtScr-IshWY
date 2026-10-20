@@ -49,6 +49,9 @@ public sealed partial class HistoryWindow : Window
         {
             _closed = true;
             _keys.Dispose();
+            // 30 张缩略图（约 9 MB）随窗口一起释放，避免关闭后仍驻留
+            HistoryGrid.ItemsSource = null;
+            _items.Clear();
         };
         ((FrameworkElement)Content).Loaded += async (_, _) =>
         {
@@ -112,7 +115,7 @@ public sealed partial class HistoryWindow : Window
             var totalBytes = views.Sum(v => v.Item.SizeBytes);
             SubtitleText.Text = $"最近 30 张，仅保存在本机 data\\history · 当前 {_items.Count} 张 / {FormatSize(totalBytes)}";
             EmptyText.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            StatusText.Text = _items.Count == 0 ? "" : "选中一张后可以复制、贴图或删除（双击直接复制）";
+            StatusText.Text = _items.Count == 0 ? "" : "选中一张后可以复制、贴图、标注、另存为或删除（双击直接复制）";
         }
         catch (Exception ex)
         {
@@ -201,6 +204,43 @@ public sealed partial class HistoryWindow : Window
 
         var created = PinService.PastePng(bytes);
         StatusText.Text = created ? "已贴到桌面" : "贴图失败";
+    }
+
+    private async void Annotate_Click(object sender, RoutedEventArgs e)
+    {
+        var view = RequireSelection();
+        if (view is null)
+            return;
+
+        var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
+        if (bytes is null)
+        {
+            StatusText.Text = "读取文件失败（可能已被删除）";
+            return;
+        }
+
+        var created = PinService.PastePngAndEdit(bytes);
+        StatusText.Text = created ? "已贴到桌面并进入标注" : "贴图失败";
+    }
+
+    private async void SaveAs_Click(object sender, RoutedEventArgs e)
+    {
+        var view = RequireSelection();
+        if (view is null)
+            return;
+
+        var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
+        if (bytes is null)
+        {
+            StatusText.Text = "读取文件失败（可能已被删除）";
+            return;
+        }
+
+        StatusText.Text = "选择保存位置…";
+        var path = await FileSaveService.SavePngAsync(
+            WindowNative.GetWindowHandle(this), bytes,
+            FileSaveService.SuggestedName("history"));
+        StatusText.Text = path is null ? "已取消另存为" : $"已保存：{path}";
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)

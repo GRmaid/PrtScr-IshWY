@@ -9,7 +9,7 @@ namespace PrtScr.App.Services;
 /// </summary>
 public static class AnnotationRenderer
 {
-    public static Bitmap Render(Bitmap source, IReadOnlyList<Annotation> annotations)
+    public static Bitmap Render(Image source, IReadOnlyList<Annotation> annotations)
     {
         var bitmap = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(bitmap))

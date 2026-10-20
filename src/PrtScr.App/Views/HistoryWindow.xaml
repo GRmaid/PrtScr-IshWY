@@ -109,6 +109,8 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="复制" Click="Copy_Click" Style="{StaticResource AccentButtonStyle}" />
                 <Button Content="贴图" Click="Pin_Click" />
+                <Button Content="标注" Click="Annotate_Click" />
+                <Button Content="另存为" Click="SaveAs_Click" />
                 <Button Content="删除" Click="Delete_Click" />
                 <Button Content="清空" Click="Clear_Click" />
                 <Button Content="打开文件夹" Click="OpenFolder_Click" />

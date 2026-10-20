@@ -42,6 +42,21 @@
             </Border>
         </Canvas>
 
+        <!-- 选区操作层：保存按钮浮在选区右上角，不遮挡取景交互 -->
+        <Canvas x:Name="ActionLayer" Background="{x:Null}">
+            <Button
+                x:Name="SaveButton"
+                Content="保存"
+                Padding="12,4"
+                FontSize="12"
+                MinWidth="0"
+                CornerRadius="4"
+                IsTabStop="False"
+                Visibility="Collapsed"
+                Style="{StaticResource AccentButtonStyle}"
+                Click="Save_Click" />
+        </Canvas>
+
         <!-- 焦点锚：隐形按钮，亮窗即聚焦——Esc/回车/Tab 的 KeyDown 全部由它直达，不依赖焦点漂移 -->
         <Button
             x:Name="FocusSink"
@@ -54,6 +69,7 @@
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Escape" Invoked="OnEscape" />
             <KeyboardAccelerator Key="Enter" Invoked="OnEnter" />
+            <KeyboardAccelerator Key="S" Modifiers="Control" Invoked="OnSaveShortcut" />
         </Grid.KeyboardAccelerators>
     </Grid>
 </Window>

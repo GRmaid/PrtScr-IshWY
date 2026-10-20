@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using PrtScr.App.Services;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace PrtScr.App.Views;
 
@@ -15,8 +16,9 @@ namespace PrtScr.App.Views;
 public sealed unsafe partial class NativePinWindow
 {
     private static readonly string[] ToolLabels = ["矩形", "箭头", "画笔", "文字", "马赛克", "序号"];
+    private static readonly int[] ToolbarOrder = [0, 1, 2, 3, 4, 5, 20, 21, 22, 24, 23, 15];
 
-    private bool _editMode;
+    private volatile bool _editMode;
     private readonly List<Annotation> _annotations = new();
     private Annotation? _draft;
     private int _toolId;
@@ -26,6 +28,11 @@ public sealed unsafe partial class NativePinWindow
     private readonly List<(int Id, Rectangle Rect)> _toolbarButtons = new();
     private float _toolbarHeight;
     private bool _editDragging;
+    private bool _editPanning;
+    private bool _panMoved;
+    private NativePoint _panStartCursor;
+    private int _panStartWinX;
+    private int _panStartWinY;
     private nint _editControl;
     private PrtScr.App.Services.KeyInterceptor? _editKeys;
     private PointD _editTextPosition;
@@ -51,11 +58,11 @@ public sealed unsafe partial class NativePinWindow
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder text, int maxCount);
 
-    private double EditScale => _winW / (double)_source!.Width;
+    private double EditScale => _winW / (double)_pixelWidth;
 
     private void EnterEditMode()
     {
-        if (_source is null)
+        if (_pngBytes.Length == 0)
             return;
 
         _editMode = true;
@@ -105,9 +112,8 @@ public sealed unsafe partial class NativePinWindow
         _winH = _imgH + extra;
         // 不调用 MoveWindow：位置与尺寸由 UpdateLayeredWindow 一次性原子更新，避免退出/进入时画面跳动
 
-        // 编辑期间全局接管 Esc：不依赖窗口焦点，一次即退
-        _ = PInvoke.RegisterHotKey(_hwnd, 100, (Windows.Win32.UI.Input.KeyboardAndMouse.HOT_KEY_MODIFIERS)0x4000 /* MOD_NOREPEAT */, 0x1B);
-
+        // Esc 不再单独注册全局热键：会和 OCR 结果窗的 Esc 热键冲突（1409），
+        // 统一交给 EscRouter：它看到 _editMode 时只退出标注，不关窗口。
         RebuildBaseScaled();
         RenderEditMode();
         _ = PInvoke.SetFocus(_hwnd);
@@ -119,9 +125,11 @@ public sealed unsafe partial class NativePinWindow
         if (!_editMode)
             return;
 
-        _ = PInvoke.UnregisterHotKey(_hwnd, 100);
         DestroyTextEditor();
         _editMode = false;
+        // 只有 Esc 仍被按住时才要求先抬起：避免同一次 Esc 退出标注后又关贴图；
+        // 若用户已松手（或本次是鼠标点“完成”退出），不能把下一次 Esc 也吞掉。
+        _escNeedsRelease = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
 
         // 收回工具栏边栏，窗口恢复为纯图片尺寸与位置
         if (_imgW > 0 && _imgH > 0)
@@ -170,7 +178,7 @@ public sealed unsafe partial class NativePinWindow
             x += width + gap;
         }
 
-        for (var i = 0; i < 11; i++)
+        for (var i = 0; i < ToolbarOrder.Length; i++)
             Place(button);
         for (var i = 0; i < 5; i++)
             Place(swatch);
@@ -184,9 +192,12 @@ public sealed unsafe partial class NativePinWindow
         var height = _imgH > 0 ? _imgH : _winH;
         _baseScaled?.Dispose();
         _baseScaled = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+        using var source = DecodeSource();
+        if (source is null)
+            return;
         using var graphics = Graphics.FromImage(_baseScaled);
         graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        graphics.DrawImage(_source!, new Rectangle(0, 0, width, height));
+        graphics.DrawImage(source.Image, new Rectangle(0, 0, width, height));
     }
 
     private void OnEditPointerDown(nint lParam)
@@ -317,6 +328,62 @@ public sealed unsafe partial class NativePinWindow
         RenderEditMode();
     }
 
+    /// <summary>编辑模式下按住中键/右键拖动贴图。左键仍用于绘制。</summary>
+    private void BeginEditPan(nint lParam)
+    {
+        var (x, y) = ClientPoint(lParam);
+        var point = new PointF(x, y);
+
+        if (_paletteOpen && _paletteRect.Contains(point))
+            return;
+        foreach (var (_, rect) in _toolbarButtons)
+        {
+            if (rect.Contains(x, y))
+                return;
+        }
+        if (y < _editOffsetY || y >= _editOffsetY + _imgH)
+            return;
+
+        DestroyTextEditor();
+        if (!GetCursorPos(out _panStartCursor))
+            return;
+
+        _panStartWinX = _winX;
+        _panStartWinY = _winY;
+        _panMoved = false;
+        _editPanning = true;
+        _ = PInvoke.SetCapture(_hwnd);
+    }
+
+    private void MoveEditPan()
+    {
+        if (!GetCursorPos(out var cursor))
+            return;
+
+        var dx = cursor.x - _panStartCursor.x;
+        var dy = cursor.y - _panStartCursor.y;
+        if (Math.Abs(dx) > 2 || Math.Abs(dy) > 2)
+            _panMoved = true;
+
+        _winX = _panStartWinX + dx;
+        _winY = _panStartWinY + dy;
+        _imgX = _winX;
+        _imgY = _winY + _editOffsetY;
+        _ = PInvoke.SetWindowPos(_hwnd, default, _winX, _winY, 0, 0,
+            SET_WINDOW_POS_FLAGS.SWP_NOSIZE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
+            SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
+    }
+
+    private bool EndEditPan()
+    {
+        if (!_editPanning)
+            return false;
+
+        _editPanning = false;
+        _ = PInvoke.ReleaseCapture();
+        return _panMoved;
+    }
+
     private void OnEditPointerUp(nint lParam)
     {
         if (_paletteDrag != 0)
@@ -378,6 +445,9 @@ public sealed unsafe partial class NativePinWindow
             case 22:
                 ApplyEdit();
                 return;
+            case 24:
+                ApplyEdit(saveAs: true);
+                return;
             case 23:
                 ExitEditMode(apply: false);
                 return;
@@ -387,17 +457,22 @@ public sealed unsafe partial class NativePinWindow
     }
 
     /// <summary>把标注烘焙进原图、更新贴图本身、复制到剪贴板，然后退出编辑模式。</summary>
-    private void ApplyEdit()
+    private void ApplyEdit(bool saveAs = false)
     {
+        byte[]? bytes = null;
         try
         {
-            using var rendered = AnnotationRenderer.Render(_source!, _annotations);
+            using var full = DecodeSource();
+            if (full is null)
+            {
+                ExitEditMode(apply: false);
+                return;
+            }
+
+            using var rendered = AnnotationRenderer.Render(full.Image, _annotations);
             using var ms = new MemoryStream();
             rendered.Save(ms, ImageFormat.Png);
-            var bytes = ms.ToArray();
-
-            _source!.Dispose();
-            _source = new Bitmap(rendered);
+            bytes = ms.ToArray();
             _pngBytes = bytes;
 
             PinClipboardHelper.Copy(bytes, _uiQueue);
@@ -409,6 +484,12 @@ public sealed unsafe partial class NativePinWindow
         }
 
         ExitEditMode(apply: true);
+
+        if (saveAs && bytes is not null)
+        {
+            _ = PrtScr.App.Services.FileSaveService.SavePngAsync(
+                (nint)_hwnd.Value, bytes, PrtScr.App.Services.FileSaveService.SuggestedName("pin"));
+        }
     }
 
     // ---------- 文字输入（原生 EDIT，支持 IME） ----------
@@ -491,12 +572,16 @@ public sealed unsafe partial class NativePinWindow
 
     private void RenderEditMode()
     {
-        if (!_editMode || _source is null || _baseScaled is null || _hwnd.IsNull)
+        if (!_editMode || _baseScaled is null || _hwnd.IsNull)
             return;
 
-        var composed = new Bitmap(_winW, _winH, PixelFormat.Format32bppPArgb);
+        using var composed = CreateDestBitmap();
+        if (composed is null)
+            return;
+
         using (var graphics = Graphics.FromImage(composed))
         {
+            graphics.Clear(Color.Transparent);
             graphics.DrawImageUnscaled(_baseScaled, 0, _editOffsetY);
         }
 
@@ -545,8 +630,7 @@ public sealed unsafe partial class NativePinWindow
             DrawPalette(graphics);
         }
 
-        CopyToDestAndPresent(composed);
-        composed.Dispose();
+        Present();
     }
 
     private void DrawAnnotationShape(Graphics graphics, Annotation a)
@@ -647,7 +731,7 @@ public sealed unsafe partial class NativePinWindow
         }
 
         var rects = new List<(int Id, RectangleF Rect)>();
-        foreach (var id in new[] { 0, 1, 2, 3, 4, 5, 20, 21, 22, 23, 15 })
+        foreach (var id in ToolbarOrder)
         {
             var sx = Next(button);
             rects.Add((id, new RectangleF(sx, y, button, itemHeight)));
@@ -787,6 +871,13 @@ public sealed unsafe partial class NativePinWindow
                     new PointF(cx - s * 0.2f, cy + s * 0.75f),
                     new PointF(cx + s, cy - s * 0.8f),
                 });
+                break;
+
+            case 24:  // 保存（下载箭头 + 托盘）
+                graphics.DrawLine(pen, cx, cy - s, cx, cy + s * 0.35f);
+                graphics.DrawLine(pen, cx - s * 0.55f, cy - s * 0.1f, cx, cy + s * 0.45f);
+                graphics.DrawLine(pen, cx + s * 0.55f, cy - s * 0.1f, cx, cy + s * 0.45f);
+                graphics.DrawLine(pen, cx - s * 0.9f, cy + s * 0.9f, cx + s * 0.9f, cy + s * 0.9f);
                 break;
 
             case 15:  // 调色盘

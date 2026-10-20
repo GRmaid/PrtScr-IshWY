@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using PrtScr.App.Services;
 using PrtScr.Ocr;
 using Windows.ApplicationModel.DataTransfer;
 using WinRT.Interop;
@@ -85,19 +86,20 @@ public sealed partial class OcrResultWindow : Window
         _keys.KeyDown += vk =>
         {
             if (vk == 0x1B)
-            {
-                UnregisterEscapeHotkey();
-                Close();
-            }
+                EscRouter.Dispatch();
         };
         _keys.HotKey += id =>
         {
             if (id == EscapeHotkeyId)
-            {
-                UnregisterEscapeHotkey();
-                Close();
-            }
+                EscRouter.Dispatch();
         };
+
+        // 交给统一仲裁器：与贴图重叠时关最上层，不重叠时固定先关 OCR
+        EscRouter.RegisterOcr(hwnd, () => DispatcherQueue.TryEnqueue(() =>
+        {
+            UnregisterEscapeHotkey();
+            Close();
+        }));
 
         _escapeRegistered = Windows.Win32.PInvoke.RegisterHotKey(
             new Windows.Win32.Foundation.HWND(hwnd), EscapeHotkeyId,
@@ -106,6 +108,7 @@ public sealed partial class OcrResultWindow : Window
 
         Closed += (_, _) =>
         {
+            EscRouter.Unregister(hwnd);
             UnregisterEscapeHotkey();
 
             // 把焦点还给打开 OCR 的窗口（通常是贴图），否则 Esc 会"失灵"

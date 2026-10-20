@@ -70,6 +70,35 @@ if ($pdbFiles.Count -gt 0) {
     Write-Host "    已移除 $($pdbFiles.Count) 个 PDB（避免泄露构建路径）" -ForegroundColor Yellow
 }
 
+# Windows App SDK 元包会把 AI/ML/Search/Widgets 一并带进发布目录，其中
+# onnxruntime.dll / DirectML.dll 约 38 MB，本应用从未加载它们。
+# 直接删除这些未使用的可选组件，缩小便携包（启动冒烟会验证依赖完整）。
+$trimPatterns = @(
+    'DirectML.dll',
+    'onnxruntime.dll',
+    'Microsoft.ML.OnnxRuntime.dll',
+    'Microsoft.Asg.*.dll',
+    'Microsoft.Windows.AI*.dll',
+    'Microsoft.Windows.AI*.winmd',
+    'Microsoft.Windows.Internal.AI*.winmd',
+    'Microsoft.Windows.Search*.dll',
+    'Microsoft.Windows.Search*.winmd',
+    'Microsoft.Windows.Internal.SemanticSearch*.winmd',
+    'Microsoft.Windows.SemanticSearch*.winmd',
+    'Microsoft.Windows.Widgets*.dll',
+    'Microsoft.Windows.Widgets*.winmd',
+    'Microsoft.DiaSymReader.Native.amd64.dll'
+)
+$trimmedFiles = @()
+foreach ($pattern in $trimPatterns) {
+    $trimmedFiles += @(Get-ChildItem $outDir -File -Filter $pattern -ErrorAction SilentlyContinue)
+}
+if ($trimmedFiles.Count -gt 0) {
+    $trimmedMb = [math]::Round((($trimmedFiles | Measure-Object Length -Sum).Sum / 1MB), 1)
+    $trimmedFiles | Remove-Item -Force
+    Write-Host "    已移除 $($trimmedFiles.Count) 个未使用的 App SDK 可选组件（约 $trimmedMb MB）" -ForegroundColor Yellow
+}
+
 $exe = Join-Path $outDir 'IshWY.exe'
 if (-not (Test-Path $exe)) {
     throw "发布输出缺少 IshWY.exe"
