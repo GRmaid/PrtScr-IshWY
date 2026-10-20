@@ -20,7 +20,7 @@
 
                 <TextBlock Text="实践小梅IshWY" FontSize="32" FontWeight="SemiBold" />
                 <TextBlock
-                    Text="Ishmael is watching you · 轻量截图 · 分窗口截屏 · 贴图 · OCR"
+                    Text="Ishmael is watching you · 分窗口截屏 · 窗口内容捕获 · 贴图 · OCR"
                     Opacity="0.6" />
 
                 <Expander Header="常规" IsExpanded="True" HorizontalAlignment="Stretch">
@@ -133,9 +133,21 @@
                         </StackPanel>
                         <ToggleSwitch
                             x:Name="HistoryToggle"
-                            Header="保存最近截图到本机（data\history，最多 30 张）"
+                            Header="保存最近截图到本机（data\history，按模式 / 进程分类）"
                             Margin="0,4,0,0"
                             Toggled="HistoryToggle_Toggled" />
+                        <TextBlock
+                            Text="每个分类保留张数（窗口截图按进程各算一类；常规截图、早期未分类各算一类）"
+                            TextWrapping="Wrap" />
+                        <NumberBox
+                            x:Name="HistoryLimitBox"
+                            Width="220"
+                            HorizontalAlignment="Left"
+                            Minimum="1"
+                            Maximum="200"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            ValueChanged="HistoryLimit_ValueChanged" />
                         <TextBlock
                             x:Name="HistoryStatusText"
                             Opacity="0.6"

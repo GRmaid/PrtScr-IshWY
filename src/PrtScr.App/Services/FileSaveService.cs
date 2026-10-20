@@ -52,6 +52,68 @@ internal static class FileSaveService
         }
     }
 
+    /// <summary>
+    /// 批量另存为：让用户选一个文件夹，把多张历史 PNG 以不冲突的文件名写进去。
+    /// 返回成功张数与目标目录；取消时张数为 0、目录为 null。
+    /// </summary>
+    public static async Task<(int Saved, string? Folder)> SaveManyAsync(
+        nint ownerHwnd, IReadOnlyList<(byte[] Bytes, string SuggestedName)> items)
+    {
+        if (items.Count == 0)
+            return (0, null);
+
+        try
+        {
+            var picker = new FolderPicker
+            {
+                SuggestedStartLocation = PickerLocationId.PicturesLibrary,
+            };
+            picker.FileTypeFilter.Add("*");
+            InitializeWithWindow.Initialize(picker, ownerHwnd);
+
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is null)
+            {
+                App.Log("SaveMany: 用户取消");
+                return (0, null);
+            }
+
+            var saved = 0;
+            foreach (var item in items)
+            {
+                try
+                {
+                    var name = MakeSafeFileName(item.SuggestedName);
+                    var file = await folder.CreateFileAsync(
+                        name + ".png", CreationCollisionOption.GenerateUniqueName);
+                    await FileIO.WriteBytesAsync(file, item.Bytes);
+                    saved++;
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"SaveMany: 写入失败 {item.SuggestedName} {ex.Message}");
+                }
+            }
+
+            App.Log($"SaveMany: {saved}/{items.Count} -> {folder.Path}");
+            return (saved, folder.Path);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"SaveMany: 失败 {ex}");
+            return (0, null);
+        }
+    }
+
+    private static string MakeSafeFileName(string? value)
+    {
+        var name = string.IsNullOrWhiteSpace(value) ? "IshWY-history" : value.Trim();
+        foreach (var c in Path.GetInvalidFileNameChars())
+            name = name.Replace(c, '_');
+        name = name.TrimEnd('.', ' ');
+        return name.Length == 0 ? "IshWY-history" : name;
+    }
+
     private static byte[] ToJpeg(byte[] pngBytes)
     {
         using var input = new MemoryStream(pngBytes);

@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
     private readonly bool _startHidden;
     private bool _suppressStartupToggle;
     private bool _suppressHistoryToggle;
+    private bool _suppressHistoryLimit;
     private bool _suppressCaptureOptions;
     private CancellationTokenSource? _delayCts;
     private Views.HistoryWindow? _historyWindow;
@@ -75,6 +76,10 @@ public sealed partial class MainWindow : Window
         _suppressHistoryToggle = true;
         HistoryToggle.IsOn = App.Config.Current.SaveHistory;
         _suppressHistoryToggle = false;
+
+        _suppressHistoryLimit = true;
+        HistoryLimitBox.Value = CaptureHistoryService.PerCategoryLimit;
+        _suppressHistoryLimit = false;
         RefreshHistoryStatus();
 
         _suppressCaptureOptions = true;
@@ -131,7 +136,27 @@ public sealed partial class MainWindow : Window
         }
 
         var count = CaptureHistoryService.Instance.GetItems().Count;
-        HistoryStatusText.Text = $"已开启：本机保留最近 {count} 张（data\\history，最多 30 张）。";
+        var limit = CaptureHistoryService.PerCategoryLimit;
+        HistoryStatusText.Text = $"已开启：窗口截图按进程、常规/早期按模式分类，每类保留最近 {limit} 张（data\\history，当前共 {count} 张）。";
+    }
+
+    private void HistoryLimit_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_suppressHistoryLimit || HistoryLimitBox is null)
+            return;
+
+        var value = double.IsNaN(args.NewValue) ? 30 : (int)Math.Clamp(args.NewValue, 1, 200);
+        if (App.Config.Current.HistoryPerCategory == value)
+            return;
+
+        App.Config.Current.HistoryPerCategory = value;
+        App.Config.Save();
+
+        // 调小上限立即回收旧文件；调大只影响以后新增，不主动恢复已删内容。
+        CaptureHistoryService.Instance.PruneNow(value);
+        RefreshHistoryStatus();
+        _ = _historyWindow?.RefreshAsync();
+        App.Log($"History: perCategory={value}");
     }
 
     private void DelayCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -586,7 +611,8 @@ public sealed partial class MainWindow : Window
             }
 
             var copyTask = Services.ClipboardService.SetImageAsync(result.Png);
-            var historyTask = Services.CaptureHistoryService.Instance.AddAsync(result.Png, fullScreen: true);
+            var historyTask = Services.CaptureHistoryService.Instance.AddAsync(
+                result.Png, Services.HistoryCaptureMode.Normal);
             await Task.WhenAll(copyTask, historyTask);
 
             var ok = copyTask.Result;

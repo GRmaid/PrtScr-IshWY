@@ -63,6 +63,7 @@ public sealed partial class CaptureOverlayWindow : Window
     private DateTimeOffset _lastPress;
     private bool _closed;
     private bool _saving;
+    private bool _confirming;
     private PrtScr.App.Services.KeyInterceptor? _keys;
 
     private WriteableBitmap? _loupeBitmap;
@@ -374,7 +375,17 @@ public sealed partial class CaptureOverlayWindow : Window
     private void HandlePressed(PointerRoutedEventArgs e)
     {
         var now = DateTimeOffset.UtcNow;
-        var point = e.GetCurrentPoint(Root).Position;
+        var pointInfo = e.GetCurrentPoint(Root);
+        var point = pointInfo.Position;
+
+        // 右键等价 Esc：取景阶段随时取消，不进入选区/拖拽状态。
+        if (pointInfo.Properties.IsRightButtonPressed)
+        {
+            App.Log("Overlay: right-click cancel");
+            Cancel();
+            return;
+        }
+
         Layer.CapturePointer(e.Pointer);
 
         // 双击已有选区 = 确认
@@ -543,7 +554,7 @@ public sealed partial class CaptureOverlayWindow : Window
         if (_hoverWindow is { } win)
         {
             var title = win.Title.Length > 48 ? win.Title[..48] + "…" : win.Title;
-            App.Log($"Overlay: hover 0x{win.Handle:X} class=\"{win.ClassName}\" child={win.IsChild} rect={win.FrameBounds.X},{win.FrameBounds.Y} {win.FrameBounds.Width}x{win.FrameBounds.Height} title=\"{title}\"");
+            App.Log($"Overlay: hover 0x{win.Handle:X} class=\"{win.ClassName}\" child={win.IsChild} process=\"{win.ProcessName}\" rect={win.FrameBounds.X},{win.FrameBounds.Y} {win.FrameBounds.Width}x{win.FrameBounds.Height} title=\"{title}\"");
         }
         else
         {
@@ -697,8 +708,7 @@ public sealed partial class CaptureOverlayWindow : Window
                 Cancel();
                 break;
             case 0x0D: // Enter
-                if (_hasSelection)
-                    _ = ConfirmAsync();
+                _ = ConfirmCurrentTargetAsync();
                 break;
             case 0x09: // Tab
                 ToggleCaptureMode();
@@ -732,8 +742,7 @@ public sealed partial class CaptureOverlayWindow : Window
 
             case Windows.System.VirtualKey.Enter:
                 e.Handled = true;
-                if (_hasSelection)
-                    _ = ConfirmAsync();
+                _ = ConfirmCurrentTargetAsync();
                 break;
 
             case Windows.System.VirtualKey.Tab:
@@ -752,8 +761,7 @@ public sealed partial class CaptureOverlayWindow : Window
     private void OnEnter(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        if (_hasSelection)
-            _ = ConfirmAsync();
+        _ = ConfirmCurrentTargetAsync();
     }
 
     // ---------- 收尾 ----------
@@ -909,6 +917,41 @@ public sealed partial class CaptureOverlayWindow : Window
         }
     }
 
+    /// <summary>
+    /// 回车确认当前目标：已有选区走原确认流程；只有滚轮/悬停高亮时，
+    /// 把高亮窗口当作整窗选区再确认，这样滚轮选完不必再点一下。
+    /// </summary>
+    private async Task ConfirmCurrentTargetAsync()
+    {
+        if (_closed || _confirming)
+            return;
+
+        _confirming = true;
+        try
+        {
+            if (!_hasSelection)
+            {
+                if (_hoverWindow is null)
+                    return;
+
+                _clickedWindow = _hoverWindow;
+                _selection = DipRect(_clickedWindow.FrameBounds);
+                _hasSelection = true;
+                _subregionWindow = null;
+                // 不在这里 UpdateVisuals：回车是“直接截当前高亮窗口”，
+                // 若先画选区边框/遮罩，窗口捕获的几十毫秒里主人会看到亮框先缩到窗口再截图。
+                // 保持原有悬停高亮，等 ConfirmAsync 捕获完直接 Dismiss。
+                App.Log($"Overlay: enter captures hovered window 0x{_clickedWindow.Handle:X} process=\"{_clickedWindow.ProcessName}\"");
+            }
+
+            await ConfirmAsync();
+        }
+        finally
+        {
+            _confirming = false;
+        }
+    }
+
     private async Task ConfirmAsync()
     {
         Bitmap? captured = null;
@@ -922,8 +965,10 @@ public sealed partial class CaptureOverlayWindow : Window
             captured.Save(ms, ImageFormat.Png);
             var bytes = ms.ToArray();
 
+            var target = ResolveHistoryTarget();
             var copyTask = PrtScr.App.Services.ClipboardService.SetImageAsync(bytes);
-            var historyTask = PrtScr.App.Services.CaptureHistoryService.Instance.AddAsync(bytes, fullScreen: false);
+            var historyTask = PrtScr.App.Services.CaptureHistoryService.Instance.AddAsync(
+                bytes, target.Mode, target.ProcessName, target.WindowTitle);
             await Task.WhenAll(copyTask, historyTask);
 
             var ok = copyTask.Result;
@@ -978,8 +1023,10 @@ public sealed partial class CaptureOverlayWindow : Window
             }
 
             // 另存为不是“只写文件”：保存成功后仍要进剪贴板和截图历史，保持与回车确认一致
+            var target = ResolveHistoryTarget();
             var copyTask = PrtScr.App.Services.ClipboardService.SetImageAsync(bytes);
-            var historyTask = PrtScr.App.Services.CaptureHistoryService.Instance.AddAsync(bytes, fullScreen: false);
+            var historyTask = PrtScr.App.Services.CaptureHistoryService.Instance.AddAsync(
+                bytes, target.Mode, target.ProcessName, target.WindowTitle);
             await Task.WhenAll(copyTask, historyTask);
 
             var copied = copyTask.Result;
@@ -998,6 +1045,22 @@ public sealed partial class CaptureOverlayWindow : Window
             captured?.Dispose();
             _saving = false;
         }
+    }
+
+    /// <summary>
+    /// 解析本次截图应归入的历史分类：窗口模式且确实落在某个窗口上时按进程归类；
+    /// 常规模式、或窗口模式下自由拖拽没命中窗口（实际裁的是冻屏），都算常规截图。
+    /// </summary>
+    private (HistoryCaptureMode Mode, string ProcessName, string WindowTitle) ResolveHistoryTarget()
+    {
+        if (_captureMode == CaptureMode.Normal)
+            return (HistoryCaptureMode.Normal, string.Empty, string.Empty);
+
+        var target = _subregionWindow ?? _clickedWindow;
+        if (target is null)
+            return (HistoryCaptureMode.Normal, string.Empty, string.Empty);
+
+        return (HistoryCaptureMode.Window, target.ProcessName, target.Title);
     }
 
     // ---------- 取色放大镜 ----------
@@ -1260,6 +1323,7 @@ public sealed partial class CaptureOverlayWindow : Window
         Canvas.SetTop(ModeBadge, 8);
 
         var sel = _hasSelection ? _selection : Rect.Empty;
+        var tipShown = false;
 
         // 遮罩四块（选区挖洞；无选区时全遮）
         SetRect(MaskTop, 0, 0, width, sel.IsEmpty ? height : sel.Y);
@@ -1287,15 +1351,20 @@ public sealed partial class CaptureOverlayWindow : Window
 
             SizeText.Text = $"{hover.FrameBounds.Width} × {hover.FrameBounds.Height}"
                 + (_hoverCandidates.Count > 1 ? " · 滚轮切换" : "")
+                + " · 回车截此窗"
                 + (_captureMode == CaptureMode.Window
-                    ? " · 拖拽截窗口局部"
-                    : " · 单击选中 / 拖拽自由框选");
+                    ? " / 拖拽截窗口局部"
+                    : " / 单击选中 / 拖拽自由框选");
+            SetProcessLabel(_captureMode == CaptureMode.Window ? hover : null);
             _lastTipWindow = hover;
-            var tipX = Math.Clamp(r.X + r.Width - 110, 4, Math.Max(4, width - 120));
+            SizeTip.Visibility = Visibility.Visible;
+            var tipW = MeasureSizeTipWidth(200);
+            var tipX = Math.Clamp(r.X + r.Width - tipW, 4, Math.Max(4, width - tipW - 4));
             var tipY = r.Y + r.Height + 6 < height - 30 ? r.Y + r.Height + 6 : r.Y - 30;
             Canvas.SetLeft(SizeTip, tipX);
             Canvas.SetTop(SizeTip, Math.Max(4, tipY));
             SizeTip.Visibility = Visibility.Visible;
+            tipShown = true;
         }
         else
         {
@@ -1311,11 +1380,15 @@ public sealed partial class CaptureOverlayWindow : Window
 
             var prefix = _subregionWindow is not null ? "窗口内容 " : "";
             SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)} · 回车复制 / Ctrl+S 保存 / O 识别 / Tab 切换模式";
-            var tipX = Math.Clamp(sel.Right - SizeTip.ActualWidth - 8, 4, Math.Max(4, width - 120));
+            SetProcessLabel(_subregionWindow ?? (_captureMode == CaptureMode.Window ? _clickedWindow : null));
+            SizeTip.Visibility = Visibility.Visible;
+            var tipW = MeasureSizeTipWidth(200);
+            var tipX = Math.Clamp(sel.Right - tipW - 8, 4, Math.Max(4, width - tipW - 4));
             var tipY = sel.Bottom + 6 < height - 30 ? sel.Bottom + 6 : sel.Y - 30;
             Canvas.SetLeft(SizeTip, tipX);
             Canvas.SetTop(SizeTip, Math.Max(4, tipY));
             SizeTip.Visibility = Visibility.Visible;
+            tipShown = true;
 
             // 保存按钮贴在选区右上角内侧；选区太矮时挪到下方，避免压住尺寸提示
             var saveW = SaveButton.ActualWidth > 0 ? SaveButton.ActualWidth : 56;
@@ -1329,9 +1402,35 @@ public sealed partial class CaptureOverlayWindow : Window
         else
         {
             SelectionBorder.Visibility = Visibility.Collapsed;
-            SizeTip.Visibility = Visibility.Collapsed;
             SaveButton.Visibility = Visibility.Collapsed;
+            // 悬停提示是独立的：没有选区但有悬浮窗口时必须留着，否则进程名永远看不见
+            if (!tipShown)
+                SizeTip.Visibility = Visibility.Collapsed;
         }
+    }
+
+    /// <summary>窗口模式在尺寸提示里附带进程名；常规模式或未知进程时收起，避免多占横向空间。</summary>
+    private void SetProcessLabel(WindowInfo? window)
+    {
+        var process = window?.ProcessName;
+        if (_captureMode == CaptureMode.Window && !string.IsNullOrWhiteSpace(process))
+        {
+            ProcessText.Text = $"进程 {process.Trim()}";
+            ProcessText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ProcessText.Text = string.Empty;
+            ProcessText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>进程标签宽度不定，先测量 SizeTip 再决定贴边位置，避免提示框被挤出屏幕。</summary>
+    private double MeasureSizeTipWidth(double fallback)
+    {
+        SizeTip.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var measured = SizeTip.DesiredSize.Width;
+        return measured > 0 ? measured : fallback;
     }
 
     private static void SetRect(FrameworkElement element, double x, double y, double w, double h)

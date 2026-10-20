@@ -37,10 +37,19 @@
                 Background="#E6202020"
                 CornerRadius="3"
                 Padding="6,2">
-                <TextBlock
-                    x:Name="SizeText"
-                    Foreground="White"
-                    FontSize="12" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock
+                        x:Name="SizeText"
+                        Foreground="White"
+                        FontSize="12" />
+                    <TextBlock
+                        x:Name="ProcessText"
+                        Foreground="#FF8FE3FF"
+                        FontSize="12"
+                        MaxWidth="220"
+                        TextTrimming="CharacterEllipsis"
+                        Visibility="Collapsed" />
+                </StackPanel>
             </Border>
 
             <!-- 模式徽标：取景器始终显示当前模式，Tab 随时切换 -->

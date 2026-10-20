@@ -214,8 +214,28 @@ FullscreenBypass: 已归还原前台
 - 症状：按 F1 后立刻连按 Tab 多次没反应；先单击选窗或拖一次选区，再快速按两次 Tab 才切换；无选区 Ctrl+C 复制色值同样要“先点一下”；Esc 偶发关不掉。不是按键映射问题，而是取景窗亮窗后不保证拿到前台/XAML 焦点：`InitializeFrozen` 的 `Activate()` 与 `FocusSink.Focus()` 都可能被系统静默拒绝；顶层 `KeyInterceptor` 只挂 top-level WndProc，WinUI 的键盘焦点实际落在 `InputSiteWindowClass` 子窗（`GetGUIThreadInfo` 实测 active=0/focus=0 时消息到不了）；全局 Esc 的 `RegisterHotKey` 又是在 `Prepare` 之后才注册且失败不记日志，留下启动空窗。
 - 修复：复用 `EscOverPinHook` 的 `WH_KEYBOARD_LL`，取景窗可见且激活时由钩子直接吞键并投递 UI 线程。`TryHandleOverlayKey` 白名单：Tab 仅无修饰；Esc/Enter/O 仅无 Ctrl/Shift；C/S 仅 Ctrl 无 Shift；Alt/Win 组合一律放行（Alt+Tab / Win+Tab 仍可切走），Ctrl+Tab 与 Shift+Tab 也放行。命中时返回 1 消费按键，否则底下的 Chrome/编辑器还会收到同一个 Tab/Ctrl+C；钩子回调只 `DispatcherQueue.TryEnqueue`，不写盘、不等待。
 - 生命周期：构造时 `SetOverlayKeyHandler(OnOverlayHotkey)`；`InitializeFrozen` 在 `Activate()` 前 `SetOverlayKeysActive(true)`；`Dismiss` 与 `Closed` 立刻置 false 并清 handler；`Activated` 失活（Alt+Tab、另存为对话框）置 false，重新激活且未关闭再置 true。若不在失活时放行，会把别的程序的 Tab/Ctrl+C/Esc 一起吞掉。
-- 分发：`HandleOverlayHotkey` 先守 `_closed`，然后 Esc→`Cancel()`、Enter→有选区 `ConfirmAsync()`、Tab→`ToggleCaptureMode()`、O→有选区 `OcrSelectionAsync()`、Ctrl+C→有选区 `ConfirmAsync()` 无选区 `CopyLoupeColorAsync()`、Ctrl+S→有选区 `SaveSelectionAsync()`。原 `KeyInterceptor`/`FocusSink`/`KeyboardAccelerator` 保留兜底；钩子消费后不会二次触发。
+- 分发：`HandleOverlayHotkey` 先守 `_closed`，然后 Esc→`Cancel()`、Enter→`ConfirmCurrentTargetAsync()`（有选区直接确认；无选区但有高亮窗口时把该窗口合成整窗选区再确认）、Tab→`ToggleCaptureMode()`、O→有选区 `OcrSelectionAsync()`、Ctrl+C→有选区 `ConfirmAsync()` 无选区 `CopyLoupeColorAsync()`、Ctrl+S→有选区 `SaveSelectionAsync()`。原 `KeyInterceptor`/`FocusSink`/`KeyboardAccelerator` 保留兜底；钩子消费后不会二次触发。
 - 验证：构建 0 错误（仅既有 CS0067 ×2），`--smoke` 日志含四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`。日志新增 `Hook: overlay key vk=0x9 ctrl=False`，可确认按键走的是钩子而不是焦点路径。主人 2026-10-20 23:17 真键复测：连续 Tab、无选区 Ctrl+C、Esc、拖选/选窗后重复按键、Alt+Tab 透传全部通过。
+
+### 截图历史按模式/进程归档与取景器进程标签（2026-10-20 深夜）
+- 取景器右键取消：`HandlePressed` 先取 `e.GetCurrentPoint(Root)`，若 `Properties.IsRightButtonPressed` 直接 `Cancel()` 并返回，不设置 `_pressPoint`、不抓指针；日志 `Overlay: right-click cancel`。只对取景器生效，贴图右键仍是菜单。
+- 进程标签：`SizeTip` 内改成横向 `StackPanel`（`SizeText` + `ProcessText`）。窗口模式下 `SetProcessLabel()` 显示「进程 {ProcessName}」，常规模式、自由框选或进程名为空时折叠；只显示进程名，不显示图标。提示框宽度改用 `MeasureSizeTipWidth()` 实测，右边缘不再溢出。
+- 进程标签可见性（2026-10-21 凌晨修复）：`UpdateVisuals` 原来在「无选区」分支无条件 `SizeTip.Visibility = Collapsed`，把悬停时刚显示的尺寸/进程提示又折掉，主人只看到高亮框。现用 `tipShown` 记录本帧是否已有提示，只在没有悬停/选区时折叠；悬停提示文字同时加「回车截此窗」。
+- 历史元数据：每次保存 PNG 同时写同名 `.json`（`HistoryMetadata.Version/Mode/ProcessName/WindowTitle/CapturedAt`）。`HistoryCaptureMode { Window, Normal, Legacy }`；窗口截图记录 `WindowInfo.ProcessName` 与标题，常规/全屏记 `Normal`，没有 sidecar 的旧文件归 `Legacy`（旧文件名标签无法区分窗口与常规）。`ResolveHistoryTarget()` 在 `ConfirmAsync`/`SaveSelectionAsync` 里决定模式：窗口模式下自由拖框最终回退整屏时按常规截图记。
+- 分类保留：`HistoryItem.CategoryKey` 为 `window:{process}` 或 `mode:{mode}`；`CaptureHistoryService.PerCategoryLimit` 读 `historyPerCategory`（1–200，默认 30）。`PruneLocked` 按 `CategoryKey` 分组，每组只留最新 N 张，同时删 PNG 与 sidecar；设置页改数字后调用 `PruneNow(value)` 立即清理。窗口截图下每个进程各自 30 张，常规/早期各一组。
+- 历史窗：左侧 `CategoryList`（全部 / 窗口截图 + 各进程子项 / 常规截图 / 早期未分类，带计数），右侧 `HistoryGrid` 改成 `SelectionMode="Extended"`，`DecodePixelWidth=240`。分类切换只从内存重排并用 `_loadVersion` 取消过期缩略图加载；「全部」最多展示 120 张（`DisplayCap`），各分类计数仍完整。
+- 另存为：保留单张 `另存为`；新增 `批量另存为` 走 `FileSaveService.SaveManyAsync()` + `FolderPicker`，把当前选中条目导出到同一文件夹，重名用 `GenerateUniqueName`。底部同时加 `全选`。`SelectedViews()` 取全部选中，单张动作取第一个。
+- 设置：`HistoryToggle` 文案改为「按模式 / 进程分类」，新增 `HistoryLimitBox`（NumberBox 1–200）+ `HistoryLimit_ValueChanged`；`_suppressHistoryLimit` 防止初始化回写。`RefreshHistoryStatus` 说明窗口按进程、常规/早期按模式。
+- 品牌：去掉「轻量」表述；设置窗副标题改为「Ishmael is watching you · 分窗口截屏 · 窗口内容捕获 · 贴图 · OCR」，README 首段改为普通「Windows 截图工具」。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067 ×2）；`--smoke` 通过（四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`）。主人 2026-10-20 23:56 复测：右键取消、历史分类计数、单张/批量另存为均通过；进程名当时未显示，已修复待复测。
+
+### 进程标签提示框可见性与回车截悬停窗口（2026-10-21 凌晨补）
+- 症状：窗口模式下悬停/选中窗口时看不到进程名；滚轮循环到窗口后按 `Enter` 没有反应，必须先单击出选区。
+- 可见性根因：`UpdateVisuals` 的悬停分支虽然设置了 `SizeTip.Visibility = Visible`，后面的「无选区」else 又无条件 `Collapsed`，整个提示框（尺寸 + 进程名）被折掉。修复：局部 `tipShown`，悬停或选区分支置 true，只有两者都没有时才折叠；两分支都先显示再 `MeasureSizeTipWidth()`，首帧宽度不再回退 200 造成右缘溢出。
+- 回车截悬停窗口：新增 `ConfirmCurrentTargetAsync()`。无选区但有 `_hoverWindow` 时，先合成 `_clickedWindow=_hoverWindow`、`_selection=DipRect(FrameBounds)`、`_hasSelection=true`、`_subregionWindow=null`，再走原 `ConfirmAsync()`；窗口模式抓窗口位图，常规模式按该矩形裁冻结帧，历史分类仍由 `ResolveHistoryTarget()` 判定。无选区也无悬停时直接返回，不关窗。
+- 视觉卡顿修复（2026-10-21 00:10）：合成状态后**不再调用 `UpdateVisuals()`**。否则捕获的几十毫秒内会先画出选区边框/遮罩（亮框缩到窗口），主人看到“先亮框、再截图”的跳变；现在保持原悬停高亮，`ConfirmAsync` 完成后直接 `Dismiss()`，中间不重绘。
+- 三个 Enter 入口统一：`EscOverPinHook` 分发、`FocusSink_KeyDown`、XAML `KeyboardAccelerator` 全部改调 `ConfirmCurrentTargetAsync()`；`_confirming` 防重入。悬停日志 `Overlay: hover ...` 增加 `process=...`。
+- 验证：构建 0 错误（仅既有 CS0067 ×2）；`--smoke` 通过，日志 00:00:43 四个热键 `register=0x1`、`Capture: overlay pre-created`，00:00:46 `OnLaunched: smoke exiting`。真机验收待主人执行。
 
 ### 贴图滚轮缩放内存（2026-10-20 晚）
 
@@ -242,6 +262,11 @@ FullscreenBypass: 已归还原前台
 - **不透明贴图别走 ColorMatrix**：100% 不透明度用 `CompositingMode.SourceCopy` 直拷即可；只有半透明才需要 `SourceOver` + `ImageAttributes`/`ColorMatrix`，否则常见的 100% 路径会多出逐像素混合临时面。
 - **常规截图也要有窗口预高亮**：窗口预览/单击选中不是窗口模式专属；`HitTestHover` 不要在 Normal 提前返回。`WindowRect.Contains` 不含右/下边界，边界拖框需要 2px 容差，否则从窗口右下边缘起手会落空。
 - **历史窗关闭要清空缩略图**：只 `Close()` 窗口不会释放 `_items` 里的 BitmapImage；在 `Closed` 里把 `HistoryGrid.ItemsSource=null` 并 `_items.Clear()`。
+- **历史分类不能靠文件名猜**：旧文件名只有 `full`/`shot`，无法区分窗口截图与常规截图。新保存必须写同名 `.json` sidecar（模式/进程/标题/时间），没有 sidecar 的旧图统一归 `Legacy`；清空/删除时要连 sidecar 一起删，否则会留下孤儿元数据。
+- **每类保留数按 `CategoryKey` 分组算**：窗口截图是 `window:{process}`（每个进程独立 30 张），常规/早期是 `mode:{mode}`；不要退回全局 `Take(30)`，否则某一进程会把其他进程的截图挤掉。设置页改数后调用 `PruneNow` 立即生效。
+- **批量另存为用 FolderPicker 而不是 FileSavePicker**：多选后逐张写同一文件夹，文件名用 `{Source}-{时间}` 并 `GenerateUniqueName` 防重名；单张「另存为」仍保留 FileSavePicker。
+- **取景器右键只在取景器取消**：`HandlePressed` 先判断 `IsRightButtonPressed` 再抓指针；贴图右键是菜单、标注中右键是平移，三者语义不同，不能共用同一个取消入口。
+- **进程标签要参与提示框宽度计算**：`SizeTip` 加了进程名后比原来宽，右边缘定位必须用 `MeasureSizeTipWidth()` 实测宽度，否则会超出屏幕。
 - **全局热键**：四个动作都用 `RegisterHotKey`（id 1 截图 / 3 全屏 / 4 贴图 / 5 OCR），注册失败（1409 = 被占用）必须通过 `RegistrationFailed` 在设置页明确提示，不要静默失败；默认组合键不能拍脑袋选字母组合，先用 RegisterHotKey 探针确认本机没被占用（本机 Ctrl+Alt+P/O 已占用）。
 - **剪贴板**：一律走 `ClipboardService`（CLIPBRD_E_CANT_OPEN 重试）。
 - **托盘退出/`--smoke`**：必须 `ExitProcess(0)`，`Application.Exit` 不可靠。
@@ -292,3 +317,5 @@ FullscreenBypass: 已归还原前台
 - [x] 主人实测取色器跟随与 `Ctrl+C` 色值（右/下边缘不漂移）、标题栏/托盘图标清晰度 —— 已通过
 - [x] 主人实测默认截图模式设置 —— 2026-10-20 深夜确认：设置 → 常规切到常规/窗口后，每次按截图热键从对应模式起步，Tab 临时切换与提示正常；`data/config.json` 的 `defaultCaptureMode` 随选择更新
 - [x] 主人实测重操作内存：移动贴图、标注、OCR 后峰值约 200 MB，停止约 5 分钟后回落到约 100 MB，属 Windows 工作集裁剪/GC，不是无界泄漏。本轮已加 `SWP_NOREDRAW`、退出标注回收 DIB、`ApplyEdit` 提前释放 `_baseScaled`、OCR 流 using 与结果清空
+- [x] 主人验收 2026-10-20 深夜历史/取景小批次（部分）：① 右键取消、③ 历史分类计数与筛选（含「早期未分类」）、④ 单张/批量另存为、⑥ 去「轻量」均通过
+- [x] 主人验收 2026-10-21 凌晨补丁：① 窗口模式悬停/选中窗口时尺寸提示旁出现「进程 xxx.exe」，常规模式不出现；② 滚轮循环到目标窗口后直接按 `Enter`，无需单击即可截该窗口并复制/写历史（常规模式按同一矩形裁冻结帧）；③ 右键取消仍正常；④ 回车捕获改为不预先 `UpdateVisuals()`，主人反馈整体满意，重操作内存约 165 MB。构建 0 错误、`--smoke` 通过

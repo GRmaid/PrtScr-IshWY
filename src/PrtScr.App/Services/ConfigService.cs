@@ -63,9 +63,13 @@ public sealed class AppConfig
     [JsonPropertyName("umiOcrPort")]
     public int UmiOcrPort { get; set; } = 1224;
 
-    /// <summary>是否把截好的图另存一份到程序目录 data/history（最多 30 张，仅本机）。</summary>
+    /// <summary>是否把截好的图另存一份到程序目录 data/history（仅本机）。</summary>
     [JsonPropertyName("saveHistory")]
     public bool SaveHistory { get; set; } = true;
+
+    /// <summary>每个历史分类保留张数：窗口截图按进程各算一组，常规/早期各一组；1–200。</summary>
+    [JsonPropertyName("historyPerCategory")]
+    public int HistoryPerCategory { get; set; } = 30;
 
     /// <summary>按下截图热键后等待多少秒再冻结画面（0 = 不延时；支持 3/5/10）。</summary>
     [JsonPropertyName("captureDelaySeconds")]
