@@ -98,6 +98,19 @@
                             <Button Content="从剪贴板贴图" Click="PastePin_Click" />
                             <Button Content="从剪贴板识别文字" Click="OcrClipboard_Click" />
                         </StackPanel>
+                        <ToggleSwitch
+                            x:Name="HistoryToggle"
+                            Header="保存最近截图到本机（data\history，最多 30 张）"
+                            Margin="0,4,0,0"
+                            Toggled="HistoryToggle_Toggled" />
+                        <TextBlock
+                            x:Name="HistoryStatusText"
+                            Opacity="0.6"
+                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="打开截图历史" Click="OpenHistory_Click" />
+                            <Button Content="清空历史" Click="ClearHistory_Click" />
+                        </StackPanel>
                         <TextBlock
                             Text="提示：取景中框选后按 O 可直接识别文字；贴图右键菜单也有「识别文字」；托盘右键菜单可识别剪贴板图片。"
                             Opacity="0.6"
@@ -178,6 +191,7 @@
                     <MenuFlyoutItem Text="从剪贴板贴图" Click="PastePin_Click" />
                     <MenuFlyoutItem Text="从剪贴板识别文字" Click="OcrClipboard_Click" />
                     <MenuFlyoutItem Text="全屏截图到剪贴板" Click="FullScreen_Click" />
+                    <MenuFlyoutItem Text="截图历史…" Click="History_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="退出" Click="Exit_Click" />
                 </MenuFlyout>

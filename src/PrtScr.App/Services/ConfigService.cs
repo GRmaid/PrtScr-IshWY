@@ -66,6 +66,10 @@ public sealed class AppConfig
     /// <summary>取景时是否把悬浮类窗口（歌词/桌宠等）纳入吸附识别（Tab 可临时切换）。</summary>
     [JsonPropertyName("captureOverlayWindows")]
     public bool CaptureOverlayWindows { get; set; } = false;
+
+    /// <summary>是否把截好的图另存一份到程序目录 data/history（最多 30 张，仅本机）。</summary>
+    [JsonPropertyName("saveHistory")]
+    public bool SaveHistory { get; set; } = true;
 }
 
 public sealed class ConfigService

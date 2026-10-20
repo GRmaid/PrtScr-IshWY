@@ -19,6 +19,8 @@ public sealed partial class MainWindow : Window
     private int _ocrHotkeyBusy;
     private readonly bool _startHidden;
     private bool _suppressStartupToggle;
+    private bool _suppressHistoryToggle;
+    private Views.HistoryWindow? _historyWindow;
 
     public MainWindow(bool startHidden = false)
     {
@@ -69,6 +71,11 @@ public sealed partial class MainWindow : Window
             ? "已启用：登录 Windows 后静默运行到托盘。"
             : "开机自启动未启用。";
 
+        _suppressHistoryToggle = true;
+        HistoryToggle.IsOn = App.Config.Current.SaveHistory;
+        _suppressHistoryToggle = false;
+        RefreshHistoryStatus();
+
         // 预热：成像（UI 线程）+ 抓屏/枚举/PrintWindow（后台），让第一次 F1 就是全热状态
         try
         {
@@ -87,6 +94,79 @@ public sealed partial class MainWindow : Window
         Services.CaptureService.Instance.EnsureOverlay();
 
         _ = RefreshOcrStatusAsync();
+    }
+
+    private void HistoryToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressHistoryToggle)
+            return;
+
+        var enabled = HistoryToggle.IsOn;
+        if (App.Config.Current.SaveHistory == enabled)
+        {
+            RefreshHistoryStatus();
+            return;
+        }
+
+        App.Config.Current.SaveHistory = enabled;
+        App.Config.Save();
+        RefreshHistoryStatus();
+        App.Log($"History: 保存开关 = {enabled}");
+    }
+
+    private void RefreshHistoryStatus()
+    {
+        if (!App.Config.Current.SaveHistory)
+        {
+            HistoryStatusText.Text = "已关闭：截图只进剪贴板，不写入本机历史。";
+            return;
+        }
+
+        var count = CaptureHistoryService.Instance.GetItems().Count;
+        HistoryStatusText.Text = $"已开启：本机保留最近 {count} 张（data\\history，最多 30 张）。";
+    }
+
+    private void OpenHistory()
+    {
+        try
+        {
+            if (_historyWindow is null)
+            {
+                var window = new Views.HistoryWindow();
+                window.Closed += (_, _) =>
+                {
+                    if (ReferenceEquals(_historyWindow, window))
+                        _historyWindow = null;
+                    RefreshHistoryStatus();
+                };
+                window.HistoryChanged += RefreshHistoryStatus;
+                _historyWindow = window;
+                window.Activate();
+            }
+            else
+            {
+                _historyWindow.Activate();
+                _ = _historyWindow.RefreshAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"History: 打开窗口失败 {ex}");
+        }
+    }
+
+    private void OpenHistory_Click(object sender, RoutedEventArgs e) => OpenHistory();
+
+    private void History_Click(object sender, RoutedEventArgs e) => OpenHistory();
+
+    private void ClearHistory_Click(object sender, RoutedEventArgs e)
+    {
+        var cleared = CaptureHistoryService.Instance.Clear();
+        RefreshHistoryStatus();
+        if (_historyWindow is not null)
+            _ = _historyWindow.RefreshAsync();
+
+        HistoryStatusText.Text = cleared > 0 ? $"已清空 {cleared} 张历史截图。" : "历史目录已经是空的。";
     }
 
     private void UmiPort_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -423,9 +503,15 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            var ok = await Services.ClipboardService.SetImageAsync(result.Png);
+            var copyTask = Services.ClipboardService.SetImageAsync(result.Png);
+            var historyTask = Services.CaptureHistoryService.Instance.AddAsync(result.Png, fullScreen: true);
+            await Task.WhenAll(copyTask, historyTask);
+
+            var ok = copyTask.Result;
             HotkeyStatusText.Text = ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）";
-            App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={bypass.Activated}");
+            App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={bypass.Activated} history={historyTask.Result is not null}");
+            if (historyTask.Result is { } savedPath)
+                App.Log($"QuickCapture: history saved {savedPath}");
         }
         catch (Exception ex)
         {

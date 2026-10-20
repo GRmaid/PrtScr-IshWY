@@ -50,27 +50,46 @@ public static class PinService
             var bytes = new byte[(int)source.Size];
             await source.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
 
-            using var image = Image.FromStream(new MemoryStream(bytes));
-            var pixelWidth = image.Width;
-            var pixelHeight = image.Height;
-            if (pixelWidth <= 0 || pixelHeight <= 0)
-                return false;
-
-            var queue = DispatcherQueue.GetForCurrentThread();
-            var window = NativePinWindow.TryCreate(bytes, pixelWidth, pixelHeight, queue);
-            if (window is null)
-            {
-                App.Log("Pin: 创建贴图窗口失败");
-                return false;
-            }
-
-            App.Log($"Pin: created {pixelWidth}x{pixelHeight}");
-            return true;
+            return CreatePin(bytes);
         }
         catch (Exception ex)
         {
             App.Log($"Pin: 失败 {ex}");
             return false;
         }
+    }
+
+    /// <summary>用一张 PNG 直接创建贴图（截图历史等入口复用）。</summary>
+    public static bool PastePng(byte[] bytes)
+    {
+        try
+        {
+            return CreatePin(bytes);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin: 失败 {ex}");
+            return false;
+        }
+    }
+
+    private static bool CreatePin(byte[] bytes)
+    {
+        using var image = Image.FromStream(new MemoryStream(bytes));
+        var pixelWidth = image.Width;
+        var pixelHeight = image.Height;
+        if (pixelWidth <= 0 || pixelHeight <= 0)
+            return false;
+
+        var queue = DispatcherQueue.GetForCurrentThread();
+        var window = NativePinWindow.TryCreate(bytes, pixelWidth, pixelHeight, queue);
+        if (window is null)
+        {
+            App.Log("Pin: 创建贴图窗口失败");
+            return false;
+        }
+
+        App.Log($"Pin: created {pixelWidth}x{pixelHeight}");
+        return true;
     }
 }

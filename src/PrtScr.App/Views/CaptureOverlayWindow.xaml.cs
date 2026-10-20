@@ -702,9 +702,16 @@ public sealed partial class CaptureOverlayWindow : Window
 
             using var ms = new MemoryStream();
             captured.Save(ms, ImageFormat.Png);
+            var bytes = ms.ToArray();
 
-            var ok = await PrtScr.App.Services.ClipboardService.SetImageAsync(ms.ToArray());
+            var copyTask = PrtScr.App.Services.ClipboardService.SetImageAsync(bytes);
+            var historyTask = PrtScr.App.Services.CaptureHistoryService.Instance.AddAsync(bytes, fullScreen: false);
+            await Task.WhenAll(copyTask, historyTask);
+
+            var ok = copyTask.Result;
             App.Log(ok ? "Capture: copied" : "Capture: clipboard final failure");
+            if (historyTask.Result is { } savedPath)
+                App.Log($"Capture: history saved {savedPath}");
         }
         catch (Exception ex)
         {
