@@ -26,7 +26,8 @@ public sealed record WindowInfo(
     bool IsTopmost,
     bool IsLayered,
     bool IsClickThrough,
-    bool IsCloaked)
+    bool IsCloaked,
+    bool IsChild = false)
 {
     /// <summary>
     /// 悬浮类窗口（桌面歌词、桌宠、会议提示等）：置顶且带工具窗 / 点击穿透 / 分层特征。

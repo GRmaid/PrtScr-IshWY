@@ -46,8 +46,8 @@ public sealed class WindowsOcrEngine : IOcrEngine
 
         try
         {
-            var stream = new InMemoryRandomAccessStream();
-            var writer = new DataWriter(stream);
+            using var stream = new InMemoryRandomAccessStream();
+            using var writer = new DataWriter(stream);
             writer.WriteBytes(imageBytes);
             await writer.StoreAsync();
             writer.DetachStream();

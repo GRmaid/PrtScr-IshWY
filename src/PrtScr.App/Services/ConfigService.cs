@@ -63,13 +63,21 @@ public sealed class AppConfig
     [JsonPropertyName("umiOcrPort")]
     public int UmiOcrPort { get; set; } = 1224;
 
-    /// <summary>取景时是否把悬浮类窗口（歌词/桌宠等）纳入吸附识别（Tab 可临时切换）。</summary>
-    [JsonPropertyName("captureOverlayWindows")]
-    public bool CaptureOverlayWindows { get; set; } = false;
-
     /// <summary>是否把截好的图另存一份到程序目录 data/history（最多 30 张，仅本机）。</summary>
     [JsonPropertyName("saveHistory")]
     public bool SaveHistory { get; set; } = true;
+
+    /// <summary>按下截图热键后等待多少秒再冻结画面（0 = 不延时；支持 3/5/10）。</summary>
+    [JsonPropertyName("captureDelaySeconds")]
+    public int CaptureDelaySeconds { get; set; } = 0;
+
+    /// <summary>冻结画面时是否把鼠标指针一起画进截图。</summary>
+    [JsonPropertyName("captureCursor")]
+    public bool CaptureCursor { get; set; } = false;
+
+    /// <summary>默认取景模式：window = 窗口截图（抗遮挡），normal = 常规截图（所见即所得）。</summary>
+    [JsonPropertyName("defaultCaptureMode")]
+    public string DefaultCaptureMode { get; set; } = "window";
 }
 
 public sealed class ConfigService

@@ -44,6 +44,11 @@ internal static unsafe class EscOverPinHook
     private static readonly object InstallLock = new();
     private static readonly ManualResetEventSlim InstallDone = new(false);
 
+    // 取景窗可见期间的键盘直通：窗口不一定拿得到前台焦点，靠消息层拦截会偶发漏键。
+    // 钩子回调只把按键交给 UI 线程（TryEnqueue），不在这里做任何 UI/写盘工作。
+    private static Action<int, bool>? _overlayKeyHandler;
+    private static int _overlayKeysActive;
+
     // 钩子回调里只入队，写盘交给专用线程：回调必须在 LowLevelHooksTimeout 内返回。
     private static readonly ConcurrentQueue<string> PendingLogs = new();
     private static readonly AutoResetEvent LogSignal = new(false);
@@ -57,6 +62,17 @@ internal static unsafe class EscOverPinHook
         _fullScreenVk = virtualKey;
         _fullScreenMods = modifiers;
     }
+
+    /// <summary>
+    /// 取景窗的键盘直达入口。回调在钩子线程上触发，实现方必须立即切回 UI 线程，
+    /// 不得在这里等待、写文件或做布局。
+    /// </summary>
+    public static void SetOverlayKeyHandler(Action<int, bool>? handler)
+        => Volatile.Write(ref _overlayKeyHandler, handler);
+
+    /// <summary>只有取景窗真正亮着时才吞 Tab/Esc/Enter/Ctrl+C/Ctrl+S，隐藏后立即放行。</summary>
+    public static void SetOverlayKeysActive(bool active)
+        => Volatile.Write(ref _overlayKeysActive, active ? 1 : 0);
 
     /// <summary>
     /// 全屏热键去抖/去重：钩子路径与 RegisterHotKey 兜底路径共用，
@@ -269,6 +285,59 @@ internal static unsafe class EscOverPinHook
         return $"ctrl={ctrl} shift={shift} alt={alt} win={win}";
     }
 
+    /// <summary>
+    /// 取景窗按键白名单。返回 true 表示这次按键已被取景窗消费，必须阻止它继续下发，
+    /// 否则底下的 Chrome/编辑器还会收到同一个 Tab/Ctrl+C。
+    /// </summary>
+    private static bool TryHandleOverlayKey(int vk)
+    {
+        var handler = Volatile.Read(ref _overlayKeyHandler);
+        if (handler is null || Volatile.Read(ref _overlayKeysActive) == 0)
+            return false;
+
+        var ctrl = _ctrlDown || Down(0x11);
+        var alt = _altDown || Down(0x12);
+        var shift = _shiftDown || Down(0x10);
+        var win = _winDown || Down(0x5B) || Down(0x5C);
+
+        // Alt+Tab / Win+Tab / Ctrl+Tab 等系统组合键必须放行，否则取景时会切不走窗口。
+        if (alt || win)
+            return false;
+
+        switch (vk)
+        {
+            case 0x09: // Tab：只消费无修饰的 Tab，Ctrl+Tab / Shift+Tab 交给系统与焦点导航
+                if (ctrl || shift)
+                    return false;
+                break;
+            case 0x1B: // Esc
+            case 0x0D: // Enter
+            case 0x4F: // O：对选区做 OCR
+                if (ctrl || shift)
+                    return false;
+                break;
+            case 0x43: // Ctrl+C：有选区复制图片，无选区复制色值
+            case 0x53: // Ctrl+S：选区另存为
+                if (!ctrl || shift)
+                    return false;
+                break;
+            default:
+                return false;
+        }
+
+        try
+        {
+            handler(vk, ctrl);
+            HookLog($"Hook: overlay key vk=0x{vk:X} ctrl={ctrl}");
+            return true;
+        }
+        catch
+        {
+            // 钩子回调绝不能把异常抛回系统；消费掉这次按键也比让底层应用误收安全。
+            return true;
+        }
+    }
+
     private static void EvaluateFullScreenHotkey()
     {
         if (RequiredModifiersDown())
@@ -307,6 +376,10 @@ internal static unsafe class EscOverPinHook
                 {
                     // 修饰键按下/抬起都要记账：LL 钩子里 GetAsyncKeyState 对合成按键不可靠
                     TrackModifier(data->vkCode, isDown);
+
+                    // 取景窗可见时优先走这条：窗口没拿到前台焦点也能收到 Tab/Esc/Enter/Ctrl+C。
+                    if (isDown && TryHandleOverlayKey((int)data->vkCode))
+                        return 1;
 
                     if (isDown && data->vkCode == (uint)_fullScreenVk)
                         EvaluateFullScreenHotkey();

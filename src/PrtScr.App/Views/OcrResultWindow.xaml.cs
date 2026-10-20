@@ -111,6 +111,11 @@ public sealed partial class OcrResultWindow : Window
             EscRouter.Unregister(hwnd);
             UnregisterEscapeHotkey();
 
+            // 主动丢掉识别文本，让大段结果随窗口一起回收，而不是等 GC 猜
+            TextOutput.Text = "";
+            StatusText.Text = "";
+            EngineText.Text = "";
+
             // 把焦点还给打开 OCR 的窗口（通常是贴图），否则 Esc 会"失灵"
             ForceForeground(_ownerHwnd);
 

@@ -151,6 +151,9 @@ public sealed unsafe partial class NativePinWindow
         _toolbarButtons.Clear();
 
         _needsRedrawAfterZoom = true;   // 强制重绘，否则工具栏会留在画面上（表现为 Esc 按一下没反应）
+        // 标注时窗口为了工具栏变高，DIB 可能按更大尺寸分配；退出时收回到图片尺寸，
+        // 避免这块常驻内存一直挂在进程里。
+        MaybeShrinkDestDib();
         RenderAndPresent(highQuality: true);
         App.Log($"Pin: edit mode off (apply={apply})");
     }
@@ -460,6 +463,9 @@ public sealed unsafe partial class NativePinWindow
     private void ApplyEdit(bool saveAs = false)
     {
         byte[]? bytes = null;
+        // 提交瞬间先把缩放基底放掉，避免“基底 + 全分辨率解码 + 渲染结果”三份大图同时存在
+        _baseScaled?.Dispose();
+        _baseScaled = null;
         try
         {
             using var full = DecodeSource();

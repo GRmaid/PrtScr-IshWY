@@ -1,4 +1,6 @@
 EnumWindows
+EnumChildWindows
+GetWindowRect
 IsWindowVisible
 GetWindowTextLength
 GetWindowText

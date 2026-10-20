@@ -86,6 +86,7 @@ public sealed class CaptureService
                 App.Log("Capture: 所有采集引擎均失败");
                 return;
             }
+            DrawCursorIfEnabled(frozen, monitor);
             App.Log($"Capture: frozen {sw.ElapsedMilliseconds}ms pool={pool} black={frozenBlack}");
             _currentMonitor = hMonitor;
 
@@ -247,6 +248,7 @@ public sealed class CaptureService
 
             try
             {
+                DrawCursorIfEnabled(bitmap, monitor);
                 using var ms = new MemoryStream();
                 bitmap.Save(ms, ImageFormat.Png);
                 App.Log($"QuickCapture: {bitmap.Width}×{bitmap.Height} black={likelyBlack}");
@@ -263,6 +265,86 @@ public sealed class CaptureService
             return new QuickCaptureResult(null, false);
         }
     }
+
+    /// <summary>按设置把当前鼠标指针画到冻结图上（GDI 截屏本身不含光标）。</summary>
+    private static void DrawCursorIfEnabled(Bitmap bitmap, WindowRect monitor)
+    {
+        if (!App.Config.Current.CaptureCursor)
+            return;
+
+        try
+        {
+            var cursor = new CursorInfo { cbSize = Marshal.SizeOf<CursorInfo>() };
+            if (!GetCursorInfo(ref cursor) || (cursor.flags & CursorShowing) == 0 || cursor.hCursor == 0)
+                return;
+
+            var x = cursor.ptScreenPos.X - monitor.X;
+            var y = cursor.ptScreenPos.Y - monitor.Y;
+
+            // 图标原点不是热点：先减去热点偏移，箭头/文本光标/I 型光标才会落在真实位置
+            if (GetIconInfo(cursor.hCursor, out var icon))
+            {
+                x -= icon.xHotspot;
+                y -= icon.yHotspot;
+                if (icon.hbmMask != 0)
+                    _ = DeleteObject(icon.hbmMask);
+                if (icon.hbmColor != 0)
+                    _ = DeleteObject(icon.hbmColor);
+            }
+
+            using var graphics = Graphics.FromImage(bitmap);
+            var hdc = graphics.GetHdc();
+            try
+            {
+                _ = DrawIconEx(hdc, x, y, cursor.hCursor, 0, 0, 0, 0, DiNormal);
+            }
+            finally
+            {
+                graphics.ReleaseHdc(hdc);
+            }
+
+            App.Log($"Capture: cursor included at {x},{y}");
+        }
+        catch (Exception ex)
+        {
+            // 光标只是锦上添花，失败绝不能影响截图主体
+            App.Log($"Capture: 光标合成失败 {ex.Message}");
+        }
+    }
+
+    private const uint CursorShowing = 0x0001;
+    private const uint DiNormal = 0x0003;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo
+    {
+        public int cbSize;
+        public uint flags;
+        public nint hCursor;
+        public NativePoint ptScreenPos;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IconInfo
+    {
+        public int fIcon;
+        public int xHotspot;
+        public int yHotspot;
+        public nint hbmMask;
+        public nint hbmColor;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorInfo(ref CursorInfo cursorInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetIconInfo(nint hIcon, out IconInfo iconInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool DrawIconEx(nint hdc, int x, int y, nint hIcon, int cx, int cy, uint istep, nint hbrFlickerFreeDraw, uint diFlags);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(nint hObject);
 
     /// <summary>采样判断是否几乎全黑（独占全屏游戏被系统屏蔽时的典型结果）。</summary>
     private static bool IsNearlyBlack(Bitmap bitmap)

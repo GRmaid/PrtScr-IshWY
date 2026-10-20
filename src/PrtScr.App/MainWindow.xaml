@@ -33,7 +33,7 @@
                             x:Name="StartupStatusText"
                             Opacity="0.6"
                             TextWrapping="Wrap" />
-                        <TextBlock Text="截图热键（默认 F1；支持任意组合键，F1–F12 可单独使用）" />
+                        <TextBlock Text="窗口截图热键（默认 F1；取景中按 Tab 切换窗口/常规截图；支持任意组合键，F1–F12 可单独使用）" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button
                                 x:Name="ScreenshotRecordButton"
@@ -89,11 +89,44 @@
                                 VerticalAlignment="Center"
                                 Opacity="0.7" />
                         </StackPanel>
+                        <TextBlock
+                            Text="延时截图（按下截图热键后先等待，再冻结画面；方便打开右键菜单、悬停提示、下拉框）"
+                            Margin="0,6,0,0"
+                            TextWrapping="Wrap" />
+                        <ComboBox
+                            x:Name="DelayCombo"
+                            Width="150"
+                            HorizontalAlignment="Left"
+                            SelectionChanged="DelayCombo_SelectionChanged">
+                            <ComboBoxItem Content="不延时" Tag="0" />
+                            <ComboBoxItem Content="3 秒" Tag="3" />
+                            <ComboBoxItem Content="5 秒" Tag="5" />
+                            <ComboBoxItem Content="10 秒" Tag="10" />
+                        </ComboBox>
                         <ToggleSwitch
-                            x:Name="OverlayToggle"
-                            Header="识别悬浮窗口（歌词、桌宠、会议提示等；取景中按 Tab 临时切换）"
-                            Margin="0,4,0,0"
-                            Toggled="OverlayToggle_Toggled" />
+                            x:Name="CaptureCursorToggle"
+                            Header="截图包含鼠标指针（F1 取景和全屏截图都生效）"
+                            Toggled="CaptureCursorToggle_Toggled" />
+                        <TextBlock
+                            Text="默认截图模式（每次按截图热键从该模式起步；取景中按 Tab 临时切换，切换会清除已有选区）"
+                            Margin="0,6,0,0"
+                            TextWrapping="Wrap" />
+                        <ComboBox
+                            x:Name="DefaultModeCombo"
+                            Width="360"
+                            HorizontalAlignment="Left"
+                            SelectionChanged="DefaultModeCombo_SelectionChanged">
+                            <ComboBoxItem Content="窗口截图（抗遮挡，抓窗口本体；适合被别的窗口盖住时）" Tag="window" />
+                            <ComboBoxItem Content="常规截图（所见即所得，能抓菜单/悬停/光标）" Tag="normal" />
+                        </ComboBox>
+                        <TextBlock
+                            x:Name="CaptureModeHintText"
+                            Opacity="0.6"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="CaptureOptionsText"
+                            Opacity="0.6"
+                            TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="从剪贴板贴图" Click="PastePin_Click" />
                             <Button Content="从剪贴板识别文字" Click="OcrClipboard_Click" />
@@ -191,6 +224,8 @@
                     <MenuFlyoutItem Text="从剪贴板贴图" Click="PastePin_Click" />
                     <MenuFlyoutItem Text="从剪贴板识别文字" Click="OcrClipboard_Click" />
                     <MenuFlyoutItem Text="全屏截图到剪贴板" Click="FullScreen_Click" />
+                    <MenuFlyoutItem x:Name="DelayCaptureItem" Text="延时截图" Click="DelayCapture_Click" />
+                    <MenuFlyoutItem x:Name="CancelDelayItem" Text="取消延时截图" Click="CancelDelay_Click" Visibility="Collapsed" />
                     <MenuFlyoutItem Text="截图历史…" Click="History_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="退出" Click="Exit_Click" />

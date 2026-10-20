@@ -489,7 +489,8 @@ public sealed unsafe partial class NativePinWindow
                     self._winX = self._dragStartX + (pt.x - self._dragStartCursor.x);
                     self._winY = self._dragStartY + (pt.y - self._dragStartCursor.y);
                     _ = PInvoke.SetWindowPos(hwnd, default, self._winX, self._winY, 0, 0,
-                        SET_WINDOW_POS_FLAGS.SWP_NOSIZE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
+                        SET_WINDOW_POS_FLAGS.SWP_NOSIZE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
+                        SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOREDRAW);
                     return default;
 
                 case WM_LBUTTONUP:
@@ -510,6 +511,8 @@ public sealed unsafe partial class NativePinWindow
                     return default;
 
                 case WM_APP_ZOOM_SETTLED:
+                    // 缩小后把曾经为最大尺寸分配的 DIB 换回当前尺寸，避免峰值内存长期驻留。
+                    self.MaybeShrinkDestDib();
                     self.RenderAndPresent(highQuality: true);
                     return default;
 
@@ -621,9 +624,10 @@ public sealed unsafe partial class NativePinWindow
         _zoom = newZoom;
         _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
         _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
-        _ = PInvoke.MoveWindow(_hwnd, _winX, _winY, _winW, _winH, false);
 
-        // 交互期走 GDI StretchBlt 快路径；停手 150ms 后高清精修
+        // 不再先 MoveWindow 再 UpdateLayeredWindow：后者本身就会按 psize 调整窗口尺寸和位置。
+        // 连续滚轮时每帧只提交一次分层表面，避免 DWM 为每个中间尺寸各留一张表面。
+        // 交互期走占位边框；停手 350ms 后再高清精修（150ms 会在快速滚轮中途反复触发）。
         RenderAndPresent(highQuality: false);
 
         _settleTimer?.Dispose();
@@ -631,7 +635,7 @@ public sealed unsafe partial class NativePinWindow
         {
             if (!_hwnd.IsNull)
                 _ = PInvoke.PostMessage(_hwnd, WM_APP_ZOOM_SETTLED, default, default);
-        }, null, 150, Timeout.Infinite);
+        }, null, 350, Timeout.Infinite);
     }
 
     private void ShowMenu()
@@ -795,6 +799,30 @@ public sealed unsafe partial class NativePinWindow
     }
 
     /// <summary>
+    /// 滚轮把窗口缩回去后，DIB 仍按历史最大尺寸常驻（2560×1600 约 16MB）。
+    /// 只在窗口已小于分配面积的一半时重建，避免轻微缩放就反复申请 GDI 资源。
+    /// </summary>
+    private void MaybeShrinkDestDib()
+    {
+        if (_destDib == 0 || _winW <= 0 || _winH <= 0)
+            return;
+
+        var needW = Math.Min(8192, Math.Max(_winW, 256));
+        var needH = Math.Max(_winH, 256);
+        if (needW >= _destAllocW && needH >= _destAllocH)
+            return;
+
+        var used = (long)_winW * _winH;
+        var allocated = (long)_destAllocW * _destAllocH;
+        if (used * 2 > allocated)
+            return;
+
+        App.Log($"Pin zoom: 收缩 DIB {_destAllocW}×{_destAllocH} -> {needW}×{needH}");
+        ReleaseDestResources();
+        EnsureDestDib(_winW, _winH);
+    }
+
+    /// <summary>
     /// 交互期占位：只画目标尺寸的半透明边框（+极淡填充），不缩放假图——
     /// 既省资源，又避免 GDI StretchBlt 不保留 Alpha 导致的“背景透明”与逐帧闪烁。
     /// </summary>
@@ -859,16 +887,29 @@ public sealed unsafe partial class NativePinWindow
             return;
 
         using (var graphics = Graphics.FromImage(bitmap))
-        using (var attributes = new ImageAttributes())
         {
             graphics.Clear(Color.Transparent);
             graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.CompositingQuality = CompositingQuality.HighQuality;
-            var matrix = new ColorMatrix { Matrix33 = (float)_opacity };
-            attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-            graphics.DrawImage(source.Image, new Rectangle(0, 0, _winW, _winH),
-                0, 0, source.Image.Width, source.Image.Height, GraphicsUnit.Pixel, attributes);
+
+            if (_opacity >= 0.999)
+            {
+                // 不透明度 100% 是最常见路径：SourceCopy 不做逐像素混合，也不建 ColorMatrix 临时面，
+                // 滚动缩放时的瞬时分配明显少于 SourceOver + ImageAttributes。
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.DrawImage(source.Image, new Rectangle(0, 0, _winW, _winH),
+                    0, 0, source.Image.Width, source.Image.Height, GraphicsUnit.Pixel);
+            }
+            else
+            {
+                using var attributes = new ImageAttributes();
+                graphics.CompositingMode = CompositingMode.SourceOver;
+                var matrix = new ColorMatrix { Matrix33 = (float)_opacity };
+                attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                graphics.DrawImage(source.Image, new Rectangle(0, 0, _winW, _winH),
+                    0, 0, source.Image.Width, source.Image.Height, GraphicsUnit.Pixel, attributes);
+            }
         }
     }
 

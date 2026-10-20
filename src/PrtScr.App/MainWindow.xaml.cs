@@ -20,6 +20,8 @@ public sealed partial class MainWindow : Window
     private readonly bool _startHidden;
     private bool _suppressStartupToggle;
     private bool _suppressHistoryToggle;
+    private bool _suppressCaptureOptions;
+    private CancellationTokenSource? _delayCts;
     private Views.HistoryWindow? _historyWindow;
 
     public MainWindow(bool startHidden = false)
@@ -60,7 +62,6 @@ public sealed partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        OverlayToggle.IsOn = App.Config.Current.CaptureOverlayWindows;
         OcrPreferUmiToggle.IsOn = App.Config.Current.PreferUmiOcr;
         UmiPortBox.Value = App.Config.Current.UmiOcrPort;
 
@@ -75,6 +76,13 @@ public sealed partial class MainWindow : Window
         HistoryToggle.IsOn = App.Config.Current.SaveHistory;
         _suppressHistoryToggle = false;
         RefreshHistoryStatus();
+
+        _suppressCaptureOptions = true;
+        DelayCombo.SelectedIndex = DelayToIndex(App.Config.Current.CaptureDelaySeconds);
+        CaptureCursorToggle.IsOn = App.Config.Current.CaptureCursor;
+        DefaultModeCombo.SelectedIndex = IsNormalDefaultMode() ? 1 : 0;
+        _suppressCaptureOptions = false;
+        UpdateCaptureOptions();
 
         // 预热：成像（UI 线程）+ 抓屏/枚举/PrintWindow（后台），让第一次 F1 就是全热状态
         try
@@ -124,6 +132,89 @@ public sealed partial class MainWindow : Window
 
         var count = CaptureHistoryService.Instance.GetItems().Count;
         HistoryStatusText.Text = $"已开启：本机保留最近 {count} 张（data\\history，最多 30 张）。";
+    }
+
+    private void DelayCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressCaptureOptions || DelayCombo is null)
+            return;
+
+        var seconds = DelayFromIndex(DelayCombo.SelectedIndex);
+        if (App.Config.Current.CaptureDelaySeconds == seconds)
+            return;
+
+        App.Config.Current.CaptureDelaySeconds = seconds;
+        App.Config.Save();
+        UpdateCaptureOptions();
+        App.Log($"CaptureOptions: delay={seconds}s");
+    }
+
+    private static bool IsNormalDefaultMode() =>
+        string.Equals(App.Config.Current.DefaultCaptureMode, "normal", StringComparison.OrdinalIgnoreCase);
+
+    private void DefaultModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressCaptureOptions || DefaultModeCombo is null)
+            return;
+
+        var mode = DefaultModeCombo.SelectedIndex == 1 ? "normal" : "window";
+        if (string.Equals(App.Config.Current.DefaultCaptureMode, mode, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        App.Config.Current.DefaultCaptureMode = mode;
+        App.Config.Save();
+        UpdateCaptureOptions();
+        App.Log($"CaptureOptions: defaultMode={mode}");
+    }
+
+    private void CaptureCursorToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressCaptureOptions || CaptureCursorToggle is null)
+            return;
+
+        var enabled = CaptureCursorToggle.IsOn;
+        if (App.Config.Current.CaptureCursor == enabled)
+            return;
+
+        App.Config.Current.CaptureCursor = enabled;
+        App.Config.Save();
+        UpdateCaptureOptions();
+        App.Log($"CaptureOptions: cursor={enabled}");
+    }
+
+    private static int DelayToIndex(int seconds) => seconds switch
+    {
+        3 => 1,
+        5 => 2,
+        10 => 3,
+        _ => 0,
+    };
+
+    private static int DelayFromIndex(int index) => index switch
+    {
+        1 => 3,
+        2 => 5,
+        3 => 10,
+        _ => 0,
+    };
+
+    private static int NormalizeDelay(int seconds) => seconds is 3 or 5 or 10 ? seconds : 0;
+
+    private void UpdateCaptureOptions()
+    {
+        var delay = NormalizeDelay(App.Config.Current.CaptureDelaySeconds);
+        var cursor = App.Config.Current.CaptureCursor;
+
+        DelayCaptureItem.Text = delay > 0 ? $"延时截图（{delay} 秒）" : "延时截图（3 秒）";
+        CaptureOptionsText.Text = delay > 0
+            ? $"当前：按下截图热键后等待 {delay} 秒再冻结画面；等待期间再按一次截图热键可取消。"
+            : "当前：截图热键立即冻结画面；托盘菜单的「延时截图」默认等 3 秒。";
+        CaptureOptionsText.Text += cursor ? " 截图会包含鼠标指针。" : " 截图不包含鼠标指针。";
+
+        var normal = IsNormalDefaultMode();
+        CaptureModeHintText.Text = normal
+            ? "当前默认：常规截图。看到什么就截什么；按 F1 后按 Tab 可切到窗口截图。"
+            : "当前默认：窗口截图。会重建窗口本体，抗遮挡；按 F1 后按 Tab 可切到常规截图。";
     }
 
     private void OpenHistory()
@@ -195,15 +286,6 @@ public sealed partial class MainWindow : Window
         _ = RefreshOcrStatusAsync();
     }
 
-    private void OverlayToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (OverlayToggle is null)
-            return;
-
-        App.Config.Current.CaptureOverlayWindows = OverlayToggle.IsOn;
-        App.Config.Save();
-    }
-
     private void InitTray()
     {
         try
@@ -211,7 +293,7 @@ public sealed partial class MainWindow : Window
             TrayIcon.ForceCreate();
             TrayIcon.LeftClickCommand = new DelegateCommand(ShowFromTray);
             TrayIcon.DoubleClickCommand = new DelegateCommand(ShowFromTray);
-            TrayIcon.ToolTipText = $"{AppInfo.Name} — 单击/双击打开设置，右键菜单";
+            ResetTrayToolTip();
             TrayMenu.Opening += (_, _) => App.Log("Tray: menu opening");
             App.Log("Tray: 初始化完成");
         }
@@ -525,6 +607,27 @@ public sealed partial class MainWindow : Window
 
     private void FullScreen_Click(object sender, RoutedEventArgs e) => OnFullScreenPressed();
 
+    private async void DelayCapture_Click(object sender, RoutedEventArgs e)
+    {
+        var seconds = NormalizeDelay(App.Config.Current.CaptureDelaySeconds);
+        if (seconds <= 0)
+            seconds = 3;   // 托盘入口在未配置延时的时候默认 3 秒，保证功能可发现
+
+        await StartDelayedCaptureAsync(seconds);
+    }
+
+    private void CancelDelay_Click(object sender, RoutedEventArgs e)
+    {
+        if (_delayCts is not null)
+        {
+            App.Log("Delay: tray cancel clicked");
+            _delayCts.Cancel();
+        }
+    }
+
+    private void ResetTrayToolTip() =>
+        TrayIcon.ToolTipText = $"{AppInfo.Name} — 单击/双击打开设置，右键菜单";
+
     private void HotkeyRecord_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not string action)
@@ -602,7 +705,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 _hotkey.Restart(vk, mods);
                 ScreenshotHotkeyText.Text = text;
-                HotkeyStatusText.Text = $"截图热键已设为 {text}";
+                HotkeyStatusText.Text = $"窗口截图热键已设为 {text}";
                 break;
 
             case "fullscreen":
@@ -653,7 +756,7 @@ public sealed partial class MainWindow : Window
 
         if (action != "screenshot" && vk == screenshotVk && mods == screenshotMods)
         {
-            other = "截图";
+            other = "窗口截图";
             return true;
         }
         if (action != "fullscreen" && vk == fullVk && mods == c.FullHotkeyModifiers)
@@ -684,14 +787,85 @@ public sealed partial class MainWindow : Window
     private async void OnHotkeyPressed()
     {
         // M1：唤起冻屏取景器。Dispatcher 回调里的异常会变成“暂存异常”直接杀进程，
-        // 必须在这里兜住并写日志
+        // 必须在这里兜住并写日志。
         try
         {
-            await Services.CaptureService.Instance.StartCaptureAsync();
+            // 延时等待中再按一次 = 取消，而不是叠加一次新截图
+            if (_delayCts is not null)
+            {
+                App.Log("Delay: hotkey pressed again, cancel");
+                _delayCts.Cancel();
+                return;
+            }
+
+            // 取景器已经打开时，热键仍然走原来的“再按一次取消”语义
+            if (Services.CaptureService.Instance.IsCapturing)
+            {
+                await Services.CaptureService.Instance.StartCaptureAsync();
+                return;
+            }
+
+            var delay = NormalizeDelay(App.Config.Current.CaptureDelaySeconds);
+            if (delay > 0)
+                await StartDelayedCaptureAsync(delay);
+            else
+                await Services.CaptureService.Instance.StartCaptureAsync();
         }
         catch (Exception ex)
         {
             App.Log($"热键处理异常: {ex}");
+        }
+    }
+
+    /// <summary>延时截图：先等待，期间用户可以打开菜单/悬停；到点后再走正常冻屏取景。</summary>
+    private async Task StartDelayedCaptureAsync(int seconds)
+    {
+        if (_delayCts is not null)
+        {
+            App.Log("Delay: 已有延时截图在进行，忽略新请求");
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _delayCts = cts;
+        CancelDelayItem.Visibility = Visibility.Visible;
+
+        try
+        {
+            App.Log($"Delay: start {seconds}s");
+            TrayIcon.ShowNotification($"{AppInfo.Name} 延时截图",
+                $"{seconds} 秒后冻结画面，期间可正常操作。再按一次截图热键可取消。");
+
+            for (var remaining = seconds; remaining > 0; remaining--)
+            {
+                TrayIcon.ToolTipText = $"{AppInfo.Name} — {remaining} 秒后截图";
+                HotkeyStatusText.Text = $"延时截图：{remaining} 秒后冻结画面（再按一次截图热键可取消）";
+                await Task.Delay(1000, cts.Token);
+            }
+
+            App.Log("Delay: capture now");
+            HotkeyStatusText.Text = "延时结束，正在冻结画面…";
+            await Services.CaptureService.Instance.StartCaptureAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            App.Log("Delay: canceled");
+            HotkeyStatusText.Text = "已取消延时截图";
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Delay: 异常 {ex}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_delayCts, cts))
+            {
+                _delayCts = null;
+                CancelDelayItem.Visibility = Visibility.Collapsed;
+                ResetTrayToolTip();
+            }
+
+            cts.Dispose();
         }
     }
 

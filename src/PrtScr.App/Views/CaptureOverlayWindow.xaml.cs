@@ -3,11 +3,13 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Windowing;
+using PrtScr.App.Services;
 using PrtScr.Capture;
 using PrtScr.Interop;
 using Windows.ApplicationModel.DataTransfer;
@@ -27,6 +29,16 @@ namespace PrtScr.App.Views;
 public sealed partial class CaptureOverlayWindow : Window
 {
     private const double DragThresholdSq = 16;   // 4 DIP 的平方
+    private const int HitTolerancePx = 2;        // 窗口边界容差：贴着边框起手也能选中
+    private const int LoupeSampleSize = 19;      // 取色器采样 19×19 像素
+    private const int LoupeCell = 10;            // 每像素放大 10 倍 → 190×190
+    private const int LoupePixelSize = LoupeSampleSize * LoupeCell;
+
+    private enum CaptureMode
+    {
+        Window,   // 窗口截图：重建窗口本体，被遮挡也能取（默认）
+        Normal,   // 常规截图：直接裁冻结画面，菜单/提示/指针所见即所得
+    }
 
     private Bitmap _full;
     private WindowRect _monitor;
@@ -37,9 +49,10 @@ public sealed partial class CaptureOverlayWindow : Window
     private bool _dragging;
     private bool _dragMoved;
     private bool _hasSelection;
-    private bool _includeOverlays;                       // 是否识别悬浮类窗口（Tab 切换）
+    private CaptureMode _captureMode = CaptureMode.Window;
     private Windows.Foundation.Point _pressPoint;
     private Windows.Foundation.Point _lastHoverPoint;
+    private nint _lastHoverHandle;
     private Rect _selection;            // DIP，相对本显示器
     private WindowInfo? _hoverWindow;   // 鼠标下吸附的窗口
     private WindowInfo? _clickedWindow; // 按下那一刻吸附的窗口
@@ -51,6 +64,14 @@ public sealed partial class CaptureOverlayWindow : Window
     private bool _closed;
     private bool _saving;
     private PrtScr.App.Services.KeyInterceptor? _keys;
+
+    private WriteableBitmap? _loupeBitmap;
+    private readonly byte[] _loupePixels = new byte[LoupePixelSize * LoupePixelSize * 4];
+    private readonly byte[] _loupeSample = new byte[LoupeSampleSize * LoupeSampleSize * 4];
+    private string _loupeHex = "";
+    private string _loupeRgb = "";
+    private bool _loupeErrorLogged;
+    private DispatcherQueueTimer? _toastTimer;
 
     private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _normalHoverBrush =
         new(Windows.UI.Color.FromArgb(0xFF, 0x00, 0xC8, 0xFF));
@@ -70,6 +91,9 @@ public sealed partial class CaptureOverlayWindow : Window
         InitializeComponent();
         Title = $"{PrtScr.App.AppInfo.Name} 取景";
 
+        _loupeBitmap = new WriteableBitmap(LoupePixelSize, LoupePixelSize);
+        LoupeImage.Source = _loupeBitmap;
+
         // 消息层拦截 Enter/Esc/Tab：不依赖 XAML 焦点，杜绝偶发失灵
         _keys = new PrtScr.App.Services.KeyInterceptor(WindowNative.GetWindowHandle(this), interceptO: true);
         _keys.KeyDown += vk => DispatcherQueue.TryEnqueue(() =>
@@ -84,7 +108,7 @@ public sealed partial class CaptureOverlayWindow : Window
                     Cancel();
                     break;
                 case 0x09:
-                    ToggleOverlays();
+                    ToggleCaptureMode();
                     break;
                 case 0x4F:
                     if (_hasSelection)
@@ -93,6 +117,9 @@ public sealed partial class CaptureOverlayWindow : Window
             }
         });
 
+        // 焦点仍可能被系统抢走：再挂一条低级键盘钩子，取景窗亮着时 Tab/Esc/Ctrl+C 不依赖焦点。
+        EscOverPinHook.SetOverlayKeyHandler(OnOverlayHotkey);
+
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.SetBorderAndTitleBar(false, false);
@@ -100,15 +127,26 @@ public sealed partial class CaptureOverlayWindow : Window
             presenter.IsResizable = false;
         }
 
+        // WinUI 无边框窗仍保留 1px 非客户边框：鼠标贴屏幕边缘时命中 HTBORDER，
+        // PointerPressed 根本收不到。把客户区扩到整窗，并强制所有点命中 HTCLIENT。
+        _keys.MakeClientAreaFullWindow();
+
         // 首次亮窗时窗口可能尚未就绪，Focus 会被静默丢弃 → Tab/回车失灵；
         // 每次激活都补焦，另有 60ms 延迟补投兜底
         Activated += (_, args) =>
         {
-            if (args.WindowActivationState != WindowActivationState.Deactivated)
+            if (args.WindowActivationState == WindowActivationState.Deactivated)
             {
-                _ = FocusSink.Focus(FocusState.Programmatic);
-                RefreshHoverFromCursor();
+                // 切走窗口（例如 Alt+Tab、另存为对话框）时必须立刻放行键盘，
+                // 否则钩子会把别的程序的 Tab/Ctrl+C/Esc 也吞掉。回来激活时再接管。
+                EscOverPinHook.SetOverlayKeysActive(false);
+                return;
             }
+
+            if (!_closed)
+                EscOverPinHook.SetOverlayKeysActive(true);
+            _ = FocusSink.Focus(FocusState.Programmatic);
+            RefreshHoverFromCursor();
         };
 
         // 注：不做“失焦自动取消”——在 Activated 事件回调里调 Close() 会触发 XAML
@@ -128,7 +166,12 @@ public sealed partial class CaptureOverlayWindow : Window
             }
         };
 
-        Closed += (_, _) => _full.Dispose();
+        Closed += (_, _) =>
+        {
+            EscOverPinHook.SetOverlayKeysActive(false);
+            EscOverPinHook.SetOverlayKeyHandler(null);
+            _full.Dispose();
+        };
     }
 
     /// <summary>
@@ -140,8 +183,16 @@ public sealed partial class CaptureOverlayWindow : Window
         _full.Dispose();
         _full = frozen;
         _monitor = monitor;
+        // 跳过本进程窗口；跳过“几乎整屏的点击穿透层”（例如 DSH 歌词 toast 的透明 Chrome 窗口）。
+        // 后者永远压在 Z 序最前且鼠标穿过去，若不排除，任何位置的首选都会是它，
+        // 其他窗口只能靠滚轮轮换，表现为“鼠标悬停高亮不跟手”。
+        var selfPid = Environment.ProcessId;
         _windows = windows
-            .Where(w => !w.IsCloaked && w.Handle != _selfHwnd && w.FrameBounds.Width > 0)
+            .Where(w => !w.IsCloaked &&
+                        w.Handle != _selfHwnd &&
+                        w.ProcessId != selfPid &&
+                        w.FrameBounds.Width > 0 &&
+                        !IsFullScreenClickThrough(w))
             .ToList();
 
         ResetSessionState();
@@ -149,8 +200,10 @@ public sealed partial class CaptureOverlayWindow : Window
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(
             _monitor.X, _monitor.Y, _monitor.Width, _monitor.Height));
 
-        // 布局完成前就把遮罩按物理尺寸铺好：亮窗第一帧即完整画面
-        _includeOverlays = App.Config.Current.CaptureOverlayWindows;
+        // 每次取景默认窗口截图；主人可在取景中按 Tab 切到常规截图
+        _captureMode = string.Equals(App.Config.Current.DefaultCaptureMode, "normal", StringComparison.OrdinalIgnoreCase)
+            ? CaptureMode.Normal
+            : CaptureMode.Window;
         _scale = DetectScale();
         UpdateVisuals();
 
@@ -170,14 +223,19 @@ public sealed partial class CaptureOverlayWindow : Window
         _subregionWindow = null;
         _subregionCandidate = null;
         _lastTipWindow = null;
+        _lastHoverHandle = 0;
         _hoverCandidates.Clear();
         _lastHoverPoint = default;
         _lastPress = default;
         _saving = false;
+        _loupeHex = "";
+        _loupeRgb = "";
         SelectionBorder.Visibility = Visibility.Collapsed;
         HoverBorder.Visibility = Visibility.Collapsed;
         SizeTip.Visibility = Visibility.Collapsed;
         SaveButton.Visibility = Visibility.Collapsed;
+        LoupePanel.Visibility = Visibility.Collapsed;
+        CopyToast.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>
@@ -273,6 +331,7 @@ public sealed partial class CaptureOverlayWindow : Window
             {
             }
 
+            EscOverPinHook.SetOverlayKeysActive(true);
             Activate();
             App.Log($"Overlay: activated, scale dpi={_scale:0.###} xaml={Root.XamlRoot?.RasterizationScale:0.###}");
             _scale = Root.XamlRoot?.RasterizationScale ?? _scale;
@@ -330,24 +389,24 @@ public sealed partial class CaptureOverlayWindow : Window
 
         // 按下：记住吸附窗口。拖动 = 自由框选；不动 = 单击选中窗口
         _pressPoint = point;
+        _lastHoverPoint = point;
         _dragging = true;
         _dragMoved = false;
+        HideColorLoupe();
+        // 两种模式都允许预选/单击选中窗口；区别只在取图来源：
+        // 窗口模式重建窗口本体，常规模式仍从冻结画面裁切（菜单/提示所见即所得）。
         _clickedWindow = _hoverWindow;
         _subregionWindow = null;
         // 悬浮在普通窗口上开始拖拽 = 窗口局部（悬浮类窗口仍按屏幕所见处理）
-        _subregionCandidate = _hoverWindow is { IsOverlayClass: false } && _hoverWindow.FrameBounds.Width > 0
+        _subregionCandidate = _captureMode == CaptureMode.Window &&
+                              _hoverWindow is { IsOverlayClass: false } &&
+                              _hoverWindow.FrameBounds.Width > 0
             ? _hoverWindow
             : null;
-        if (_clickedWindow is not null)
-        {
-            _selection = DipRect(_clickedWindow.FrameBounds);
-            _hasSelection = true;
-        }
-        else
-        {
-            _selection = Rect.Empty;
-            _hasSelection = false;
-        }
+        // 不在按下时直接提交整窗选区：否则边框/内部按下会先变成“整窗选中”，
+        // 拖拽被误判为已有选区，边界起拖也会被吞。整窗选中等松手再确认。
+        _selection = Rect.Empty;
+        _hasSelection = false;
         UpdateVisuals();
     }
 
@@ -379,6 +438,7 @@ public sealed partial class CaptureOverlayWindow : Window
 
             if (_dragMoved)
             {
+                HideColorLoupe();
                 _hoverWindow = null;
                 _clickedWindow = null;
 
@@ -432,11 +492,21 @@ public sealed partial class CaptureOverlayWindow : Window
         // 焦点拉回锚点，保证 Esc/回车/Tab 随时可用
         _ = FocusSink.Focus(FocusState.Programmatic);
 
-        if (!_dragMoved && _clickedWindow is null)
+        if (!_dragMoved)
         {
-            // 空白处纯点击 = 清除选区
-            _selection = Rect.Empty;
-            _hasSelection = false;
+            if (_clickedWindow is null)
+            {
+                // 空白处纯点击 = 清除选区
+                _selection = Rect.Empty;
+                _hasSelection = false;
+            }
+            else
+            {
+                // 单击窗口 = 选中整窗（两种模式都支持；常规模式仍从冻结画面裁切）
+                _selection = DipRect(_clickedWindow.FrameBounds);
+                _hasSelection = true;
+                _subregionWindow = null;
+            }
         }
         else if (_dragMoved && _selection.Width * _selection.Height < 16)
         {
@@ -447,13 +517,38 @@ public sealed partial class CaptureOverlayWindow : Window
         }
 
         UpdateVisuals();
+        if (_hasSelection)
+            HideColorLoupe();
+        else
+            UpdateColorLoupe(e.GetCurrentPoint(Root).Position);
     }
 
     private void UpdateHover(Windows.Foundation.Point dipPoint)
     {
         _lastHoverPoint = dipPoint;
         HitTestHover(dipPoint);
+        LogHoverChange();
         UpdateVisuals();
+        UpdateColorLoupe(dipPoint);
+    }
+
+    /// <summary>命中目标变化时记一行，方便主人复现“某个弹窗选不中”时直接看日志。</summary>
+    private void LogHoverChange()
+    {
+        var handle = _hoverWindow?.Handle ?? 0;
+        if (handle == _lastHoverHandle)
+            return;
+
+        _lastHoverHandle = handle;
+        if (_hoverWindow is { } win)
+        {
+            var title = win.Title.Length > 48 ? win.Title[..48] + "…" : win.Title;
+            App.Log($"Overlay: hover 0x{win.Handle:X} class=\"{win.ClassName}\" child={win.IsChild} rect={win.FrameBounds.X},{win.FrameBounds.Y} {win.FrameBounds.Width}x{win.FrameBounds.Height} title=\"{title}\"");
+        }
+        else
+        {
+            App.Log("Overlay: hover none");
+        }
     }
 
     /// <summary>
@@ -485,15 +580,16 @@ public sealed partial class CaptureOverlayWindow : Window
         var vx = _monitor.X + (int)Math.Round(dipPoint.X * _scale);
         var vy = _monitor.Y + (int)Math.Round(dipPoint.Y * _scale);
 
-        // 枚举列表本身按 Z 序（顶层在前）；纯净模式跳过悬浮类窗口（歌词/桌宠/会议提示），Tab 可切换。
+        // 两种模式都做预选/单击选中：常规模式也先高亮窗口，但确认时仍从冻结画面裁切。
+        // 枚举列表本身按 Z 序（顶层在前）；悬浮类窗口（歌词/桌宠/提示）也一并纳入，
+        // 与窗口截图合并后不再需要单独的「识别悬浮窗口」开关。
         // 注意命中的是“矩形包含该点”的全部窗口——被遮挡的窗口也在候选里，滚轮可轮换。
         // 复用列表，鼠标高频移动下零分配（分配会引起 GC 停顿 → 闪动感）
         _hoverCandidates.Clear();
         foreach (var w in _windows)
         {
-            if (w.FrameBounds.Contains(vx, vy) &&
-                w.FrameBounds.Width < _monitor.Width * 2 &&
-                (_includeOverlays || !w.IsOverlayClass))
+            if (ContainsNear(w.FrameBounds, vx, vy, HitTolerancePx) &&
+                w.FrameBounds.Width < _monitor.Width * 2)
             {
                 _hoverCandidates.Add(w);
             }
@@ -550,23 +646,77 @@ public sealed partial class CaptureOverlayWindow : Window
         UpdateVisuals();
     }
 
-    private void OnToggleOverlays(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        ToggleOverlays();
-    }
-
-    private void ToggleOverlays()
+    /// <summary>Tab：窗口截图 ↔ 常规截图。两种模式共用同一套框选与确认流程，只换取图来源。</summary>
+    private void ToggleCaptureMode()
     {
         try
         {
-            _includeOverlays = !_includeOverlays;
-            _lastTipWindow = null;   // 强制刷新提示文本
-            HitTestHover(_lastHoverPoint);   // 立即按新策略重新命中
+            var hadSelection = _hasSelection;
+            _captureMode = _captureMode == CaptureMode.Window ? CaptureMode.Normal : CaptureMode.Window;
+
+            // 切换模式时清空当前选区与窗口引用，避免“窗口截图选区”被常规模式误裁、
+            // 或常规选区残留 _clickedWindow 又走回窗口重建。
+            _dragging = false;
+            _dragMoved = false;
+            _hasSelection = false;
+            _selection = Rect.Empty;
+            _hoverWindow = null;
+            _clickedWindow = null;
+            _subregionCandidate = null;
+            _subregionWindow = null;
+            _lastTipWindow = null;
+            _hoverCandidates.Clear();
+            HideColorLoupe();
+
+            RefreshHoverFromCursor();
+            UpdateVisuals();
+            ShowModeToast(hadSelection);
+            App.Log($"Overlay: mode={(_captureMode == CaptureMode.Window ? "window" : "normal")}");
         }
         catch (Exception ex)
         {
             App.Log($"Overlay Tab 切换异常: {ex.Message}");
+        }
+    }
+
+    /// <summary>低级键盘钩子回调（钩子线程）：只切回 UI 线程，绝不做其他事。</summary>
+    private void OnOverlayHotkey(int vk, bool ctrl)
+    {
+        DispatcherQueue.TryEnqueue(() => HandleOverlayHotkey(vk, ctrl));
+    }
+
+    /// <summary>取景窗可见时的键盘直达，不依赖 XAML 焦点。</summary>
+    private void HandleOverlayHotkey(int vk, bool ctrl)
+    {
+        if (_closed)
+            return;
+
+        switch (vk)
+        {
+            case 0x1B: // Esc
+                Cancel();
+                break;
+            case 0x0D: // Enter
+                if (_hasSelection)
+                    _ = ConfirmAsync();
+                break;
+            case 0x09: // Tab
+                ToggleCaptureMode();
+                break;
+            case 0x4F: // O：OCR 选区
+                if (_hasSelection)
+                    _ = OcrSelectionAsync();
+                break;
+            case 0x43 when ctrl: // Ctrl+C
+                if (_hasSelection)
+                    _ = ConfirmAsync();
+                else
+                    _ = CopyLoupeColorAsync();
+                break;
+            case 0x53 when ctrl: // Ctrl+S
+                if (_hasSelection)
+                    _ = SaveSelectionAsync();
+                break;
         }
     }
 
@@ -588,7 +738,7 @@ public sealed partial class CaptureOverlayWindow : Window
 
             case Windows.System.VirtualKey.Tab:
                 e.Handled = true;
-                ToggleOverlays();
+                ToggleCaptureMode();
                 break;
         }
     }
@@ -616,12 +766,16 @@ public sealed partial class CaptureOverlayWindow : Window
         if (_closed)
             return;
         _closed = true;
+        EscOverPinHook.SetOverlayKeysActive(false);
         AppWindow.Hide();
 
         // 取景器常驻复用，但冻结图（2560×1600 WriteableBitmap + GDI Bitmap 各约 16 MB）
         // 不能一直挂在窗口上；隐藏后立即释放，下次 Prepare 会重新填充。
         try
         {
+            HideColorLoupe();
+            _toastTimer?.Stop();
+            CopyToast.Visibility = Visibility.Collapsed;
             Frozen.Source = null;
             _full.Dispose();
             // 这两块（WriteableBitmap + GDI Bitmap）各约 16 MB，且 PixelBuffer 会进大对象堆。
@@ -681,6 +835,10 @@ public sealed partial class CaptureOverlayWindow : Window
     /// <summary>按当前选区/窗口取回一张位图（窗口模式抗遮挡；否则裁冻结画面）。调用方负责 Dispose。</summary>
     private async Task<Bitmap?> CaptureSelectionAsync()
     {
+        // 常规截图：不重建任何窗口，直接裁冻结画面——菜单、悬停提示、下拉框、指针所见即所得
+        if (_captureMode == CaptureMode.Normal)
+            return CropFullScreenSelection();
+
         // 窗口局部：先抓完整窗口（抗遮挡），再按选区裁剪
         if (_subregionWindow is { } sub)
         {
@@ -704,11 +862,16 @@ public sealed partial class CaptureOverlayWindow : Window
                 return windowBitmap;
         }
 
+        return CropFullScreenSelection();
+    }
+
+    /// <summary>按选区从冻结画面裁切（DIP → 显示器本地物理坐标，夹在显示器内）。</summary>
+    private Bitmap? CropFullScreenSelection()
+    {
         var dip = _selection;
         if (dip.IsEmpty)
             return null;
 
-        // DIP → 显示器本地物理坐标（冻结位图就是显示器本地区域），并夹在显示器内
         var x = Math.Clamp((int)Math.Round(dip.X * _scale), 0, _monitor.Width - 1);
         var y = Math.Clamp((int)Math.Round(dip.Y * _scale), 0, _monitor.Height - 1);
         var right = Math.Clamp((int)Math.Round((dip.X + dip.Width) * _scale), x + 1, _monitor.Width);
@@ -837,6 +1000,243 @@ public sealed partial class CaptureOverlayWindow : Window
         }
     }
 
+    // ---------- 取色放大镜 ----------
+
+    /// <summary>
+    /// 跟随鼠标更新 19×19 取色器：中心像素放大 10 倍，显示 HEX 与 RGB。
+    /// 直接锁 19×19 小块再展开，避免 361 次 GetPixel；缓冲区全部复用，不产生每帧分配。
+    /// </summary>
+    private void UpdateColorLoupe(Windows.Foundation.Point dipPoint)
+    {
+        if (_closed || _hasSelection || _dragging || _scale <= 0 ||
+            _full.Width < LoupeSampleSize || _full.Height < LoupeSampleSize ||
+            _loupeBitmap is null)
+        {
+            HideColorLoupe();
+            return;
+        }
+
+        try
+        {
+            // 用 Root 的实际 DIP 尺寸映射到冻结帧，而不是直接用 RasterizationScale：
+            // 无边框窗曾有 1px 非客户区，客户区比屏幕小 2px，靠边时取色坐标会偏。
+            var rootW = Root.ActualWidth > 0 ? Root.ActualWidth : _monitor.Width / _scale;
+            var rootH = Root.ActualHeight > 0 ? Root.ActualHeight : _monitor.Height / _scale;
+            if (rootW <= 0 || rootH <= 0)
+            {
+                HideColorLoupe();
+                return;
+            }
+
+            var px = (int)Math.Round(dipPoint.X * _full.Width / rootW);
+            var py = (int)Math.Round(dipPoint.Y * _full.Height / rootH);
+            if (px < 0 || py < 0)
+            {
+                HideColorLoupe();
+                return;
+            }
+            px = Math.Min(px, _full.Width - 1);
+            py = Math.Min(py, _full.Height - 1);
+
+            var left = Math.Clamp(px - LoupeSampleSize / 2, 0, _full.Width - LoupeSampleSize);
+            var top = Math.Clamp(py - LoupeSampleSize / 2, 0, _full.Height - LoupeSampleSize);
+
+            var data = _full.LockBits(
+                new System.Drawing.Rectangle(left, top, LoupeSampleSize, LoupeSampleSize),
+                ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var rowBytes = LoupeSampleSize * 4;
+                for (var row = 0; row < LoupeSampleSize; row++)
+                {
+                    Marshal.Copy(
+                        IntPtr.Add(data.Scan0, row * data.Stride),
+                        _loupeSample,
+                        row * rowBytes,
+                        rowBytes);
+                }
+            }
+            finally
+            {
+                _full.UnlockBits(data);
+            }
+
+            var center = (py - top) * LoupeSampleSize + (px - left);
+            var centerOffset = center * 4;
+            var b = _loupeSample[centerOffset];
+            var g = _loupeSample[centerOffset + 1];
+            var r = _loupeSample[centerOffset + 2];
+            _loupeHex = $"#{r:X2}{g:X2}{b:X2}";
+            _loupeRgb = $"R {r}  G {g}  B {b}";
+
+            // 每个采样像素铺成 10×10 色块，整张 190×190
+            for (var sy = 0; sy < LoupeSampleSize; sy++)
+            {
+                for (var sx = 0; sx < LoupeSampleSize; sx++)
+                {
+                    var so = (sy * LoupeSampleSize + sx) * 4;
+                    var sb = _loupeSample[so];
+                    var sg = _loupeSample[so + 1];
+                    var sr = _loupeSample[so + 2];
+                    var bx = sx * LoupeCell;
+                    var by = sy * LoupeCell;
+                    for (var dy = 0; dy < LoupeCell; dy++)
+                    {
+                        var rowBase = ((by + dy) * LoupePixelSize + bx) * 4;
+                        for (var dx = 0; dx < LoupeCell; dx++)
+                        {
+                            var di = rowBase + dx * 4;
+                            _loupePixels[di] = sb;
+                            _loupePixels[di + 1] = sg;
+                            _loupePixels[di + 2] = sr;
+                            _loupePixels[di + 3] = 255;
+                        }
+                    }
+                }
+            }
+
+            // 中心像素框：黑白双线，深色/浅色背景上都看得见
+            var ccx = (px - left) * LoupeCell;
+            var ccy = (py - top) * LoupeCell;
+            for (var i = -1; i <= LoupeCell; i++)
+            {
+                SetLoupePixel(ccx + i, ccy - 1, 255, 255, 255);
+                SetLoupePixel(ccx + i, ccy + LoupeCell, 255, 255, 255);
+                SetLoupePixel(ccx - 1, ccy + i, 255, 255, 255);
+                SetLoupePixel(ccx + LoupeCell, ccy + i, 255, 255, 255);
+            }
+            for (var i = -2; i <= LoupeCell + 1; i++)
+            {
+                SetLoupePixel(ccx + i, ccy - 2, 0, 0, 0);
+                SetLoupePixel(ccx + i, ccy + LoupeCell + 1, 0, 0, 0);
+                SetLoupePixel(ccx - 2, ccy + i, 0, 0, 0);
+                SetLoupePixel(ccx + LoupeCell + 1, ccy + i, 0, 0, 0);
+            }
+
+            using (var stream = _loupeBitmap.PixelBuffer.AsStream())
+            {
+                stream.Position = 0;
+                stream.Write(_loupePixels, 0, _loupePixels.Length);
+            }
+            _loupeBitmap.Invalidate();
+
+            LoupeHex.Text = _loupeHex;
+            LoupeRgb.Text = _loupeRgb;
+            LoupePanel.Visibility = Visibility.Visible;
+
+            var panelW = LoupePanel.ActualWidth > 0 ? LoupePanel.ActualWidth : 202;
+            var panelH = LoupePanel.ActualHeight > 0 ? LoupePanel.ActualHeight : 238;
+            var x = dipPoint.X + 18;
+            if (x + panelW > rootW - 4)
+                x = dipPoint.X - panelW - 18;
+            var y = dipPoint.Y + 18;
+            if (y + panelH > rootH - 4)
+                y = dipPoint.Y - panelH - 18;
+            Canvas.SetLeft(LoupePanel, Math.Clamp(x, 4, Math.Max(4, rootW - panelW - 4)));
+            Canvas.SetTop(LoupePanel, Math.Clamp(y, 4, Math.Max(4, rootH - panelH - 4)));
+            _loupeErrorLogged = false;
+        }
+        catch (Exception ex)
+        {
+            HideColorLoupe();
+            if (!_loupeErrorLogged)
+            {
+                _loupeErrorLogged = true;
+                App.Log($"Overlay 取色器异常: {ex.Message}");
+            }
+        }
+    }
+
+    private void HideColorLoupe()
+    {
+        if (LoupePanel is not null)
+            LoupePanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void SetLoupePixel(int x, int y, byte r, byte g, byte b)
+    {
+        if (x < 0 || y < 0 || x >= LoupePixelSize || y >= LoupePixelSize)
+            return;
+        var o = (y * LoupePixelSize + x) * 4;
+        _loupePixels[o] = b;
+        _loupePixels[o + 1] = g;
+        _loupePixels[o + 2] = r;
+        _loupePixels[o + 3] = 255;
+    }
+
+    private void OnCopyColorShortcut(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        if (_hasSelection)
+        {
+            // 有选区时 Ctrl+C 仍然是“复制这张截图”，和常见截图工具一致
+            _ = ConfirmAsync();
+            return;
+        }
+        _ = CopyLoupeColorAsync();
+    }
+
+    private async Task CopyLoupeColorAsync()
+    {
+        try
+        {
+            if (_loupeHex.Length == 0)
+            {
+                RefreshHoverFromCursor();
+                if (_loupeHex.Length == 0)
+                    return;
+            }
+
+            var text = _loupeHex;
+            var ok = await PrtScr.App.Services.ClipboardService.SetTextAsync(text);
+            App.Log(ok ? $"Overlay: color copied {text}" : $"Overlay: color copy failed {text}");
+            ShowCopyToast(ok ? $"已复制 {text}" : "复制色值失败");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Overlay 复制色值异常: {ex.Message}");
+        }
+    }
+
+    /// <summary>模式切换的可见提示：贴在顶部模式徽标下方，避免“Tab 按了但看不出变化”。</summary>
+    private void ShowModeToast(bool clearedSelection)
+    {
+        var modeName = _captureMode == CaptureMode.Window ? "窗口截图" : "常规截图";
+        ShowCopyToast(clearedSelection ? $"已切换到{modeName}，原选区已清除" : $"已切换到{modeName}", nearTop: true);
+    }
+
+    private void ShowCopyToast(string text, bool nearTop = false)
+    {
+        try
+        {
+            CopyToastText.Text = text;
+            CopyToast.Visibility = Visibility.Visible;
+
+            var rootW = Root.ActualWidth > 0 ? Root.ActualWidth : _monitor.Width / _scale;
+            var rootH = Root.ActualHeight > 0 ? Root.ActualHeight : _monitor.Height / _scale;
+            var toastW = CopyToast.ActualWidth > 0 ? CopyToast.ActualWidth : 160;
+            var toastH = CopyToast.ActualHeight > 0 ? CopyToast.ActualHeight : 30;
+            Canvas.SetLeft(CopyToast, Math.Max(4, (rootW - toastW) / 2));
+            Canvas.SetTop(CopyToast, nearTop ? 46 : Math.Max(4, rootH - toastH - 48));
+
+            _toastTimer?.Stop();
+            var timer = DispatcherQueue.CreateTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(1400);
+            timer.IsRepeating = false;
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                CopyToast.Visibility = Visibility.Collapsed;
+            };
+            timer.Start();
+            _toastTimer = timer;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Overlay 提示异常: {ex.Message}");
+        }
+    }
+
     // ---------- 绘制 ----------
 
     private void UpdateVisuals()
@@ -850,6 +1250,14 @@ public sealed partial class CaptureOverlayWindow : Window
             height = _monitor.Height / _scale;
         if (width <= 0 || height <= 0)
             return;
+
+        // 模式徽标：始终可见，用户随时知道 Tab 会切到哪
+        ModeText.Text = _captureMode == CaptureMode.Window
+            ? "窗口截图 · Tab 切换常规"
+            : "常规截图 · Tab 切换窗口";
+        var badgeW = ModeBadge.ActualWidth > 0 ? ModeBadge.ActualWidth : 170;
+        Canvas.SetLeft(ModeBadge, Math.Max(4, (width - badgeW) / 2));
+        Canvas.SetTop(ModeBadge, 8);
 
         var sel = _hasSelection ? _selection : Rect.Empty;
 
@@ -877,11 +1285,11 @@ public sealed partial class CaptureOverlayWindow : Window
             HoverBorder.Stroke = hover.IsOverlayClass ? _overlayHoverBrush : _normalHoverBrush;
             HoverBorder.Visibility = Visibility.Visible;
 
-            SizeText.Text = hover.IsOverlayClass && !_includeOverlays
-                ? "悬浮窗口 · 按 Tab 识别"
-                : $"{hover.FrameBounds.Width} × {hover.FrameBounds.Height}"
-                    + (_hoverCandidates.Count > 1 ? " · 滚轮切换" : "")
-                    + " · 拖拽截窗口局部";
+            SizeText.Text = $"{hover.FrameBounds.Width} × {hover.FrameBounds.Height}"
+                + (_hoverCandidates.Count > 1 ? " · 滚轮切换" : "")
+                + (_captureMode == CaptureMode.Window
+                    ? " · 拖拽截窗口局部"
+                    : " · 单击选中 / 拖拽自由框选");
             _lastTipWindow = hover;
             var tipX = Math.Clamp(r.X + r.Width - 110, 4, Math.Max(4, width - 120));
             var tipY = r.Y + r.Height + 6 < height - 30 ? r.Y + r.Height + 6 : r.Y - 30;
@@ -897,11 +1305,12 @@ public sealed partial class CaptureOverlayWindow : Window
         // 选区边框
         if (_hasSelection)
         {
+            HideColorLoupe();
             SetRect(SelectionBorder, sel.X, sel.Y, sel.Width, sel.Height);
             SelectionBorder.Visibility = Visibility.Visible;
 
             var prefix = _subregionWindow is not null ? "窗口内容 " : "";
-            SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)} · 回车复制 / Ctrl+S 保存 / O 识别";
+            SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)} · 回车复制 / Ctrl+S 保存 / O 识别 / Tab 切换模式";
             var tipX = Math.Clamp(sel.Right - SizeTip.ActualWidth - 8, 4, Math.Max(4, width - 120));
             var tipY = sel.Bottom + 6 < height - 30 ? sel.Bottom + 6 : sel.Y - 30;
             Canvas.SetLeft(SizeTip, tipX);
@@ -940,6 +1349,27 @@ public sealed partial class CaptureOverlayWindow : Window
             (physical.Y - _monitor.Y) / _scale,
             physical.Width / _scale,
             physical.Height / _scale);
+    }
+
+    /// <summary>
+    /// 几乎铺满整屏的点击穿透层（例如 DSH 歌词 toast 的透明 Chrome 窗口）。
+    /// 它永远在 Z 序最前且鼠标会穿过去，不能作为窗口吸附的首选，否则其他窗口都“悬停不亮”。
+    /// </summary>
+    private bool IsFullScreenClickThrough(WindowInfo w)
+    {
+        if (!w.IsClickThrough)
+            return false;
+
+        var area = (long)w.FrameBounds.Width * w.FrameBounds.Height;
+        var monitorArea = (long)_monitor.Width * _monitor.Height;
+        return monitorArea > 0 && area >= monitorArea * 85 / 100;
+    }
+
+    /// <summary>带容差的矩形命中：窗口右/下边框本身不在 Contains 内，贴边起手会漏选。</summary>
+    private static bool ContainsNear(WindowRect rect, int x, int y, int tolerance)
+    {
+        return x >= rect.X - tolerance && x <= rect.Right + tolerance &&
+               y >= rect.Y - tolerance && y <= rect.Bottom + tolerance;
     }
 
     private static Rect Normalize(Windows.Foundation.Point a, Windows.Foundation.Point b)
