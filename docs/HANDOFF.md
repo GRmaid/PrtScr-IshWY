@@ -51,7 +51,7 @@ src/PrtScr.App/
   Services/CaptureService.cs  采集编排；CaptureMonitorBestAsync 四层引擎
   Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService.PastePng 可从历史字节直接贴图，不经过剪贴板）
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部
-  Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/删除/清空/打开文件夹）
+  Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/删除/清空/打开文件夹；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致）
   Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询）
   Views/AnnotationWindow.xaml(.cs)      旧独立标注窗（已不用于贴图，保留）
   Views/OcrResultWindow.xaml(.cs)
@@ -132,10 +132,11 @@ FullscreenBypass: 已归还原前台
 - 接入点：`CaptureOverlayWindow.ConfirmAsync`（框选，`shot`）和 `MainWindow.OnFullScreenPressed`（全屏，`full`）在写剪贴板的同时用 `Task.WhenAll` 写历史；日志 `History: saved ...`、`QuickCapture: 完成 ... history=True`。
 - 设置 → 常规：`HistoryToggle` + `HistoryStatusText`；托盘菜单「截图历史…」；`HistoryWindow` 支持复制、贴图（`PinService.PastePng`）、删除、清空、打开文件夹，双击复制；`HistoryChanged` 事件让设置页刷新计数。
 - 实测 2026-10-20 12:14：合成 Alt+D（主人当前全屏热键）触发 → `Hook: fullscreen key vk=0x44 mods=1 pressed` → `Capture: engine=WGC 2560×1600` → `History: saved 20261020-121425-539-full-63bbee.png (5188KB)` → `QuickCapture: 完成 5188KB copied=True bypass=False history=True`；历史窗 UIA 显示「当前 1 张 / 5.1 MB」「全屏 · 10-20 12:14:25」「2560×1600 · 5.1 MB」。开关 UIA 切换会写 `saveHistory=false/true` 并立即更新状态。
+- 2026-10-20 补充：历史窗根 `Grid` 的 `PreviewKeyDown` 处理 Esc，`Loaded`/`Activated` 时把焦点放到 `HistoryGrid`（实测 12:37 合成 Esc 后窗口关闭、标题回到「设置」，有历史项时复测通过）；`AppWindow.SetIcon(Assets/app.ico)` 使标题栏图标与设置窗一致（`WM_GETICON` 取到的 48×48 图标渲染哈希相同）。
 
 ## 5. 踩坑与约定
 
-- **WinUI 3 焦点不可靠**：关键按键用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`），不要依赖 XAML 加速器。
+- **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。
 - **贴图 Esc 关闭**：由 `NativePinWindow` 自身 30ms 轮询 Esc 边沿 + `WindowFromPoint` 命中贴图（不消费按键、不抢焦点）；右键菜单/编辑模式/OCR 结果窗期间让路，OCR 关闭后先等一次抬起。**不要再改回全局钩子**——钩子会被系统摘除，表现为 Esc 随机失灵。
 - **全局热键**：四个动作都用 `RegisterHotKey`（id 1 截图 / 3 全屏 / 4 贴图 / 5 OCR），注册失败（1409 = 被占用）必须通过 `RegistrationFailed` 在设置页明确提示，不要静默失败；默认组合键不能拍脑袋选字母组合，先用 RegisterHotKey 探针确认本机没被占用（本机 Ctrl+Alt+P/O 已占用）。
 - **剪贴板**：一律走 `ClipboardService`（CLIPBRD_E_CANT_OPEN 重试）。
@@ -152,6 +153,7 @@ FullscreenBypass: 已归还原前台
 - **未打包发布必须手工补 PRI/XBF**：`WindowsPackageType=None` 时 Windows App SDK 只在 `AppxPackage=true` 才把 `IshWY.pri`（程序集名 IshWY）放进发布清单，`dotnet publish` 会漏掉它和 `.xbf`，产物启动即 `XamlParseException`。`PrtScr.App.csproj` 里的 `CopyPriAndXbfToPublish`（AfterTargets=Publish）负责补拷；改发布逻辑后务必用 `scripts/publish.ps1` 或 `--smoke` 验证。
 - **发布包不要带 PDB**：PDB 的 CodeView 会写入构建机绝对路径（含用户目录下的 `.nuget` 缓存路径），DLL 的调试目录也会保留 `obj/...pdb` 路径。`scripts/publish.ps1` 用 `-p:DebugType=None -p:DebugSymbols=false` 发布并兜底删除 `*.pdb`；发布后扫描 zip 中的 PDB、`data/`、日志与绝对路径。
 - **HistoryWindow 没有 `Loaded` 事件**：`Microsoft.UI.Xaml.Window` 本身不暴露 `Loaded`；要在构造函数里用 `((FrameworkElement)Content).Loaded += ...`，否则 `CS0103: 当前上下文中不存在名称 Loaded`。
+- **HistoryWindow 的 Esc 不能在 top-level WndProc 拦截**：WinUI 3 的键盘焦点在 `InputSiteWindowClass` 子窗（`GetGUIThreadInfo` 可确认，焦点 HWND 不是 `WinUIDesktopWin32WindowClass` 顶层窗），所以顶层 `KeyInterceptor` 收不到 Esc；用根 `Grid` 的 `PreviewKeyDown` 才能在 XAML 路由里关闭窗口，并在 `Loaded`/`Activated` 时把焦点放到 `HistoryGrid`（空列表也能聚焦），否则窗口刚打开、焦点尚未进入 XAML 树时 Esc 仍可能丢失。`KeyInterceptor` 保留作兜底。
 - **历史保存必须 best-effort**：`CaptureHistoryService` 的任何异常都只能记日志并返回 null，不能让截图/剪贴板失败；关闭 `saveHistory` 只停止新写入，不删除已有文件。
 - **改代码纪律**：字符串替换前先读文件、替换后验证命中；每轮改动后必须 `dotnet build` 0 错误再交主人。
 - **交付节奏**：构建后关掉旧实例时必须明确提示主人重新打开；验证靠主人实测 + `data\logs\app.log`。

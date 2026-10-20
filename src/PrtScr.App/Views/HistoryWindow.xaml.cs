@@ -24,6 +24,7 @@ public sealed partial class HistoryWindow : Window
     {
         InitializeComponent();
         Title = $"{AppInfo.Name} 截图历史";
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
 
         HistoryGrid.ItemsSource = _items;
 
@@ -49,7 +50,28 @@ public sealed partial class HistoryWindow : Window
             _closed = true;
             _keys.Dispose();
         };
-        ((FrameworkElement)Content).Loaded += async (_, _) => await ReloadAsync();
+        ((FrameworkElement)Content).Loaded += async (_, _) =>
+        {
+            // 让键盘焦点落在 XAML 树内，根 Grid 的 PreviewKeyDown 才能稳定收到 Esc
+            // （WinUI 3 的顶层 HWND 收不到 WM_KEYDOWN，见 docs/HANDOFF.md §5）。
+            HistoryGrid.Focus(FocusState.Programmatic);
+            await ReloadAsync();
+        };
+
+        Activated += (_, e) =>
+        {
+            if (!_closed && e.WindowActivationState != WindowActivationState.Deactivated)
+                HistoryGrid.Focus(FocusState.Programmatic);
+        };
+    }
+
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Escape)
+            return;
+
+        e.Handled = true;
+        Close();
     }
 
     /// <summary>历史被删除/清空后通知外部刷新统计。</summary>
