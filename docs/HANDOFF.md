@@ -237,6 +237,16 @@ FullscreenBypass: 已归还原前台
 - 三个 Enter 入口统一：`EscOverPinHook` 分发、`FocusSink_KeyDown`、XAML `KeyboardAccelerator` 全部改调 `ConfirmCurrentTargetAsync()`；`_confirming` 防重入。悬停日志 `Overlay: hover ...` 增加 `process=...`。
 - 验证：构建 0 错误（仅既有 CS0067 ×2）；`--smoke` 通过，日志 00:00:43 四个热键 `register=0x1`、`Capture: overlay pre-created`，00:00:46 `OnLaunched: smoke exiting`。真机验收待主人执行。
 
+### 主窗口信息架构与热键表（2026-10-21 中午）
+- 目标：把首页从一长列设置项改为「先常用操作、再分组设置」，让四个主操作与当前热键在第一屏可见。
+- 首页 2×2 操作卡片：窗口截图 / 全屏截图 / 贴图 / 文字识别，分别调用 `CaptureNow_Click`（复用 `OnHotkeyPressed`）、`FullScreen_Click`、`PastePin_Click`、`OcrClipboard_Click`；每张卡右上角是热键角标 `ScreenshotCardHotkey` / `FullCardHotkey` / `PinCardHotkey` / `OcrCardHotkey`。
+- 布局细节：角标用 `HorizontalAlignment=Right` + `VerticalAlignment=Top` 叠加在卡片内，不占 Grid 列宽；否则说明文字会被挤成省略号（窗口卡片曾只剩「滚轮选窗，回车…」）。说明统一 `MaxLines=2` + `TextTrimming=CharacterEllipsis`，窗口卡片用 `&#10;` 显式两行。
+- 历史摘要卡读取 `RefreshHistoryStatus()`，显示张数、分类规则、每类保留数；`打开历史` 走原 `OpenHistory_Click`。
+- `SetStatus()` 同时写 `HotkeyStatusText` 与首页 `HomeStatusText`，热键录制/取消/失败状态不再只在折叠区可见；`SyncHotkeyTexts()` 在构造与 `ApplyHotkey` 后把四个当前组合键同步到卡片角标。
+- 热键表：`操作 / 当前组合键 / 修改` 三列四行，录制按钮文案平时「修改」、录制中「按键…」，Esc 取消；状态行在表下方。
+- 折叠分组：截图与热键（默认展开）、截图行为（延时 / 默认模式 / 指针）、截图历史、启动与托盘、外观·自定义背景、OCR 引擎、关于。只改 `MainWindow.xaml` / `MainWindow.xaml.cs`，配置键与行为未变。
+- 验证：构建 0 错误（仅既有 CS0067 ×2）；Debug PID 9804 实际启动，PrintWindow 780×900 截图确认四张卡、历史摘要、提示行完整，窗口卡片两行说明不截断。主人 2026-10-21 12:39 验收「都没问题」。
+
 ### 贴图滚轮缩放内存（2026-10-20 晚）
 
 - 主人复测发现：整进程静止约 142 MB，但滚轮缩放贴图时会在约 120 MB ↔ 190–200 MB 间波动；标注编辑也可能摸到 200 MB。
@@ -318,4 +328,5 @@ FullscreenBypass: 已归还原前台
 - [x] 主人实测默认截图模式设置 —— 2026-10-20 深夜确认：设置 → 常规切到常规/窗口后，每次按截图热键从对应模式起步，Tab 临时切换与提示正常；`data/config.json` 的 `defaultCaptureMode` 随选择更新
 - [x] 主人实测重操作内存：移动贴图、标注、OCR 后峰值约 200 MB，停止约 5 分钟后回落到约 100 MB，属 Windows 工作集裁剪/GC，不是无界泄漏。本轮已加 `SWP_NOREDRAW`、退出标注回收 DIB、`ApplyEdit` 提前释放 `_baseScaled`、OCR 流 using 与结果清空
 - [x] 主人验收 2026-10-20 深夜历史/取景小批次（部分）：① 右键取消、③ 历史分类计数与筛选（含「早期未分类」）、④ 单张/批量另存为、⑥ 去「轻量」均通过
+- [x] 主人验收 2026-10-21 12:39 主窗口 UI 第一批：2×2 操作卡片与热键角标、历史摘要、分组折叠、紧凑热键表与录制态、首页状态提示全部通过。
 - [x] 主人验收 2026-10-21 凌晨补丁：① 窗口模式悬停/选中窗口时尺寸提示旁出现「进程 xxx.exe」，常规模式不出现；② 滚轮循环到目标窗口后直接按 `Enter`，无需单击即可截该窗口并复制/写历史（常规模式按同一矩形裁冻结帧）；③ 右键取消仍正常；④ 回车捕获改为不预先 `UpdateVisuals()`，主人反馈整体满意，重操作内存约 165 MB。构建 0 错误、`--smoke` 通过

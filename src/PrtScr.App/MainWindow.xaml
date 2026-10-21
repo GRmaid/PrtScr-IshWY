@@ -6,6 +6,26 @@
     xmlns:tb="using:H.NotifyIcon">
 
     <Grid>
+        <Grid.Resources>
+            <Style x:Key="ActionCardButtonStyle" TargetType="Button">
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                <Setter Property="MinHeight" Value="112" />
+                <Setter Property="Padding" Value="16" />
+                <Setter Property="CornerRadius" Value="12" />
+            </Style>
+            <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Margin" Value="0,4,0,0" />
+            </Style>
+            <Style x:Key="HintTextStyle" TargetType="TextBlock">
+                <Setter Property="Opacity" Value="0.62" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+        </Grid.Resources>
+
         <!-- 自定义背景层：设置里的背景图铺在最底下 -->
         <Image
             x:Name="BackgroundImage"
@@ -16,125 +36,335 @@
             <StackPanel
                 MaxWidth="760"
                 Margin="28,24,28,48"
-                Spacing="14">
+                Spacing="16">
 
-                <TextBlock Text="实践小梅IshWY" FontSize="32" FontWeight="SemiBold" />
-                <TextBlock
-                    Text="Ishmael is watching you · 分窗口截屏 · 窗口内容捕获 · 贴图 · OCR"
-                    Opacity="0.6" />
+                <StackPanel Spacing="2">
+                    <TextBlock Text="实践小梅IshWY" FontSize="32" FontWeight="SemiBold" />
+                    <TextBlock
+                        Text="Ishmael is watching you · 分窗口截屏 · 窗口内容捕获 · 贴图 · OCR"
+                        Opacity="0.6" />
+                </StackPanel>
 
-                <Expander Header="常规" IsExpanded="True" HorizontalAlignment="Stretch">
-                    <StackPanel Spacing="10" Margin="0,4">
-                        <ToggleSwitch
-                            x:Name="StartupToggle"
-                            Header="开机自动启动（登录 Windows 后静默运行到托盘）"
-                            Toggled="StartupToggle_Toggled" />
-                        <TextBlock
-                            x:Name="StartupStatusText"
-                            Opacity="0.6"
-                            TextWrapping="Wrap" />
-                        <TextBlock Text="窗口截图热键（默认 F1；取景中按 Tab 切换窗口/常规截图；支持任意组合键，F1–F12 可单独使用）" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button
-                                x:Name="ScreenshotRecordButton"
-                                Tag="screenshot"
-                                Content="点击录制组合键…"
-                                Click="HotkeyRecord_Click"
-                                KeyDown="HotkeyRecord_KeyDown" />
+                <!-- 首页：四个高频动作 + 历史概览 -->
+                <StackPanel Spacing="8">
+                    <TextBlock Text="常用操作" Style="{StaticResource SectionTitleStyle}" />
+                    <Grid RowSpacing="10" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Button
+                            x:Name="ScreenshotActionButton"
+                            Grid.Row="0"
+                            Grid.Column="0"
+                            Style="{StaticResource ActionCardButtonStyle}"
+                            Click="CaptureNow_Click">
+                            <Grid>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="窗口截图" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock
+                                        Text="抗遮挡抓窗口本体。&#10;滚轮选窗，回车截取。"
+                                        MaxWidth="230"
+                                        FontSize="12"
+                                        MaxLines="2"
+                                        TextTrimming="CharacterEllipsis"
+                                        HorizontalAlignment="Left"
+                                        Style="{StaticResource HintTextStyle}" />
+                                </StackPanel>
+                                <Border
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Padding="8,3"
+                                    CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                    <TextBlock
+                                        x:Name="ScreenshotCardHotkey"
+                                        FontFamily="Consolas"
+                                        FontSize="12" />
+                                </Border>
+                            </Grid>
+                        </Button>
+
+                        <Button
+                            Grid.Row="0"
+                            Grid.Column="1"
+                            Style="{StaticResource ActionCardButtonStyle}"
+                            Click="FullScreen_Click">
+                            <Grid>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="全屏截图" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock
+                                        Text="整张屏幕冻结后直接放进剪贴板。"
+                                        MaxWidth="230"
+                                        FontSize="12"
+                                        MaxLines="2"
+                                        TextTrimming="CharacterEllipsis"
+                                        HorizontalAlignment="Left"
+                                        Style="{StaticResource HintTextStyle}" />
+                                </StackPanel>
+                                <Border
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Padding="8,3"
+                                    CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                    <TextBlock
+                                        x:Name="FullCardHotkey"
+                                        FontFamily="Consolas"
+                                        FontSize="12" />
+                                </Border>
+                            </Grid>
+                        </Button>
+
+                        <Button
+                            Grid.Row="1"
+                            Grid.Column="0"
+                            Style="{StaticResource ActionCardButtonStyle}"
+                            Click="PastePin_Click">
+                            <Grid>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="贴图" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock
+                                        Text="把剪贴板里的图片钉在桌面上。"
+                                        MaxWidth="230"
+                                        FontSize="12"
+                                        MaxLines="2"
+                                        TextTrimming="CharacterEllipsis"
+                                        HorizontalAlignment="Left"
+                                        Style="{StaticResource HintTextStyle}" />
+                                </StackPanel>
+                                <Border
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Padding="8,3"
+                                    CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                    <TextBlock
+                                        x:Name="PinCardHotkey"
+                                        FontFamily="Consolas"
+                                        FontSize="12" />
+                                </Border>
+                            </Grid>
+                        </Button>
+
+                        <Button
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Style="{StaticResource ActionCardButtonStyle}"
+                            Click="OcrClipboard_Click">
+                            <Grid>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="文字识别" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock
+                                        Text="识别剪贴板图片里的文字。"
+                                        MaxWidth="230"
+                                        FontSize="12"
+                                        MaxLines="2"
+                                        TextTrimming="CharacterEllipsis"
+                                        HorizontalAlignment="Left"
+                                        Style="{StaticResource HintTextStyle}" />
+                                </StackPanel>
+                                <Border
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Padding="8,3"
+                                    CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                    <TextBlock
+                                        x:Name="OcrCardHotkey"
+                                        FontFamily="Consolas"
+                                        FontSize="12" />
+                                </Border>
+                            </Grid>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+
+                <Border
+                    Padding="16"
+                    CornerRadius="12"
+                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="截图历史" FontSize="16" FontWeight="SemiBold" />
                             <TextBlock
-                                x:Name="ScreenshotHotkeyText"
-                                VerticalAlignment="Center"
-                                Opacity="0.7" />
+                                x:Name="HistoryHomeSummaryText"
+                                Style="{StaticResource HintTextStyle}" />
                         </StackPanel>
+                        <Button
+                            Grid.Column="1"
+                            Content="打开历史"
+                            VerticalAlignment="Center"
+                            Click="OpenHistory_Click" />
+                    </Grid>
+                </Border>
+
+                <TextBlock
+                    x:Name="HomeStatusText"
+                    Text="提示：截图热键随时可用；取景中按 Tab 切换模式，回车截取当前窗口。"
+                    Style="{StaticResource HintTextStyle}" />
+
+                <Expander Header="截图与热键" IsExpanded="True" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="12" Margin="0,4">
+                        <TextBlock Text="快捷键" Style="{StaticResource SectionTitleStyle}" />
+                        <Border
+                            Padding="12"
+                            CornerRadius="10"
+                            Background="{ThemeResource ControlFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1">
+                            <Grid ColumnSpacing="12" RowSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="112" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="操作" FontSize="12" Opacity="0.55" />
+                                <TextBlock Grid.Column="1" Text="当前组合键" FontSize="12" Opacity="0.55" />
+                                <TextBlock Grid.Column="2" Text="修改" FontSize="12" Opacity="0.55" />
+
+                                <TextBlock Grid.Row="1" Text="窗口截图" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="ScreenshotHotkeyText"
+                                    Grid.Row="1"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="ScreenshotRecordButton"
+                                    Grid.Row="1"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="screenshot"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
+
+                                <TextBlock Grid.Row="2" Text="全屏截图" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="FullHotkeyText"
+                                    Grid.Row="2"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="FullHotkeyRecordButton"
+                                    Grid.Row="2"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="fullscreen"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
+
+                                <TextBlock Grid.Row="3" Text="贴图" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="PinHotkeyText"
+                                    Grid.Row="3"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="PinHotkeyRecordButton"
+                                    Grid.Row="3"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="pin"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
+
+                                <TextBlock Grid.Row="4" Text="文字识别" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="OcrHotkeyText"
+                                    Grid.Row="4"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="OcrHotkeyRecordButton"
+                                    Grid.Row="4"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="ocr"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
+                            </Grid>
+                        </Border>
                         <TextBlock
                             x:Name="HotkeyStatusText"
-                            Opacity="0.6"
-                            TextWrapping="Wrap" />
-                        <TextBlock Text="全屏快速截图热键（按下即把当前屏幕整张复制到剪贴板）" Margin="0,6,0,0" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button
-                                x:Name="FullHotkeyRecordButton"
-                                Tag="fullscreen"
-                                Content="点击录制组合键…"
-                                Click="HotkeyRecord_Click"
-                                KeyDown="HotkeyRecord_KeyDown" />
-                            <TextBlock
-                                x:Name="FullHotkeyText"
-                                VerticalAlignment="Center"
-                                Opacity="0.7" />
-                        </StackPanel>
-                        <TextBlock Text="贴图热键（从剪贴板取图钉在桌面；默认 Ctrl+Alt+V）" Margin="0,6,0,0" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button
-                                x:Name="PinHotkeyRecordButton"
-                                Tag="pin"
-                                Content="点击录制组合键…"
-                                Click="HotkeyRecord_Click"
-                                KeyDown="HotkeyRecord_KeyDown" />
-                            <TextBlock
-                                x:Name="PinHotkeyText"
-                                VerticalAlignment="Center"
-                                Opacity="0.7" />
-                        </StackPanel>
-                        <TextBlock Text="OCR 热键（识别剪贴板图片里的文字；默认 Ctrl+Alt+S）" Margin="0,6,0,0" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button
-                                x:Name="OcrHotkeyRecordButton"
-                                Tag="ocr"
-                                Content="点击录制组合键…"
-                                Click="HotkeyRecord_Click"
-                                KeyDown="HotkeyRecord_KeyDown" />
-                            <TextBlock
-                                x:Name="OcrHotkeyText"
-                                VerticalAlignment="Center"
-                                Opacity="0.7" />
-                        </StackPanel>
+                            Style="{StaticResource HintTextStyle}" />
                         <TextBlock
-                            Text="延时截图（按下截图热键后先等待，再冻结画面；方便打开右键菜单、悬停提示、下拉框）"
-                            Margin="0,6,0,0"
-                            TextWrapping="Wrap" />
-                        <ComboBox
-                            x:Name="DelayCombo"
-                            Width="150"
-                            HorizontalAlignment="Left"
-                            SelectionChanged="DelayCombo_SelectionChanged">
-                            <ComboBoxItem Content="不延时" Tag="0" />
-                            <ComboBoxItem Content="3 秒" Tag="3" />
-                            <ComboBoxItem Content="5 秒" Tag="5" />
-                            <ComboBoxItem Content="10 秒" Tag="10" />
-                        </ComboBox>
+                            Text="取景中按 Tab 在窗口截图与常规截图之间切换；Esc 或鼠标右键取消；滚轮切换窗口，回车直接截取当前窗口。"
+                            Style="{StaticResource HintTextStyle}" />
+
+                        <TextBlock Text="截图行为" Style="{StaticResource SectionTitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="24">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="延时截图" />
+                                <ComboBox
+                                    x:Name="DelayCombo"
+                                    Width="170"
+                                    SelectionChanged="DelayCombo_SelectionChanged">
+                                    <ComboBoxItem Content="不延时" Tag="0" />
+                                    <ComboBoxItem Content="3 秒" Tag="3" />
+                                    <ComboBoxItem Content="5 秒" Tag="5" />
+                                    <ComboBoxItem Content="10 秒" Tag="10" />
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="默认截图模式" />
+                                <ComboBox
+                                    x:Name="DefaultModeCombo"
+                                    Width="390"
+                                    SelectionChanged="DefaultModeCombo_SelectionChanged">
+                                    <ComboBoxItem Content="窗口截图（抗遮挡，抓窗口本体）" Tag="window" />
+                                    <ComboBoxItem Content="常规截图（所见即所得，可抓菜单/光标）" Tag="normal" />
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
                         <ToggleSwitch
                             x:Name="CaptureCursorToggle"
                             Header="截图包含鼠标指针（F1 取景和全屏截图都生效）"
                             Toggled="CaptureCursorToggle_Toggled" />
-                        <TextBlock
-                            Text="默认截图模式（每次按截图热键从该模式起步；取景中按 Tab 临时切换，切换会清除已有选区）"
-                            Margin="0,6,0,0"
-                            TextWrapping="Wrap" />
-                        <ComboBox
-                            x:Name="DefaultModeCombo"
-                            Width="360"
-                            HorizontalAlignment="Left"
-                            SelectionChanged="DefaultModeCombo_SelectionChanged">
-                            <ComboBoxItem Content="窗口截图（抗遮挡，抓窗口本体；适合被别的窗口盖住时）" Tag="window" />
-                            <ComboBoxItem Content="常规截图（所见即所得，能抓菜单/悬停/光标）" Tag="normal" />
-                        </ComboBox>
-                        <TextBlock
-                            x:Name="CaptureModeHintText"
-                            Opacity="0.6"
-                            TextWrapping="Wrap" />
-                        <TextBlock
-                            x:Name="CaptureOptionsText"
-                            Opacity="0.6"
-                            TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="从剪贴板贴图" Click="PastePin_Click" />
-                            <Button Content="从剪贴板识别文字" Click="OcrClipboard_Click" />
-                        </StackPanel>
+                        <TextBlock x:Name="CaptureModeHintText" Style="{StaticResource HintTextStyle}" />
+                        <TextBlock x:Name="CaptureOptionsText" Style="{StaticResource HintTextStyle}" />
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="截图历史" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="10" Margin="0,4">
                         <ToggleSwitch
                             x:Name="HistoryToggle"
-                            Header="保存最近截图到本机（data\history，按模式 / 进程分类）"
-                            Margin="0,4,0,0"
+                            Header="保存截图到本机（data\history，按模式 / 进程分类）"
                             Toggled="HistoryToggle_Toggled" />
                         <TextBlock
                             Text="每个分类保留张数（窗口截图按进程各算一类；常规截图、早期未分类各算一类）"
@@ -148,18 +378,24 @@
                             SmallChange="1"
                             SpinButtonPlacementMode="Compact"
                             ValueChanged="HistoryLimit_ValueChanged" />
-                        <TextBlock
-                            x:Name="HistoryStatusText"
-                            Opacity="0.6"
-                            TextWrapping="Wrap" />
+                        <TextBlock x:Name="HistoryStatusText" Style="{StaticResource HintTextStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="打开截图历史" Click="OpenHistory_Click" />
                             <Button Content="清空历史" Click="ClearHistory_Click" />
                         </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="启动与托盘" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="10" Margin="0,4">
+                        <ToggleSwitch
+                            x:Name="StartupToggle"
+                            Header="开机自动启动（登录 Windows 后静默运行到托盘）"
+                            Toggled="StartupToggle_Toggled" />
+                        <TextBlock x:Name="StartupStatusText" Style="{StaticResource HintTextStyle}" />
                         <TextBlock
-                            Text="提示：取景中框选后按 O 可直接识别文字；贴图右键菜单也有「识别文字」；托盘右键菜单可识别剪贴板图片。"
-                            Opacity="0.6"
-                            TextWrapping="Wrap" />
+                            Text="关闭窗口只会收进托盘；要彻底退出，请用托盘右键菜单里的「退出」。"
+                            Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
                 </Expander>
 

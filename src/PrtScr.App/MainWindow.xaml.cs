@@ -58,6 +58,7 @@ public sealed partial class MainWindow : Window
         InitHotkey();
         InitFullHotkey();
         InitPinOcrHotkeys();
+        SyncHotkeyTexts();
         AboutText.Text = $"{AppInfo.Name} v{typeof(App).Assembly.GetName().Version} · {AppInfo.Tagline} · 分窗口截屏截图工具";
     }
 
@@ -132,12 +133,24 @@ public sealed partial class MainWindow : Window
         if (!App.Config.Current.SaveHistory)
         {
             HistoryStatusText.Text = "已关闭：截图只进剪贴板，不写入本机历史。";
+            HistoryHomeSummaryText.Text = "保存已关闭：截图只进剪贴板，不写入本机历史。";
             return;
         }
 
         var count = CaptureHistoryService.Instance.GetItems().Count;
         var limit = CaptureHistoryService.PerCategoryLimit;
         HistoryStatusText.Text = $"已开启：窗口截图按进程、常规/早期按模式分类，每类保留最近 {limit} 张（data\\history，当前共 {count} 张）。";
+        HistoryHomeSummaryText.Text = count == 0
+            ? "还没有截图；按截图热键后会自动出现在这里。"
+            : $"{count} 张 · 窗口截图按进程分栏 · 每类保留 {limit} 张";
+    }
+
+    /// <summary>设置页与首页共用一条可读状态，避免动作反馈只出现在折叠区里。</summary>
+    private void SetStatus(string message)
+    {
+        HotkeyStatusText.Text = message;
+        if (HomeStatusText is not null)
+            HomeStatusText.Text = message;
     }
 
     private void HistoryLimit_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -398,7 +411,7 @@ public sealed partial class MainWindow : Window
         {
             var created = await Services.PinService.PasteFromClipboardAsync();
             if (!created)
-                HotkeyStatusText.Text = "剪贴板里没有图片可贴（先截一张图或复制一张图片）";
+                SetStatus("剪贴板里没有图片可贴（先截一张图或复制一张图片）");
         }
         catch (Exception ex)
         {
@@ -413,7 +426,7 @@ public sealed partial class MainWindow : Window
             var bytes = await Services.PinService.ReadClipboardImageBytesAsync();
             if (bytes is null)
             {
-                HotkeyStatusText.Text = "剪贴板里没有图片可供识别";
+                SetStatus("剪贴板里没有图片可供识别");
                 return;
             }
             await Services.OcrUiService.RecognizeAndShowAsync(bytes,
@@ -439,7 +452,7 @@ public sealed partial class MainWindow : Window
             if (!created)
             {
                 var message = "剪贴板里没有图片可贴（先截一张图或复制一张图片）";
-                HotkeyStatusText.Text = message;
+                SetStatus(message);
                 TrayIcon.ShowNotification($"{AppInfo.Name} 贴图", message);
             }
         }
@@ -467,7 +480,7 @@ public sealed partial class MainWindow : Window
             if (bytes is null)
             {
                 var message = "剪贴板里没有图片可供识别";
-                HotkeyStatusText.Text = message;
+                SetStatus(message);
                 TrayIcon.ShowNotification($"{AppInfo.Name} OCR", message);
                 return;
             }
@@ -501,7 +514,7 @@ public sealed partial class MainWindow : Window
         // 任意一个热键被占用时，在设置页给出可读提示（日志同时留痕）
         _hotkey.RegistrationFailed += message => DispatcherQueue.TryEnqueue(() =>
         {
-            HotkeyStatusText.Text = message;
+            SetStatus(message);
             App.Log($"Hotkey: {message}");
         });
 
@@ -596,14 +609,14 @@ public sealed partial class MainWindow : Window
 
             if (result.Png is null)
             {
-                HotkeyStatusText.Text = "全屏截图失败";
+                SetStatus("全屏截图失败");
                 App.Log($"QuickCapture: 失败，无图像 (bypass={bypass.Activated})");
                 return;
             }
 
             if (result.LikelyBlack)
             {
-                HotkeyStatusText.Text = "当前画面像是独占全屏游戏，Windows 无法截取";
+                SetStatus("当前画面像是独占全屏游戏，Windows 无法截取");
                 App.Log($"QuickCapture: 两次都是黑屏 (bypass={bypass.Activated})");
                 TrayIcon.ShowNotification($"{AppInfo.Name} 全屏截图",
                     "当前画面疑似独占全屏（游戏绕过了系统合成器），无法截屏。请把游戏改为“无边框窗口”模式再试。");
@@ -616,7 +629,7 @@ public sealed partial class MainWindow : Window
             await Task.WhenAll(copyTask, historyTask);
 
             var ok = copyTask.Result;
-            HotkeyStatusText.Text = ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）";
+            SetStatus(ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）");
             App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={bypass.Activated} history={historyTask.Result is not null}");
             if (historyTask.Result is { } savedPath)
                 App.Log($"QuickCapture: history saved {savedPath}");
@@ -632,6 +645,8 @@ public sealed partial class MainWindow : Window
     }
 
     private void FullScreen_Click(object sender, RoutedEventArgs e) => OnFullScreenPressed();
+
+    private void CaptureNow_Click(object sender, RoutedEventArgs e) => OnHotkeyPressed();
 
     private async void DelayCapture_Click(object sender, RoutedEventArgs e)
     {
@@ -665,7 +680,16 @@ public sealed partial class MainWindow : Window
 
         _recordingAction = action;
         _recordingButton = button;
-        button.Content = "请按下组合键…（Esc 取消）";
+        button.Content = "按键…";
+        var label = action switch
+        {
+            "screenshot" => "窗口截图",
+            "fullscreen" => "全屏截图",
+            "pin" => "贴图",
+            "ocr" => "文字识别",
+            _ => action,
+        };
+        SetStatus($"正在录制「{label}」：请按下组合键，Esc 取消。");
         _ = button.Focus(FocusState.Programmatic);
     }
 
@@ -682,6 +706,7 @@ public sealed partial class MainWindow : Window
         if (vk == 0x1B)
         {
             ResetHotkeyRecording(button);
+            SetStatus("已取消录制快捷键。");
             return;
         }
 
@@ -695,13 +720,13 @@ public sealed partial class MainWindow : Window
         var isFunctionKey = vk is >= 0x70 and <= 0x7B;
         if (mods == 0 && !isFunctionKey)
         {
-            HotkeyStatusText.Text = "请按住 Ctrl / Alt / Shift / Win 之一（F1–F12 可单独使用）";
+            SetStatus("请按住 Ctrl / Alt / Shift / Win 之一（F1–F12 可单独使用）");
             return;
         }
 
         if (TryFindHotkeyConflict(_recordingAction, vk, mods, out var other))
         {
-            HotkeyStatusText.Text = $"这个组合键已经给了「{other}」，换一个";
+            SetStatus($"这个组合键已经给了「{other}」，换一个");
             ResetHotkeyRecording(button);
             return;
         }
@@ -713,9 +738,18 @@ public sealed partial class MainWindow : Window
 
     private void ResetHotkeyRecording(Button button)
     {
-        button.Content = "点击录制组合键…";
+        button.Content = "修改";
         _recordingAction = null;
         _recordingButton = null;
+    }
+
+    /// <summary>首页四张动作卡片与设置表格共用同一份热键文案。</summary>
+    private void SyncHotkeyTexts()
+    {
+        ScreenshotCardHotkey.Text = ScreenshotHotkeyText.Text;
+        FullCardHotkey.Text = FullHotkeyText.Text;
+        PinCardHotkey.Text = PinHotkeyText.Text;
+        OcrCardHotkey.Text = OcrHotkeyText.Text;
     }
 
     private void ApplyHotkey(string action, int vk, int mods)
@@ -731,7 +765,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 _hotkey.Restart(vk, mods);
                 ScreenshotHotkeyText.Text = text;
-                HotkeyStatusText.Text = $"窗口截图热键已设为 {text}";
+                SetStatus($"窗口截图热键已设为 {text}");
                 break;
 
             case "fullscreen":
@@ -741,7 +775,7 @@ public sealed partial class MainWindow : Window
                 Services.EscOverPinHook.SetFullScreenKey(vk, mods);
                 _hotkey.SetFullscreenKey(vk, mods);
                 FullHotkeyText.Text = text;
-                HotkeyStatusText.Text = $"全屏截图热键已设为 {text}";
+                SetStatus($"全屏截图热键已设为 {text}");
                 break;
 
             case "pin":
@@ -750,7 +784,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 _hotkey.SetPinKey(vk, mods);
                 PinHotkeyText.Text = text;
-                HotkeyStatusText.Text = $"贴图热键已设为 {text}";
+                SetStatus($"贴图热键已设为 {text}");
                 break;
 
             case "ocr":
@@ -759,10 +793,11 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 _hotkey.SetOcrKey(vk, mods);
                 OcrHotkeyText.Text = text;
-                HotkeyStatusText.Text = $"OCR 热键已设为 {text}";
+                SetStatus($"OCR 热键已设为 {text}");
                 break;
         }
 
+        SyncHotkeyTexts();
         App.Log($"Hotkey: 更新 {action} -> {text}");
     }
 
@@ -865,18 +900,18 @@ public sealed partial class MainWindow : Window
             for (var remaining = seconds; remaining > 0; remaining--)
             {
                 TrayIcon.ToolTipText = $"{AppInfo.Name} — {remaining} 秒后截图";
-                HotkeyStatusText.Text = $"延时截图：{remaining} 秒后冻结画面（再按一次截图热键可取消）";
+                SetStatus($"延时截图：{remaining} 秒后冻结画面（再按一次截图热键可取消）");
                 await Task.Delay(1000, cts.Token);
             }
 
             App.Log("Delay: capture now");
-            HotkeyStatusText.Text = "延时结束，正在冻结画面…";
+            SetStatus("延时结束，正在冻结画面…");
             await Services.CaptureService.Instance.StartCaptureAsync();
         }
         catch (OperationCanceledException)
         {
             App.Log("Delay: canceled");
-            HotkeyStatusText.Text = "已取消延时截图";
+            SetStatus("已取消延时截图");
         }
         catch (Exception ex)
         {
