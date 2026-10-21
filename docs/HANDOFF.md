@@ -27,7 +27,7 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 | M1 | 冻屏取景：Pointer 拖拽框选、窗口吸附（青色）/悬浮类橙色、滚轮循环遮挡窗口、**Tab 在窗口截图/常规截图间切换**、全局 Esc、回车/双击复制、窗口局部截图 |
 | M2 | WGC 窗口捕获（PrintWindow 优先，失败回退 WGC 窗口条目）+ D3D 设备缓存 |
 | M3 | 贴图：**原生分层窗口** `NativePinWindow`（真透明 per-pixel alpha）、拖动、滚轮缩放（占位框 + 停手高清精修）、右键菜单、Esc/双击关闭、任务栏置顶防拉锯 |
-| M4 | **原位标注**：贴图右键「标注」，窗口内自绘图标工具栏（矩形/箭头/画笔/文字/马赛克/序号 + 颜色 + HSV 取色 + 撤销/清空/完成）、原生 IME 文字输入、完成=烘焙+更新贴图+复制 |
+| M4 | **原位标注**：贴图右键「标注」，窗口内自绘图标工具栏（矩形/箭头/画笔/文字/马赛克/序号 + 颜色 + HSV 取色 + 撤销/清空/完成）、按宽度自适应的分组工具栏、原生 IME 文字输入与 10–96 字号、完成=烘焙+更新贴图+复制 |
 | M5 | OCR：取景中按 `O`、贴图右键「识别文字」、托盘/设置「从剪贴板识别文字」；Windows OCR 优先（清理中文字间空格），Umi-OCR 可选（1224 端口，多端点探测 + 双 API 兼容）；结果窗可编辑复制，Esc 关闭 |
 | ★ | 全屏快速截图：默认 F2（可录制组合键）、静默进剪贴板、剪贴板写入 6 次重试 |
 | ★ | 窗口局部截图：窗口内拖框，从未遮挡窗口本体裁剪，OCR 同样适用 |
@@ -36,7 +36,7 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 | ★ | 常规截图模式：取景中 Tab 从窗口重建切到「按冻结画面所见即所得」，右键菜单/悬停提示/下拉框/指针都能截到；窗口模式仍保留抗遮挡 |
 | ★ | 放大取色器：跟随鼠标 19×19 放大 + 十字准星 + HEX/RGB；无选区 Ctrl+C 复制色值，有选区仍复制截图 |
 | ★ | 高分辨率应用图标：`tools/gen_icon.py` 以 256×256 为基底生成 16–256 共 10 档 ICO |
-| ★ | 另存为：取景器 `Ctrl+S`/「保存」、历史「另存为」、贴图右键「另存为…」、标注工具栏「保存」；取景器保存后仍复制并写历史 |
+| ★ | 另存为：取景器 `Ctrl+S`/「保存」、历史「另存为」、贴图右键「另存为…」、标注工具栏「另存」；取景器保存后仍复制并写历史 |
 | ★ | 延时截图与鼠标指针：设置 → 常规可选 0/3/5/10 秒，等待中再按截图热键取消；托盘有「延时截图」「取消延时截图」；可让 F1 与全屏截图包含当前指针 |
 
 ## 3. 关键文件
@@ -59,7 +59,7 @@ src/PrtScr.App/
   Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService.PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板）
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部；`CaptureMode`（Window/Normal，Tab 切换，起始模式读 `defaultCaptureMode`）；窗口预高亮/单击选窗两种模式共用；指针事件挂在根 `Root`；选区右上角「保存」/`Ctrl+S` 另存为，保存后仍复制并写历史；`Ctrl+C`（无选区）复制放大镜色值；19×19 取色器复用 WriteableBitmap 与 byte 缓冲
   Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
-  Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键「另存为…」，标注工具栏「保存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；标注中键/右键拖动平移；拖动加 SWP_NOREDRAW，退出标注回收 DIB）
+  Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键「另存为…」，标注工具栏「完成」= 烘焙+复制、「另存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；标注中键/右键拖动平移；拖动加 SWP_NOREDRAW，退出标注回收 DIB；工具栏按宽度分两排并在文字工具下显示字号步进器；窗口类挂 IDC_ARROW 光标，文字输入框按图片原点定位、输入中可用滚轮调字号）
   Views/AnnotationWindow.xaml(.cs)      旧独立标注窗（已不用于贴图，保留）
   Views/OcrResultWindow.xaml(.cs)   OCR 结果窗（关闭时清空文本，释放大段 OCR 结果）
 src/PrtScr.Capture/
@@ -256,6 +256,15 @@ FullscreenBypass: 已归还原前台
 - 行为不变：Enter / O / Ctrl+S / 右键 / Esc 仍走原钩子与分发，操作条只是可见入口；`Capture_Click` 调 `ConfirmAsync`，`Ocr_Click` 只对有选区时识别。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067 ×2）；`--smoke` 通过（四个热键 `register=0x1`、`Capture: overlay pre-created`、`OnLaunched: smoke exiting`）。主人 2026-10-21 13:16 验收「完全没问题」；此前七项布局检查已通过。
 
+### 贴图标注工具栏、文字输入与光标（2026-10-21 下午）
+- 工具栏重排：旧实现用一条 `ToolbarOrder` 自动换行，窄贴图会叠出三四行并把分层窗口撑高。现在 `BuildToolbarLayout()` 先试「文本动作」再三档字号（正常 30/4/8/28/18/8/42、紧凑 26/3/6/25/14/6/38、极紧凑 22/2/5/22/12/4/34，均乘 DPI），工具与颜色保持一组，撤销/清空/取消/完成/另存固定单独一排；动作仍放不下才退到图标按钮。绘制与扩窗共用同一份布局，不再出现换行规则错位。
+- 工具栏视觉：深色底 #EE242424，活动工具/完成用圆角强调色，色块白边 + 选中环；动作条右侧显示当前工具、颜色和快捷键，空间不足逐级缩短。自定义调色盘颜色不再误高亮黑色快速色（`_colorArgbColorId()` 遍历 `QuickColors`，找不到返回 -1）。
+- 快捷键：标注中 `Enter` 完成、`Ctrl+S` 另存、`Ctrl+Z` 撤销、`Esc` 取消；`ApplyEdit()` 用 `_applyingEdit` 防重复提交。
+- 文字字号：`_textSize` 默认 18，范围 10–96、步长 2；选中文字工具后动作条右侧出现「− 字号 N +」，点击只改字号、不销毁正在输入的 `EDIT`；输入框内滚轮（`KeyInterceptor` 转发 `WM_MOUSEWHEEL`）和贴图上滚轮都可调。`CommitTextEditor()` 存 `_textSize / EditScale`，最终烘焙字号与预览一致。
+- 输入框位置：`BeginTextEditor()` 原来用 `_winY + y`，但 `y` 是图片局部坐标；工具栏在顶部时 `_winY` 比图片原点高一个工具栏高度，输入框会整体上移。改用 `_imgX/_imgY + 图片局部坐标` 后，输入框左上角贴住鼠标点击点，最终标注位置不变。
+- 光标消失：贴图窗口类 `WNDCLASSW` 没有设置 `hCursor`，`DefWindowProc` 在 `WM_SETCURSOR` 时会把光标隐藏，表现为鼠标停在贴图上“被盖住”。`RegisterClassOnce()` 现在用 `LoadCursorW(0, IDC_ARROW)` 设置箭头光标；文字 `EDIT` 仍使用系统类自带的 I 型光标。CsWin32 的 `NativeMethods.txt` 不生成 `LoadCursor`/`LoadCursorW`（试过会 CS0117），因此用 `[DllImport("user32.dll", EntryPoint = "LoadCursorW")]`。
+- 验证：构建 0 错误（仅既有 CS0067 ×2），`--smoke` 通过；Debug PID 42244 由主人实测：输入框不再上下偏移、字号按钮/滚轮可用、最终位置与字号正确、光标不再消失。主人 2026-10-21 13:46 验收「完美通过」。
+
 ### 贴图滚轮缩放内存（2026-10-20 晚）
 
 - 主人复测发现：整进程静止约 142 MB，但滚轮缩放贴图时会在约 120 MB ↔ 190–200 MB 间波动；标注编辑也可能摸到 200 MB。
@@ -308,6 +317,9 @@ FullscreenBypass: 已归还原前台
 - **取色器不要逐像素 `GetPixel`**：19×19 用 `LockBits` 一次拷进复用缓冲；`WriteableBitmap.PixelBuffer.AsStream()` 每次写前 `Position=0`，否则第二次开始写偏。`_loupePixels/_loupeSample` 与 `WriteableBitmap` 都常驻复用，不要跟随鼠标每帧 new。
 - **多尺寸 ICO 的基底必须够大**：Pillow 的 `save(format='ICO', sizes=[...])` 只会从当前图缩出不超过基底尺寸的档位；用 16×16 当基底再传 10 个 sizes，最终只得到 16×16。先裁方图并 resize 到 256×256，再生成全部尺寸。
 - **鼠标指针只合成一次**：WGC 采集已显式关闭指针捕获，不要再打开，否则 WGC 与 GDI 兜底会出现双指针；`GetIconInfo` 返回的 `hbmMask`/`hbmColor` 必须 DeleteObject，`GetHdc` 必须 `ReleaseHdc`。
+- **自绘窗口类必须设置 `hCursor`**：`WNDCLASSW.hCursor` 为 NULL 时，`DefWindowProc` 处理 `WM_SETCURSOR` 会把光标隐藏；贴图窗口曾因此出现“鼠标停在贴图上就消失/像被盖住”。用 `LoadCursorW(0, IDC_ARROW)` 设置箭头；文字 `EDIT` 是独立系统窗口，仍用自带 I 型光标。CsWin32 的 `NativeMethods.txt` 不生成 `LoadCursor`/`LoadCursorW`（会 CS0117），这类小 API 用 `DllImport` 更省事。
+- **文字输入框按图片原点定位**：`BeginTextEditor` 收到的是图片局部坐标，必须用 `_imgX/_imgY + 局部坐标` 换算屏幕位置；用 `_winY + y` 会在工具栏位于顶部时整体上移一个工具栏高度。最终标注仍记图片坐标，所以“输入框偏了但最终位置对”正是这个坐标系混用的特征。
+- **工具栏布局与扩窗共用一套来源**：`BuildToolbarLayout()` 同时决定 `ComputeToolbarHeight()` 和实际绘制；不要另写一套换行规则，否则扩窗高度与画出来的工具栏会错位。字号步进器放在动作行右侧，不参与行高计算，避免切换文字工具时窗口突然变高。
 - **改代码纪律**：字符串替换前先读文件、替换后验证命中；每轮改动后必须 `dotnet build` 0 错误再交主人。
 - **交付节奏**：构建后关掉旧实例时必须明确提示主人重新打开；验证靠主人实测 + `data\logs\app.log`。
 
@@ -339,4 +351,5 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-20 深夜历史/取景小批次（部分）：① 右键取消、③ 历史分类计数与筛选（含「早期未分类」）、④ 单张/批量另存为、⑥ 去「轻量」均通过
 - [x] 主人验收 2026-10-21 12:39 主窗口 UI 第一批：2×2 操作卡片与热键角标、历史摘要、分组折叠、紧凑热键表与录制态、首页状态提示全部通过。
 - [x] 主人验收 2026-10-21 13:16 取景器 HUD：底部常驻模式/快捷键提示、选区外侧「截图 / 识别 / 保存」操作条、尺寸与进程提示纯数据化、取色器与 toast 避让 HUD 全部通过；顶部模式徽标已移除，Tab 与模式名共用一个蓝框且无灰色键帽。
+- [x] 主人验收 2026-10-21 13:46 贴图标注工具栏 + 文字输入 + 光标：分组两排/窄图降级、撤销/清空禁用态、当前工具/颜色/快捷键提示、Enter 完成与 Ctrl+S 另存均通过；文字输入框贴合点击处、字号按钮/滚轮可调、最终位置与字号正确；鼠标指针不再被贴图窗口隐藏。
 - [x] 主人验收 2026-10-21 凌晨补丁：① 窗口模式悬停/选中窗口时尺寸提示旁出现「进程 xxx.exe」，常规模式不出现；② 滚轮循环到目标窗口后直接按 `Enter`，无需单击即可截该窗口并复制/写历史（常规模式按同一矩形裁冻结帧）；③ 右键取消仍正常；④ 回车捕获改为不预先 `UpdateVisuals()`，主人反馈整体满意，重操作内存约 165 MB。构建 0 错误、`--smoke` 通过

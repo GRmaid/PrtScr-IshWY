@@ -393,6 +393,9 @@ public sealed unsafe partial class NativePinWindow
         }
     }
 
+    [DllImport("user32.dll", EntryPoint = "LoadCursorW")]
+    private static extern nint LoadCursor(nint hInstance, nint lpCursorName);
+
     private static void RegisterClassOnce()
     {
         lock (ClassLock)
@@ -405,6 +408,10 @@ public sealed unsafe partial class NativePinWindow
                 style = (WNDCLASS_STYLES)WM_CLASS_STYLE,
                 lpfnWndProc = &WndProc,
                 hInstance = _hInstance = new HINSTANCE(PInvoke.GetModuleHandle(default).DangerousGetHandle()),
+                // 必须给窗口类一个光标：hCursor 为 NULL 时 DefWindowProc 在 WM_SETCURSOR
+                // 会把光标隐藏，表现为鼠标停在贴图上就“消失/被贴图盖住”。
+                // 文字编辑框是独立 EDIT 窗口，自带 I 型光标，不受这里影响。
+                hCursor = new HCURSOR(LoadCursor(0, 32512 /* IDC_ARROW */)),
             };
 
             unsafe
@@ -473,6 +480,15 @@ public sealed unsafe partial class NativePinWindow
                 case WM_KEYDOWN when self._editMode && (int)wParam.Value == 0x5A
                     && (GetKeyState(0x11) & 0x8000) != 0:
                     self.UndoEdit();
+                    return default;
+
+                case WM_KEYDOWN when self._editMode && (int)wParam.Value == 0x0D:
+                    self.ApplyEdit();
+                    return default;
+
+                case WM_KEYDOWN when self._editMode && (int)wParam.Value == 0x53
+                    && (GetKeyState(0x11) & 0x8000) != 0:
+                    self.ApplyEdit(saveAs: true);
                     return default;
 
                 case WM_LBUTTONDOWN:
@@ -609,8 +625,15 @@ public sealed unsafe partial class NativePinWindow
 
     private void OnWheel(int delta)
     {
-        if (delta == 0 || _editMode)
+        if (delta == 0)
             return;
+        if (_editMode)
+        {
+            // 标注模式下滚轮不缩放贴图；文字工具时用来调字号，和输入框里的滚轮一致。
+            if (_toolId == 3)
+                AdjustTextSize(delta > 0 ? TextSizeStep : -TextSizeStep);
+            return;
+        }
 
         var factor = delta > 0 ? 1.1 : 1 / 1.1;
         var maxZoom = Math.Min(8, Math.Min(

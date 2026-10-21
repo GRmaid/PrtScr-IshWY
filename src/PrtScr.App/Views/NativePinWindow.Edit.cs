@@ -16,7 +16,46 @@ namespace PrtScr.App.Views;
 public sealed unsafe partial class NativePinWindow
 {
     private static readonly string[] ToolLabels = ["矩形", "箭头", "画笔", "文字", "马赛克", "序号"];
-    private static readonly int[] ToolbarOrder = [0, 1, 2, 3, 4, 5, 20, 21, 22, 24, 23, 15];
+    private static readonly uint[] QuickColors =
+    [
+        0xFFFF3B30, 0xFFFFCC00, 0xFF34C759, 0xFF007AFF, 0xFF000000,
+    ];
+
+    private const int TextSizeMin = 10;
+    private const int TextSizeMax = 96;
+    private const int TextSizeStep = 2;
+    private const uint WM_SETFONT = 0x0030;
+
+    private enum ToolbarItemKind
+    {
+        Tool,
+        Swatch,
+        Palette,
+        Command,
+        Separator,
+    }
+
+    private readonly record struct ToolbarItem(int Id, RectangleF Rect, ToolbarItemKind Kind);
+
+    private readonly record struct ToolbarMetrics(
+        float Button,
+        float Gap,
+        float Pad,
+        float ItemHeight,
+        float Swatch,
+        float RowGap,
+        float TextButtonWidth,
+        float SeparatorWidth);
+
+    private sealed class ToolbarLayout
+    {
+        public ToolbarMetrics Metrics;
+        public float Height;
+        public float ActionY;
+        public float ActionRight;
+        public bool TextActions;
+        public List<ToolbarItem> Items = new();
+    }
 
     private volatile bool _editMode;
     private readonly List<Annotation> _annotations = new();
@@ -24,9 +63,11 @@ public sealed unsafe partial class NativePinWindow
     private int _toolId;
     private uint _colorArgb = 0xFFFF3B30;
     private int _numberCounter;
+    private int _textSize = 18;
     private Bitmap? _baseScaled;
     private readonly List<(int Id, Rectangle Rect)> _toolbarButtons = new();
     private float _toolbarHeight;
+    private bool _applyingEdit;
     private bool _editDragging;
     private bool _editPanning;
     private bool _panMoved;
@@ -34,6 +75,9 @@ public sealed unsafe partial class NativePinWindow
     private int _panStartWinX;
     private int _panStartWinY;
     private nint _editControl;
+    private nint _editFont;
+    private int _editLocalX;
+    private int _editLocalY;
     private PrtScr.App.Services.KeyInterceptor? _editKeys;
     private PointD _editTextPosition;
     private double _dpiScale = 1;
@@ -57,6 +101,12 @@ public sealed unsafe partial class NativePinWindow
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(nint hObject);
 
     private double EditScale => _winW / (double)_pixelWidth;
 
@@ -158,35 +208,159 @@ public sealed unsafe partial class NativePinWindow
         App.Log($"Pin: edit mode off (apply={apply})");
     }
 
-    /// <summary>按与 DrawToolbar 相同的换行规则预算工具栏高度（用于扩窗）。</summary>
-    private float ComputeToolbarHeight()
-    {
-        var scale = (float)_dpiScale;
-        var button = 30 * scale;
-        var gap = 4 * scale;
-        var pad = 6 * scale;
-        var itemHeight = 28 * scale;
-        var rowHeight = itemHeight + gap;
-        var swatch = 18 * scale;
-        var maxX = _winW - pad;
+    private float ComputeToolbarHeight() => MathF.Ceiling(BuildToolbarLayout(_winW).Height);
 
-        float x = pad, y = pad;
-        void Place(float width)
+    /// <summary>
+    /// 工具栏布局只有一套来源：扩窗预算和实际绘制都调用这里，避免两套换行规则错位。
+    /// 正常宽度是「工具 + 颜色」一排、「撤销/清空 | 取消/完成/另存」一排；
+    /// 窄图依次降到紧凑/极紧凑字号，工具与颜色最多占三排，动作始终单独一排。
+    /// </summary>
+    private ToolbarLayout BuildToolbarLayout(float width)
+    {
+        var s = (float)_dpiScale;
+        var candidates = new[]
         {
-            if (x + width > maxX && x > pad)
-            {
-                x = pad;
-                y += rowHeight;
-            }
-            x += width + gap;
+            new ToolbarMetrics(30 * s, 4 * s, 8 * s, 28 * s, 18 * s, 8 * s, 42 * s, MathF.Max(1, s)),
+            new ToolbarMetrics(26 * s, 3 * s, 6 * s, 25 * s, 14 * s, 6 * s, 38 * s, MathF.Max(1, s)),
+            new ToolbarMetrics(22 * s, 2 * s, 5 * s, 22 * s, 12 * s, 4 * s, 34 * s, MathF.Max(1, s)),
+        };
+
+        foreach (var metrics in candidates)
+        {
+            var text = TryBuildToolbar(width, metrics, textActions: true, maxToolRows: 3, allowOverflow: false);
+            if (text is not null)
+                return text;
+
+            var icons = TryBuildToolbar(width, metrics, textActions: false, maxToolRows: 4, allowOverflow: false);
+            if (icons is not null)
+                return icons;
         }
 
-        for (var i = 0; i < ToolbarOrder.Length; i++)
-            Place(button);
-        for (var i = 0; i < 5; i++)
-            Place(swatch);
+        return TryBuildToolbar(width, candidates[^1], textActions: false, maxToolRows: 8, allowOverflow: true)
+            ?? new ToolbarLayout { Metrics = candidates[^1], Height = 60 * s, Items = new List<ToolbarItem>() };
+    }
 
-        return y + itemHeight + pad;
+    private ToolbarLayout? TryBuildToolbar(float width, ToolbarMetrics m, bool textActions, int maxToolRows, bool allowOverflow)
+    {
+        var maxX = width - m.Pad;
+        if (maxX <= m.Pad)
+        {
+            if (!allowOverflow)
+                return null;
+            maxX = m.Pad + MathF.Max(1, m.Button);
+        }
+
+        var items = new List<ToolbarItem>();
+        var toolRows = 1;
+        var rowHeight = m.ItemHeight + m.RowGap;
+        var x = m.Pad;
+        var y = m.Pad;
+
+        bool NewToolRow()
+        {
+            toolRows++;
+            if (toolRows > maxToolRows)
+                return false;
+            x = m.Pad;
+            y += rowHeight;
+            return true;
+        }
+
+        // 工具组：矩形 / 箭头 / 画笔 / 文字 / 马赛克 / 序号
+        for (var id = 0; id < 6; id++)
+        {
+            if (x + m.Button > maxX && x > m.Pad && !NewToolRow())
+                return null;
+            if (!allowOverflow && m.Button > maxX - m.Pad)
+                return null;
+            items.Add(new ToolbarItem(id, new RectangleF(x, y, m.Button, m.ItemHeight), ToolbarItemKind.Tool));
+            x += m.Button + m.Gap;
+        }
+
+        // 颜色组：快速色 + 调色盘。能与工具同排就同排，否则整组换到下一排。
+        var colorGap = m.Gap * 0.5f;
+        var colorGroup = m.SeparatorWidth + m.Gap + 5 * m.Swatch + 5 * colorGap + m.Button;
+        if (x > m.Pad && x + colorGroup <= maxX)
+        {
+            items.Add(new ToolbarItem(-1, new RectangleF(x, y, m.SeparatorWidth, m.ItemHeight), ToolbarItemKind.Separator));
+            x += m.SeparatorWidth + m.Gap;
+        }
+        else if (!NewToolRow())
+        {
+            return null;
+        }
+
+        for (var i = 0; i < 5; i++)
+        {
+            if (x + m.Swatch > maxX && x > m.Pad && !NewToolRow())
+                return null;
+            var sy = y + (m.ItemHeight - m.Swatch) / 2;
+            items.Add(new ToolbarItem(10 + i, new RectangleF(x, sy, m.Swatch, m.Swatch), ToolbarItemKind.Swatch));
+            x += m.Swatch + colorGap;
+        }
+
+        if (x + m.Button > maxX && x > m.Pad && !NewToolRow())
+            return null;
+        items.Add(new ToolbarItem(15, new RectangleF(x, y, m.Button, m.ItemHeight), ToolbarItemKind.Palette));
+
+        // 动作组：固定单独一排，工具和破坏性/确认动作不再混排
+        y += rowHeight;
+        var actionW = textActions ? m.TextButtonWidth : m.Button;
+        var actionWidth = 5 * actionW + 5 * m.Gap + m.SeparatorWidth;
+        if (actionWidth > maxX - m.Pad)
+        {
+            if (textActions)
+                return null;
+
+            var available = maxX - m.Pad - 5 * m.Gap - m.SeparatorWidth;
+            if (available <= 0)
+            {
+                if (!allowOverflow)
+                    return null;
+                available = 5 * m.Button;
+            }
+            actionW = available / 5;
+            if (!allowOverflow && actionW < 14 * (float)_dpiScale)
+                return null;
+            actionW = MathF.Max(8 * (float)_dpiScale, actionW);
+        }
+
+        var actionY = y;
+        x = m.Pad;
+
+        void AddCommand(int id)
+        {
+            items.Add(new ToolbarItem(id, new RectangleF(x, actionY, actionW, m.ItemHeight), ToolbarItemKind.Command));
+            x += actionW;
+        }
+
+        AddCommand(20);
+        x += m.Gap;
+        AddCommand(21);
+        x += m.Gap;
+        items.Add(new ToolbarItem(-1, new RectangleF(x, actionY, m.SeparatorWidth, m.ItemHeight), ToolbarItemKind.Separator));
+        x += m.SeparatorWidth + m.Gap;
+        AddCommand(23);
+        x += m.Gap;
+        AddCommand(22);
+        x += m.Gap;
+        AddCommand(24);
+
+        var actionRight = items
+            .Where(i => i.Kind == ToolbarItemKind.Command)
+            .Select(i => i.Rect.Right)
+            .DefaultIfEmpty(x)
+            .Max();
+
+        return new ToolbarLayout
+        {
+            Metrics = m,
+            Height = actionY + m.ItemHeight + m.Pad,
+            ActionY = actionY,
+            ActionRight = actionRight,
+            TextActions = textActions,
+            Items = items,
+        };
     }
 
     private void RebuildBaseScaled()
@@ -206,7 +380,6 @@ public sealed unsafe partial class NativePinWindow
     private void OnEditPointerDown(nint lParam)
     {
         var (x, y) = ClientPoint(lParam);
-        DestroyTextEditor();   // 点击贴图其他位置时收起未确认的文字框
 
         // 取色面板优先处理（面板浮在最上层）
         if (_paletteOpen)
@@ -231,10 +404,15 @@ public sealed unsafe partial class NativePinWindow
         {
             if (rect.Contains(x, y))
             {
+                // 字号按钮要保留正在输入的文字；其他命令照旧先收起文字框。
+                if (id is not 30 and not 31)
+                    DestroyTextEditor();
                 HandleToolbarCommand(id);
                 return;
             }
         }
+
+        DestroyTextEditor();   // 点击贴图其他位置时收起未确认的文字框
 
         // 点在图片区域之外（工具栏边栏）不画图
         if (y < _editOffsetY || y >= _editOffsetY + _imgH)
@@ -424,24 +602,26 @@ public sealed unsafe partial class NativePinWindow
                 _toolId = id;
                 break;
             case >= 10 and <= 14:
-                _colorArgb = id switch
-                {
-                    10 => 0xFFFF3B30,
-                    11 => 0xFFFFCC00,
-                    12 => 0xFF34C759,
-                    13 => 0xFF007AFF,
-                    _ => 0xFF000000,
-                };
+                _colorArgb = QuickColors[id - 10];
                 break;
             case 15:
                 _paletteOpen = !_paletteOpen;
                 _paletteDrag = 0;
                 _svHue = -1;
                 break;
+            case 30:
+                AdjustTextSize(-TextSizeStep);
+                return;
+            case 31:
+                AdjustTextSize(TextSizeStep);
+                return;
             case 20:
-                UndoEdit();
+                if (_annotations.Count > 0)
+                    UndoEdit();
                 return;
             case 21:
+                if (_annotations.Count == 0)
+                    return;
                 _annotations.Clear();
                 _numberCounter = 0;
                 break;
@@ -461,6 +641,22 @@ public sealed unsafe partial class NativePinWindow
 
     /// <summary>把标注烘焙进原图、更新贴图本身、复制到剪贴板，然后退出编辑模式。</summary>
     private void ApplyEdit(bool saveAs = false)
+    {
+        if (!_editMode || _applyingEdit)
+            return;
+
+        _applyingEdit = true;
+        try
+        {
+            ApplyEditCore(saveAs);
+        }
+        finally
+        {
+            _applyingEdit = false;
+        }
+    }
+
+    private void ApplyEditCore(bool saveAs)
     {
         byte[]? bytes = null;
         // 提交瞬间先把缩放基底放掉，避免“基底 + 全分辨率解码 + 渲染结果”三份大图同时存在
@@ -506,9 +702,12 @@ public sealed unsafe partial class NativePinWindow
 
         var scale = EditScale;
         _editTextPosition = new PointD(x / scale, y / scale);
+        _editLocalX = x;
+        _editLocalY = y;
 
-        // 分层窗口无法显示子控件，文字输入用临时顶层小窗，覆盖在贴图上
-        var width = Math.Min(240, _winW - x - 8);
+        // 分层窗口无法显示子控件，文字输入用临时顶层小窗，覆盖在贴图上。
+        // 位置必须用图片原点 _imgX/_imgY：工具栏在顶部时 _winY 比图片原点高一截，
+        // 用 _winY + y 会让输入框整体上移一个工具栏高度。
         _editControl = (nint)PInvoke.CreateWindowEx(
             Windows.Win32.UI.WindowsAndMessaging.WINDOW_EX_STYLE.WS_EX_TOPMOST |
             Windows.Win32.UI.WindowsAndMessaging.WINDOW_EX_STYLE.WS_EX_TOOLWINDOW,
@@ -517,12 +716,13 @@ public sealed unsafe partial class NativePinWindow
             Windows.Win32.UI.WindowsAndMessaging.WINDOW_STYLE.WS_POPUP |
             Windows.Win32.UI.WindowsAndMessaging.WINDOW_STYLE.WS_VISIBLE |
             Windows.Win32.UI.WindowsAndMessaging.WINDOW_STYLE.WS_BORDER,
-            _winX + x, _winY + y, Math.Max(80, width), 28,
+            _imgX + x, _imgY + y, ComputeTextEditorWidth(x), ComputeTextEditorHeight(),
             default, default, default, default).Value;
 
         if (_editControl == 0)
             return;
 
+        ApplyEditorFontAndBounds();
         _ = PInvoke.SetFocus(new HWND(_editControl));
 
         _editKeys = new PrtScr.App.Services.KeyInterceptor(_editControl);
@@ -533,6 +733,59 @@ public sealed unsafe partial class NativePinWindow
             else if (vk == 0x1B)
                 DestroyTextEditor();
         };
+        _editKeys.MouseWheel += delta => AdjustTextSize(delta > 0 ? TextSizeStep : -TextSizeStep);
+        App.Log($"Pin: text editor at {_imgX + x},{_imgY + y} size={_textSize}");
+    }
+
+    private int ComputeTextEditorWidth(int x)
+    {
+        var preferred = Math.Max(240, _textSize * 8);
+        var available = Math.Max(80, _imgW - x - 8);
+        return Math.Min(preferred, available);
+    }
+
+    private int ComputeTextEditorHeight()
+    {
+        using var font = new Font("Microsoft YaHei UI", Math.Max(6, _textSize), FontStyle.Regular, GraphicsUnit.Pixel);
+        return Math.Max((int)Math.Round(28 * _dpiScale), font.Height + (int)Math.Round(8 * _dpiScale));
+    }
+
+    private void ApplyEditorFontAndBounds()
+    {
+        if (_editControl == 0)
+            return;
+
+        var oldFont = _editFont;
+        using (var font = new Font("Microsoft YaHei UI", Math.Max(6, _textSize), FontStyle.Regular, GraphicsUnit.Pixel))
+        {
+            _editFont = font.ToHfont();
+            _ = SendMessage(_editControl, WM_SETFONT, _editFont, 1);
+        }
+        if (oldFont != 0)
+            _ = DeleteObject(oldFont);
+
+        _ = PInvoke.SetWindowPos(
+            new HWND(_editControl), default,
+            _imgX + _editLocalX, _imgY + _editLocalY,
+            ComputeTextEditorWidth(_editLocalX), ComputeTextEditorHeight(),
+            SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
+        _ = PInvoke.SetFocus(new HWND(_editControl));
+    }
+
+    private void AdjustTextSize(int delta)
+    {
+        var next = Math.Clamp(_textSize + delta, TextSizeMin, TextSizeMax);
+        if (next == _textSize)
+        {
+            if (_editControl != 0)
+                _ = PInvoke.SetFocus(new HWND(_editControl));
+            return;
+        }
+
+        _textSize = next;
+        ApplyEditorFontAndBounds();
+        RenderEditMode();
+        App.Log($"Pin: text size={_textSize}");
     }
 
     private void CommitTextEditor()
@@ -552,7 +805,7 @@ public sealed unsafe partial class NativePinWindow
                 Tool = AnnotationTool.Text,
                 Text = text,
                 Color = _colorArgb,
-                Size = (float)(18 / scale),
+                Size = (float)(_textSize / scale),
             };
             annotation.Points.Add(_editTextPosition);
             _annotations.Add(annotation);
@@ -570,6 +823,11 @@ public sealed unsafe partial class NativePinWindow
         {
             _ = PInvoke.DestroyWindow(new HWND(_editControl));
             _editControl = 0;
+        }
+        if (_editFont != 0)
+        {
+            _ = DeleteObject(_editFont);
+            _editFont = 0;
         }
         _ = PInvoke.SetFocus(_hwnd);
     }
@@ -708,85 +966,236 @@ public sealed unsafe partial class NativePinWindow
 
     private void DrawToolbar(Graphics graphics)
     {
+        var layout = BuildToolbarLayout(_winW);
+        _toolbarHeight = MathF.Ceiling(layout.Height);
         var scale = (float)_dpiScale;   // 固定尺寸：只跟 DPI，不跟贴图缩放
-        using var bgBrush = new SolidBrush(Color.FromArgb(0xD8, 0x2B, 0x2B, 0x2B));
-        using var activeBrush = new SolidBrush(_accentColor);
-        using var borderPen = new Pen(Color.FromArgb(0xFF, 0xC8, 0xC8, 0xC8), Math.Max(1, scale));
-
+        var offsetY = _toolbarAtTop ? 0 : _winH - _toolbarHeight;
         _toolbarButtons.Clear();
 
-        var button = 30 * scale;
-        var gap = 4 * scale;
-        var pad = 6 * scale;
-        var itemHeight = 28 * scale;
-        var rowHeight = itemHeight + gap;
-        var maxX = _winW - pad;
-        var x = pad;
-        var y = pad;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
 
-        float Next(float width)
-        {
-            if (x + width > maxX && x > pad)
-            {
-                x = pad;
-                y += rowHeight;
-            }
-            var sx = x;
-            x += width + gap;
-            return sx;
-        }
-
-        var rects = new List<(int Id, RectangleF Rect)>();
-        foreach (var id in ToolbarOrder)
-        {
-            var sx = Next(button);
-            rects.Add((id, new RectangleF(sx, y, button, itemHeight)));
-        }
-
-        var swatch = 18 * scale;
-        var palette = new (int Id, Color Color)[]
-        {
-            (10, Color.FromArgb(0xFF, 0xFF, 0x3B, 0x30)),
-            (11, Color.FromArgb(0xFF, 0xFF, 0xCC, 0x00)),
-            (12, Color.FromArgb(0xFF, 0x34, 0xC7, 0x59)),
-            (13, Color.FromArgb(0xFF, 0x00, 0x7A, 0xFF)),
-            (14, Color.FromArgb(0xFF, 0x00, 0x00, 0x00)),
-        };
-        foreach (var (id, _) in palette)
-        {
-            var sx = Next(swatch);
-            rects.Add((id, new RectangleF(sx, y + (itemHeight - swatch) / 2, swatch, swatch)));
-        }
-
-        _toolbarHeight = y + itemHeight + pad;
-
-        // 浮在窗口上方或下方：不遮挡鼠标最后停留的那一侧
-        var offsetY = _toolbarAtTop ? 0 : _winH - _toolbarHeight;
-        var placed = rects.Select(r => (r.Id, new RectangleF(r.Rect.X, r.Rect.Y + offsetY, r.Rect.Width, r.Rect.Height))).ToList();
-
+        using var bgBrush = new SolidBrush(Color.FromArgb(0xEE, 0x24, 0x24, 0x24));
         graphics.FillRectangle(bgBrush, 0, offsetY, _winW, _toolbarHeight);
 
-        foreach (var (id, rect) in placed)
+        using var edgePen = new Pen(Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF), 1);
+        graphics.DrawLine(edgePen, 0, offsetY + 0.5f, _winW, offsetY + 0.5f);
+        graphics.DrawLine(edgePen, 0, offsetY + _toolbarHeight - 0.5f, _winW, offsetY + _toolbarHeight - 0.5f);
+
+        using var activeBrush = new SolidBrush(_accentColor);
+        using var swatchBorder = new Pen(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF), MathF.Max(1, scale));
+        using var selectedPen = new Pen(Color.White, MathF.Max(1.5f, scale * 1.5f));
+        using var separatorPen = new Pen(Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF), MathF.Max(1, scale));
+        using var commandFont = new Font("Microsoft YaHei UI", 11 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var commandBrush = new SolidBrush(Color.FromArgb(0xFF, 0xE8, 0xE8, 0xE8));
+        using var disabledBrush = new SolidBrush(Color.FromArgb(0xFF, 0x78, 0x78, 0x78));
+        using var cancelBrush = new SolidBrush(Color.FromArgb(0xFF, 0xFF, 0xA8, 0xA0));
+        using var whiteBrush = new SolidBrush(Color.White);
+        var colorId = _colorArgbColorId();
+
+        foreach (var item in layout.Items)
         {
-            if (id is >= 0 and <= 5 && id == _toolId)
-                graphics.FillRectangle(activeBrush, rect);
+            var rect = item.Rect;
+            rect.Y += offsetY;
 
-            if (id is >= 10 and <= 14)
+            if (item.Kind == ToolbarItemKind.Separator)
             {
-                var color = palette.First(p => p.Id == id).Color;
-                using var brush = new SolidBrush(color);
-                graphics.FillRectangle(brush, rect);
-                graphics.DrawRectangle(borderPen, rect.X, rect.Y, rect.Width, rect.Height);
-                if (_colorArgbColorId() == id)
-                    graphics.DrawRectangle(borderPen, rect.X - 2, rect.Y - 2, rect.Width + 4, rect.Height + 4);
-            }
-            else
-            {
-                DrawIcon(graphics, id, rect, scale);
+                var sx = rect.X + rect.Width / 2;
+                graphics.DrawLine(separatorPen, sx, rect.Y + rect.Height * 0.2f, sx, rect.Y + rect.Height * 0.8f);
+                continue;
             }
 
-            _toolbarButtons.Add((id, Rectangle.Round(rect)));
+            _toolbarButtons.Add((item.Id, Rectangle.Round(rect)));
+
+            switch (item.Kind)
+            {
+                case ToolbarItemKind.Swatch:
+                {
+                    var color = Color.FromArgb((int)QuickColors[item.Id - 10]);
+                    using var brush = new SolidBrush(color);
+                    graphics.FillRectangle(brush, rect);
+                    graphics.DrawRectangle(swatchBorder, rect.X, rect.Y, rect.Width, rect.Height);
+                    if (colorId == item.Id)
+                    {
+                        graphics.DrawRectangle(selectedPen, rect.X - 3 * scale, rect.Y - 3 * scale,
+                            rect.Width + 6 * scale, rect.Height + 6 * scale);
+                    }
+                    break;
+                }
+
+                case ToolbarItemKind.Tool:
+                    if (item.Id == _toolId)
+                        FillRoundedRectangle(graphics, activeBrush, rect, 5 * scale);
+                    DrawIcon(graphics, item.Id, rect, scale);
+                    break;
+
+                case ToolbarItemKind.Palette:
+                    if (_paletteOpen)
+                        FillRoundedRectangle(graphics, activeBrush, rect, 5 * scale);
+                    else if (colorId < 0)
+                        DrawRoundedBorder(graphics, selectedPen, rect, 5 * scale);
+                    DrawIcon(graphics, item.Id, rect, scale);
+                    break;
+
+                case ToolbarItemKind.Command:
+                {
+                    var disabled = item.Id is 20 or 21 && _annotations.Count == 0;
+                    var complete = item.Id == 22;
+                    if (complete)
+                        FillRoundedRectangle(graphics, activeBrush, rect, 5 * scale);
+
+                    if (layout.TextActions)
+                    {
+                        var label = item.Id switch
+                        {
+                            20 => "撤销",
+                            21 => "清空",
+                            22 => "完成",
+                            23 => "取消",
+                            _ => "另存",
+                        };
+                        var brush = disabled ? disabledBrush
+                            : complete ? whiteBrush
+                            : item.Id == 23 ? cancelBrush
+                            : commandBrush;
+                        DrawCenteredText(graphics, label, commandFont, brush, rect);
+                    }
+                    else
+                    {
+                        DrawIcon(graphics, item.Id, rect, scale);
+                    }
+                    break;
+                }
+            }
         }
+
+        var textControlLeft = DrawTextSizeControl(graphics, layout, offsetY, scale);
+        DrawToolbarMeta(graphics, layout, offsetY, scale, textControlLeft);
+    }
+
+    /// <summary>文字工具时在动作条右侧显示字号步进器；宽度不够就隐藏，滚轮仍可调。</summary>
+    private float DrawTextSizeControl(Graphics graphics, ToolbarLayout layout, float offsetY, float scale)
+    {
+        if (_toolId != 3)
+            return float.NaN;
+
+        var m = layout.Metrics;
+        var button = 22 * scale;
+        var gap = 4 * scale;
+        var labelWidth = 52 * scale;
+        var groupWidth = button * 2 + labelWidth + gap * 2;
+        var right = _winW - m.Pad;
+        var x = right - groupWidth;
+        if (x < layout.ActionRight + m.Gap * 3)
+            return float.NaN;
+
+        var y = offsetY + layout.ActionY + (m.ItemHeight - button) / 2;
+        using var borderPen = new Pen(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF), MathF.Max(1, scale));
+        using var font = new Font("Microsoft YaHei UI", 11 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var textBrush = new SolidBrush(Color.FromArgb(0xFF, 0xE8, 0xE8, 0xE8));
+        using var dimBrush = new SolidBrush(Color.FromArgb(0xFF, 0x78, 0x78, 0x78));
+
+        var minus = new RectangleF(x, y, button, button);
+        DrawRoundedBorder(graphics, borderPen, minus, 4 * scale);
+        DrawCenteredText(graphics, "−", font, _textSize > TextSizeMin ? textBrush : dimBrush, minus);
+        _toolbarButtons.Add((30, Rectangle.Round(minus)));
+
+        var label = new RectangleF(minus.Right + gap, y, labelWidth, button);
+        DrawCenteredText(graphics, $"字号 {_textSize}", font, textBrush, label);
+
+        var plus = new RectangleF(label.Right + gap, y, button, button);
+        DrawRoundedBorder(graphics, borderPen, plus, 4 * scale);
+        DrawCenteredText(graphics, "+", font, _textSize < TextSizeMax ? textBrush : dimBrush, plus);
+        _toolbarButtons.Add((31, Rectangle.Round(plus)));
+
+        return x;
+    }
+
+    /// <summary>动作条右侧的状态：当前工具、当前颜色、可用的快捷键；空间不足时逐级缩短。</summary>
+    private void DrawToolbarMeta(Graphics graphics, ToolbarLayout layout, float offsetY, float scale, float maxRight)
+    {
+        var x = layout.ActionRight + layout.Metrics.Gap * 2;
+        if (float.IsNaN(maxRight))
+            maxRight = _winW - layout.Metrics.Pad;
+        if (maxRight - x < 48 * scale)
+            return;
+
+        using var font = new Font("Microsoft YaHei UI", 11 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
+        var tool = ToolLabels[Math.Clamp(_toolId, 0, ToolLabels.Length - 1)];
+        var hex = "#" + (_colorArgb & 0xFFFFFF).ToString("X6");
+        var sizeHint = _toolId == 3 ? $" · 字号 {_textSize} · 滚轮 调字号" : "";
+        var variants = new (string Text, bool Accent)[][]
+        {
+            new (string Text, bool Accent)[] { (tool, true), ($" · {hex}{sizeHint} · Ctrl+Z 撤销 · Enter 完成 · Ctrl+S 另存 · Esc 取消", false) },
+            new (string Text, bool Accent)[] { (tool, true), ($" · {hex}{sizeHint} · Enter 完成 · Esc 取消", false) },
+            new (string Text, bool Accent)[] { (tool, true), ($" · {hex}{sizeHint}", false) },
+        };
+
+        (string Text, bool Accent)[]? chosen = null;
+        foreach (var variant in variants)
+        {
+            var width = variant.Sum(part => graphics.MeasureString(part.Text, font).Width);
+            if (x + width <= maxRight)
+            {
+                chosen = variant;
+                break;
+            }
+        }
+
+        if (chosen is null)
+            return;
+
+        var lineHeight = font.GetHeight(graphics);
+        var y = offsetY + layout.ActionY + (layout.Metrics.ItemHeight - lineHeight) / 2;
+        var cursor = x;
+        foreach (var (text, accent) in chosen)
+        {
+            using var brush = new SolidBrush(accent ? _accentColor : Color.FromArgb(0xFF, 0xA8, 0xA8, 0xA8));
+            graphics.DrawString(text, font, brush, cursor, y);
+            cursor += graphics.MeasureString(text, font).Width;
+        }
+    }
+
+    private static GraphicsPath RoundedRectanglePath(RectangleF rect, float radius)
+    {
+        var path = new GraphicsPath();
+        var r = MathF.Min(radius, MathF.Min(rect.Width, rect.Height) / 2);
+        if (r <= 0)
+        {
+            path.AddRectangle(rect);
+            return path;
+        }
+
+        var d = r * 2;
+        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    private static void FillRoundedRectangle(Graphics graphics, Brush brush, RectangleF rect, float radius)
+    {
+        using var path = RoundedRectanglePath(rect, radius);
+        graphics.FillPath(brush, path);
+    }
+
+    private static void DrawRoundedBorder(Graphics graphics, Pen pen, RectangleF rect, float radius)
+    {
+        using var path = RoundedRectanglePath(rect, radius);
+        graphics.DrawPath(pen, path);
+    }
+
+    private static void DrawCenteredText(Graphics graphics, string text, Font font, Brush brush, RectangleF rect)
+    {
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center,
+            FormatFlags = StringFormatFlags.NoWrap,
+        };
+        graphics.DrawString(text, font, brush, rect, format);
     }
 
     /// <summary>微信风格的矢量图标（不依赖字体图标库）。</summary>
@@ -1058,14 +1467,17 @@ public sealed unsafe partial class NativePinWindow
         RenderEditMode();
     }
 
-    private int _colorArgbColorId() => _colorArgb switch
+    private int _colorArgbColorId()
     {
-        0xFFFF3B30 => 10,
-        0xFFFFCC00 => 11,
-        0xFF34C759 => 12,
-        0xFF007AFF => 13,
-        _ => 14,
-    };
+        for (var i = 0; i < QuickColors.Length; i++)
+        {
+            if (QuickColors[i] == _colorArgb)
+                return 10 + i;
+        }
+
+        // 调色盘选出的自定义颜色不落在任何快速色上，避免误高亮黑色。
+        return -1;
+    }
 
     private static RectangleF RectFrom(PointD a, PointD b) => new(
         (float)Math.Min(a.X, b.X), (float)Math.Min(a.Y, b.Y),

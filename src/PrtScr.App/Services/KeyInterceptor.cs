@@ -11,6 +11,7 @@ internal sealed unsafe class KeyInterceptor : IDisposable
 {
     private const int GWLP_WNDPROC = -4;
     private const uint WM_KEYDOWN = 0x0100;
+    private const uint WM_MOUSEWHEEL = 0x020A;
     private const uint WM_HOTKEY = 0x0312;
     private const uint WM_NCCALCSIZE = 0x0083;
     private const uint WM_NCHITTEST = 0x0084;
@@ -46,6 +47,9 @@ internal sealed unsafe class KeyInterceptor : IDisposable
     /// <summary>窗口线程上收到的 WM_HOTKEY（参数为热键 id）。</summary>
     public event Action<int>? HotKey;
 
+    /// <summary>窗口线程上收到的 WM_MOUSEWHEEL（参数为滚轮 delta）；有订阅时才消费消息。</summary>
+    public event Action<int>? MouseWheel;
+
     public KeyInterceptor(nint hwnd, bool interceptO = false)
     {
         _hwnd = hwnd;
@@ -78,6 +82,18 @@ internal sealed unsafe class KeyInterceptor : IDisposable
             try
             {
                 self.HotKey?.Invoke((int)wParam);
+            }
+            catch
+            {
+            }
+            return 0;
+        }
+
+        if (self is not null && msg == WM_MOUSEWHEEL && self.MouseWheel is not null)
+        {
+            try
+            {
+                self.MouseWheel((short)((long)wParam >> 16));
             }
             catch
             {
