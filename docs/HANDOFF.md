@@ -309,6 +309,7 @@ FullscreenBypass: 已归还原前台
 - UI 文案同步：设置页鼠标指针说明改为「截图取景和全屏截图都生效」；OCR 说明标明 Windows OCR 默认、Umi 需手动开启；默认模式提示与历史空状态改为「按截图热键」，不再写死 F1。
 - 打包：`PrtScr.App.csproj` 增加 `BuiltInComInteropSupport=true`、`JsonSerializerIsReflectionEnabledByDefault=true`（partial trim 下 WGC 的 built-in COM 与 ConfigService 的反射 JSON 都依赖它们）；`scripts/publish.ps1` 使用 `-p:PublishTrimmed=true -p:TrimMode=partial`，并继续删除 57 个未加载的 App SDK 可选组件（约 65 MB）、37 个 `.winmd`（约 2.4 MB），语言目录只留 en-us/en-GB/zh-CN/zh-TW（约 3.2 MB）。
 - 产物：`artifacts/IshWY-1.0.0-win-x64/` 72.7 MB；`artifacts/IshWY-1.0.0-win-x64.zip` 30,588,110 字节（约 29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`。
+- 发布：提交 `30b93e4` → https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 ，资产 `IshWY-1.0.0-win-x64.zip` 下载回读 30,588,110 字节、sha256 一致；旧 `v0.1.0` Release 已删除，保留历史 tag 供 compare。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`--smoke` 退出 0。全新目录首次启动生成的 `data/config.json` 实测为 `hotkeyVk=65/mod=1`、`fullHotkeyVk=68/mod=1`、`defaultCaptureMode=normal`、`preferUmiOcr=false`，日志五个热键均 `register=0x1`。包内解压后再次 `--smoke` 同样退出 0；trim 后 WGC 2560×1600 帧与 Windows OCR 探针此前已通过。启动内存 `ws=150MB private=98MB`，仅作 smoke 记录，不代表主人性能验收。
 - 发布注意：`--smoke` 会像正常启动一样读取并写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY`，把启动路径改成当前测试副本的 exe。对复制/解压出来的包做 smoke 前先临时删除该 Run 值，测完恢复原路径；否则主人下次登录会启动到临时目录。本轮已按此恢复。
 
@@ -371,7 +372,7 @@ FullscreenBypass: 已归还原前台
 
 - [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
 - [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
-- [ ] GitHub Release：删除旧 `v0.1.0`，发布 `v1.0.0` 并上传 `IshWY-1.0.0-win-x64.zip`。
+- [x] GitHub Release：旧 `v0.1.0` Release 已删除；`v1.0.0` 已发布并上传 `IshWY-1.0.0-win-x64.zip`（30,588,110 字节，sha256 一致），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。
 - [x] 主人验收 2026-10-22 凌晨 2A 贴图批次：贴图管理、锁定/点击穿透、8px 吸附与参考线、左右半屏切换、指针锚定缩放、新贴图初始大小 80–100%、五个热键删除 ✕ 全部通过（主人原话「验收通过，做的非常好」）。构建 0 错误，`--smoke` 通过。
 - [x] 2026-10-22 补文档并提交本轮整批（2A + 指针缩放 + pinInitialScale + 热键删除），详见 README 与 ROADMAP。
 - [x] 主人用真实独占全屏游戏实测 Ctrl+Shift+F9 —— 2026-10-19 主人确认游戏内可用（合成按键链路同日更早跑通，见 §4）
