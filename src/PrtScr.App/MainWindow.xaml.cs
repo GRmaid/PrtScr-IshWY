@@ -25,14 +25,17 @@ public sealed partial class MainWindow : Window
     private bool _suppressStartupToggle;
     private bool _suppressHistoryToggle;
     private bool _suppressHistoryLimit;
+    private bool _suppressPinInitialScale;
     private bool _suppressCaptureOptions;
     private bool _suppressProfile;
     private bool _suppressPinCropToggle;
     private string? _runtimeCaptureProfile;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _memoryTimer;
     private nint[] _historyLoweredPins = [];
+    private nint[] _pinManagerLoweredPins = [];
     private CancellationTokenSource? _delayCts;
     private Views.HistoryWindow? _historyWindow;
+    private Views.PinManagerWindow? _pinManagerWindow;
 
     public MainWindow(bool startHidden = false)
     {
@@ -103,6 +106,11 @@ public sealed partial class MainWindow : Window
         CaptureCursorToggle.IsOn = App.Config.Current.CaptureCursor;
         DefaultModeCombo.SelectedIndex = IsNormalDefaultMode() ? 1 : 0;
         _suppressCaptureOptions = false;
+
+        _suppressPinInitialScale = true;
+        PinInitialScaleBox.Value = Math.Clamp(App.Config.Current.PinInitialScale, 80, 100);
+        _suppressPinInitialScale = false;
+        UpdatePinInitialScaleHint();
 
         _suppressProfile = true;
         CaptureProfileCombo.SelectedIndex = IsQuickProfile() ? 1 : 0;
@@ -215,6 +223,41 @@ public sealed partial class MainWindow : Window
         RefreshHistoryStatus();
         _ = _historyWindow?.RefreshAsync();
         App.Log($"History: perCategory={value}");
+    }
+
+    private void PinInitialScale_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_suppressPinInitialScale || PinInitialScaleBox is null)
+            return;
+
+        var value = double.IsNaN(args.NewValue) ? 100 : (int)Math.Clamp(args.NewValue, 80, 100);
+        if (double.IsNaN(PinInitialScaleBox.Value) || Math.Abs(PinInitialScaleBox.Value - value) > 0.1)
+        {
+            _suppressPinInitialScale = true;
+            PinInitialScaleBox.Value = value;
+            _suppressPinInitialScale = false;
+        }
+
+        if (App.Config.Current.PinInitialScale == value)
+        {
+            UpdatePinInitialScaleHint();
+            return;
+        }
+
+        App.Config.Current.PinInitialScale = value;
+        App.Config.Save();
+        UpdatePinInitialScaleHint();
+        SetStatus($"新贴图初始大小：原图 {value}%");
+        App.Log($"Pin: initialScale={value}%");
+    }
+
+    private void UpdatePinInitialScaleHint()
+    {
+        if (PinInitialScaleHintText is null)
+            return;
+        var value = Math.Clamp(App.Config.Current.PinInitialScale, 80, 100);
+        PinInitialScaleHintText.Text =
+            $"可调范围 80–100；80% 更小，100% 按原图大小。新贴图与切换到的历史图片按原图 {value}% 起步；超出工作区会自动缩小。桌面已有贴图不变，滚轮仍可缩放。";
     }
 
     private void DelayCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -429,6 +472,66 @@ public sealed partial class MainWindow : Window
     private void OpenHistory_Click(object sender, RoutedEventArgs e) => OpenHistory();
 
     private void History_Click(object sender, RoutedEventArgs e) => OpenHistory();
+
+    /// <summary>打开贴图管理器：临时把贴图降为非置顶，管理器关闭后恢复。</summary>
+    private void OpenPinManager()
+    {
+        try
+        {
+            if (_pinManagerWindow is null)
+            {
+                var pins = Views.NativePinWindow.SnapshotHandles();
+                foreach (var pin in pins)
+                {
+                    _ = PInvoke.SetWindowPos(new HWND(pin), new HWND(-2) /* HWND_NOTOPMOST */,
+                        0, 0, 0, 0, SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                        SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOOWNERZORDER);
+                }
+                _pinManagerLoweredPins = pins;
+
+                var window = new Views.PinManagerWindow();
+                window.Closed += (_, _) =>
+                {
+                    if (ReferenceEquals(_pinManagerWindow, window))
+                        _pinManagerWindow = null;
+                    RestorePinsAfterPinManager();
+                };
+                _pinManagerWindow = window;
+                window.Activate();
+            }
+            else
+            {
+                _pinManagerWindow.Activate();
+            }
+
+            if (_pinManagerWindow is not null)
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_pinManagerWindow);
+                _ = PInvoke.SetWindowPos(new HWND(hwnd), new HWND(-1) /* HWND_TOPMOST */,
+                    0, 0, 0, 0, SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin manager: 打开失败 {ex}");
+        }
+    }
+
+    private void OpenPinManager_Click(object sender, RoutedEventArgs e) => OpenPinManager();
+
+    private void RestorePinsAfterPinManager()
+    {
+        if (_pinManagerLoweredPins.Length == 0)
+            return;
+        foreach (var pin in _pinManagerLoweredPins)
+        {
+            _ = PInvoke.SetWindowPos(new HWND(pin), new HWND(-1) /* HWND_TOPMOST */,
+                0, 0, 0, 0, SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOOWNERZORDER);
+        }
+        _pinManagerLoweredPins = [];
+    }
 
     private void ClearHistory_Click(object sender, RoutedEventArgs e)
     {
@@ -675,11 +778,9 @@ public sealed partial class MainWindow : Window
                 Services.CaptureService.Instance.CancelCurrent();
         });
 
-        // 旧配置没有 hotkeyVk 时按 hotkeyKey（F1…F12）回退；新配置支持任意组合键
-        var vk = config.HotkeyVk > 0
-            ? config.HotkeyVk
-            : (int)HotkeyService.KeyNameToVirtualKey(config.HotkeyKey);
-        var mods = (int)config.HotkeyModifiers;
+        // 旧配置没有 hotkeyVk 时按 hotkeyKey（F1…F12）回退；-1 表示用户已删除，不能再回退。
+        var vk = ResolveScreenshotVk(config);
+        var mods = vk == 0 ? 0 : (int)config.HotkeyModifiers;
 
         // 主截图热键也可能在游戏里被吞：钩子通道与 RegisterHotKey 兜底共用去重。
         Services.EscOverPinHook.SetScreenshotKey(vk, mods);
@@ -729,10 +830,8 @@ public sealed partial class MainWindow : Window
         // 全屏截图热键走全局键盘钩子（和 Esc 同一套）：游戏用 Raw Input/钩子吞键时 RegisterHotKey 会收不到。
         // 但低级钩子会被系统静默摘除（LowLevelHooksTimeout），所以再挂一条 RegisterHotKey 兜底；
         // 两条通道同时命中时用 TryClaimFullScreenHotkey 去重。
-        var vk = config.FullHotkeyVk > 0
-            ? config.FullHotkeyVk
-            : (int)HotkeyService.KeyNameToVirtualKey(config.FullScreenHotkeyKey);
-        var mods = config.FullHotkeyModifiers;
+        var vk = ResolveFullscreenVk(config);
+        var mods = vk == 0 ? 0 : config.FullHotkeyModifiers;
         Services.EscOverPinHook.SetFullScreenKey(vk, mods);
         Services.EscOverPinHook.FullScreenPressed += () => DispatcherQueue.TryEnqueue(OnFullScreenPressed);
 
@@ -766,6 +865,18 @@ public sealed partial class MainWindow : Window
         OcrHotkeyText.Text = HotkeyService.Describe(config.OcrHotkeyVk, config.OcrHotkeyModifiers);
         App.Log($"Hotkey: 贴图配置 {PinHotkeyText.Text} / OCR 配置 {OcrHotkeyText.Text}");
     }
+
+    /// <summary>截图键的旧配置回退；-1 是「用户已删除」的哨兵，不能回退到 hotkeyKey。</summary>
+    private static int ResolveScreenshotVk(AppConfig config) =>
+        config.HotkeyVk < 0 ? 0 :
+        config.HotkeyVk > 0 ? config.HotkeyVk :
+        (int)HotkeyService.KeyNameToVirtualKey(config.HotkeyKey);
+
+    /// <summary>全屏键同理：-1 表示已删除，0 才按旧字段 fullScreenHotkeyKey 回退。</summary>
+    private static int ResolveFullscreenVk(AppConfig config) =>
+        config.FullHotkeyVk < 0 ? 0 :
+        config.FullHotkeyVk > 0 ? config.FullHotkeyVk :
+        (int)HotkeyService.KeyNameToVirtualKey(config.FullScreenHotkeyKey);
 
     private int _quickCaptureBusy;
 
@@ -866,16 +977,7 @@ public sealed partial class MainWindow : Window
         _recordingAction = action;
         _recordingButton = button;
         button.Content = "按键…";
-        var label = action switch
-        {
-            "screenshot" => "窗口截图",
-            "fullscreen" => "全屏截图",
-            "pin" => "贴图",
-            "ocr" => "文字识别",
-            "mode" => "切换截图模式",
-            _ => action,
-        };
-        SetStatus($"正在录制「{label}」：请按下组合键，Esc 取消。");
+        SetStatus($"正在录制「{HotkeyLabel(action)}」：请按下组合键，Esc 取消。");
         _ = button.Focus(FocusState.Programmatic);
     }
 
@@ -929,6 +1031,91 @@ public sealed partial class MainWindow : Window
         _recordingButton = null;
     }
 
+    private static string HotkeyLabel(string action) => action switch
+    {
+        "screenshot" => "窗口截图",
+        "fullscreen" => "全屏截图",
+        "pin" => "贴图",
+        "ocr" => "文字识别",
+        "mode" => "切换截图模式",
+        _ => action,
+    };
+
+    private void HotkeyClear_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string action })
+            ClearHotkey(action);
+    }
+
+    private void SetHotkeyText(string action, string text)
+    {
+        switch (action)
+        {
+            case "screenshot": ScreenshotHotkeyText.Text = text; break;
+            case "fullscreen": FullHotkeyText.Text = text; break;
+            case "pin": PinHotkeyText.Text = text; break;
+            case "ocr": OcrHotkeyText.Text = text; break;
+            case "mode": ModeHotkeyText.Text = text; break;
+        }
+    }
+
+    /// <summary>删除一个全局热键。截图/全屏用 -1 区分「从未配置」和「用户已删除」，避免回退到旧 F1/F2。</summary>
+    private void ClearHotkey(string action)
+    {
+        if (_recordingButton is not null)
+            ResetHotkeyRecording(_recordingButton);
+
+        var config = App.Config.Current;
+        switch (action)
+        {
+            case "screenshot":
+                config.HotkeyVk = -1;
+                config.HotkeyModifiers = 0;
+                App.Config.Save();
+                Services.EscOverPinHook.SetScreenshotKey(0, 0);
+                _hotkey.Restart(0, 0);
+                break;
+
+            case "fullscreen":
+                config.FullHotkeyVk = -1;
+                config.FullHotkeyModifiers = 0;
+                App.Config.Save();
+                Services.EscOverPinHook.SetFullScreenKey(0, 0);
+                _hotkey.SetFullscreenKey(0, 0);
+                break;
+
+            case "pin":
+                config.PinHotkeyVk = 0;
+                config.PinHotkeyModifiers = 0;
+                App.Config.Save();
+                _hotkey.SetPinKey(0, 0);
+                break;
+
+            case "ocr":
+                config.OcrHotkeyVk = 0;
+                config.OcrHotkeyModifiers = 0;
+                App.Config.Save();
+                _hotkey.SetOcrKey(0, 0);
+                break;
+
+            case "mode":
+                config.ModeHotkeyVk = 0;
+                config.ModeHotkeyModifiers = 0;
+                App.Config.Save();
+                Services.EscOverPinHook.SetModeSwitchKey(0, 0);
+                _hotkey.SetModeKey(0, 0);
+                break;
+
+            default:
+                return;
+        }
+
+        SetHotkeyText(action, "未设置");
+        SyncHotkeyTexts();
+        SetStatus($"已删除「{HotkeyLabel(action)}」快捷键；仍可用首页按钮或托盘菜单，点「修改」可重新录制。");
+        App.Log($"Hotkey: 删除 {action}");
+    }
+
     /// <summary>首页四张动作卡片与设置表格共用同一份热键文案。</summary>
     private void SyncHotkeyTexts()
     {
@@ -936,6 +1123,16 @@ public sealed partial class MainWindow : Window
         FullCardHotkey.Text = FullHotkeyText.Text;
         PinCardHotkey.Text = PinHotkeyText.Text;
         OcrCardHotkey.Text = OcrHotkeyText.Text;
+        UpdateHotkeyClearButtons();
+    }
+
+    private void UpdateHotkeyClearButtons()
+    {
+        ScreenshotClearButton.IsEnabled = ScreenshotHotkeyText.Text != "未设置";
+        FullHotkeyClearButton.IsEnabled = FullHotkeyText.Text != "未设置";
+        PinClearButton.IsEnabled = PinHotkeyText.Text != "未设置";
+        OcrClearButton.IsEnabled = OcrHotkeyText.Text != "未设置";
+        ModeClearButton.IsEnabled = ModeHotkeyText.Text != "未设置";
     }
 
     private void ApplyHotkey(string action, int vk, int mods)
@@ -1004,35 +1201,32 @@ public sealed partial class MainWindow : Window
         other = "";
         var c = App.Config.Current;
 
-        var screenshotVk = c.HotkeyVk > 0
-            ? c.HotkeyVk
-            : (int)HotkeyService.KeyNameToVirtualKey(c.HotkeyKey);
-        var screenshotMods = (int)c.HotkeyModifiers;
-        var fullVk = c.FullHotkeyVk > 0
-            ? c.FullHotkeyVk
-            : (int)HotkeyService.KeyNameToVirtualKey(c.FullScreenHotkeyKey);
+        var screenshotVk = ResolveScreenshotVk(c);
+        var screenshotMods = screenshotVk == 0 ? 0 : (int)c.HotkeyModifiers;
+        var fullVk = ResolveFullscreenVk(c);
+        var fullMods = fullVk == 0 ? 0 : c.FullHotkeyModifiers;
 
-        if (action != "screenshot" && vk == screenshotVk && mods == screenshotMods)
+        if (screenshotVk != 0 && action != "screenshot" && vk == screenshotVk && mods == screenshotMods)
         {
             other = "窗口截图";
             return true;
         }
-        if (action != "fullscreen" && vk == fullVk && mods == c.FullHotkeyModifiers)
+        if (fullVk != 0 && action != "fullscreen" && vk == fullVk && mods == fullMods)
         {
             other = "全屏截图";
             return true;
         }
-        if (action != "pin" && vk == c.PinHotkeyVk && mods == c.PinHotkeyModifiers)
+        if (c.PinHotkeyVk != 0 && action != "pin" && vk == c.PinHotkeyVk && mods == c.PinHotkeyModifiers)
         {
             other = "贴图";
             return true;
         }
-        if (action != "ocr" && vk == c.OcrHotkeyVk && mods == c.OcrHotkeyModifiers)
+        if (c.OcrHotkeyVk != 0 && action != "ocr" && vk == c.OcrHotkeyVk && mods == c.OcrHotkeyModifiers)
         {
             other = "OCR";
             return true;
         }
-        if (action != "mode" && vk == c.ModeHotkeyVk && mods == c.ModeHotkeyModifiers)
+        if (c.ModeHotkeyVk != 0 && action != "mode" && vk == c.ModeHotkeyVk && mods == c.ModeHotkeyModifiers)
         {
             other = "切换截图模式";
             return true;

@@ -427,6 +427,9 @@ public sealed unsafe class HotkeyService : IDisposable
     /// <summary>把 vk + 修饰键位掩码转成可展示文本，例如 "Ctrl + Alt + P"。</summary>
     public static string Describe(int vk, int modifiers)
     {
+        if (vk == 0)
+            return "未设置";
+
         var parts = new List<string>();
         if ((modifiers & 2) != 0) parts.Add("Ctrl");
         if ((modifiers & 1) != 0) parts.Add("Alt");

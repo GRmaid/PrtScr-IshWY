@@ -18,7 +18,7 @@ public sealed class AppConfig
     [JsonPropertyName("fullScreenHotkeyKey")]
     public string FullScreenHotkeyKey { get; set; } = "F2";
 
-    /// <summary>全屏截图热键：虚拟键码（0 表示按旧字段解析）。</summary>
+    /// <summary>全屏截图热键：虚拟键码（0 表示按旧字段解析，-1 表示用户已删除）。</summary>
     [JsonPropertyName("fullHotkeyVk")]
     public int FullHotkeyVk { get; set; }
 
@@ -26,7 +26,7 @@ public sealed class AppConfig
     [JsonPropertyName("fullHotkeyModifiers")]
     public int FullHotkeyModifiers { get; set; }
 
-    /// <summary>截图热键：虚拟键码（0 表示按旧字段 hotkeyKey 解析）。</summary>
+    /// <summary>截图热键：虚拟键码（0 表示按旧字段 hotkeyKey 解析，-1 表示用户已删除）。</summary>
     [JsonPropertyName("hotkeyVk")]
     public int HotkeyVk { get; set; }
 
@@ -83,7 +83,6 @@ public sealed class AppConfig
     [JsonPropertyName("captureProfile")]
     public string CaptureProfile { get; set; } = "normal";
 
-    /// <summary>切换截图模式后是否记住选择（默认记住）。</summary>
     /// <summary>「切换截图模式」全局热键：默认 Alt+Shift+C。</summary>
     [JsonPropertyName("modeHotkeyVk")]
     public int ModeHotkeyVk { get; set; } = 0x43;
@@ -94,6 +93,10 @@ public sealed class AppConfig
     /// <summary>默认取景模式：window = 窗口截图（抗遮挡），normal = 常规截图（所见即所得）。仅常规档位生效。</summary>
     [JsonPropertyName("defaultCaptureMode")]
     public string DefaultCaptureMode { get; set; } = "window";
+
+    /// <summary>新贴图初始大小（原图百分比，80–100）。超过工作区时仍会自动缩到工作区。</summary>
+    [JsonPropertyName("pinInitialScale")]
+    public int PinInitialScale { get; set; } = 100;
 
     /// <summary>贴图裁剪后是否写入截图历史（分类「贴图裁剪」）。</summary>
     [JsonPropertyName("historyPinCrop")]

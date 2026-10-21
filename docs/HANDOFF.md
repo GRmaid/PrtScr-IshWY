@@ -1,4 +1,4 @@
-# 实践小梅IshWY（IshWY）交接文档（2026-10-20）
+# 实践小梅IshWY（IshWY）交接文档（2026-10-22）
 
 > 给下一位接手的小智/开发者：先读这份，再读 `docs/ROADMAP.md` 与项目记忆。
 > 工作区：仓库根目录（开源项目，MIT，已初始化 git）。
@@ -38,28 +38,34 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 | ★ | 高分辨率应用图标：`tools/gen_icon.py` 以 256×256 为基底生成 16–256 共 10 档 ICO |
 | ★ | 另存为：取景器 `Ctrl+S`/「保存」、历史「另存为」、贴图右键「另存为…」、标注工具栏「另存」；取景器保存后仍复制并写历史 |
 | ★ | 延时截图与鼠标指针：设置 → 常规可选 0/3/5/10 秒，等待中再按截图热键取消；托盘有「延时截图」「取消延时截图」；可让 F1 与全屏截图包含当前指针 |
+| ★ | 2A 贴图工作流：贴图管理、锁定/穿透、吸附（2026-10-21 晚） | ✅ 完成（2026-10-22 00:xx 主人验收「验收通过，做的非常好」）：`PinService` 注册表 + `PinManagerWindow` 集中管理全部贴图；右键菜单可锁定位置、点击穿透；拖动 8px 吸附工作区/其他贴图并画 `PinSnapGuide`；左右半屏切换历史贴图、底部序号提示；管理/历史窗打开时临时降下置顶贴图，关闭后恢复 |
+| ★ | 贴图指针锚定滚轮缩放（2026-10-21 晚） | ✅ 完成（主人验收）：`WM_MOUSEWHEEL` 用屏幕坐标计算归一化锚点，缩放后贴图仍停在指针下；上限仍夹到当前显示器工作区，保留分层 DIB 内存保护 |
+| ★ | 新贴图初始大小设置（2026-10-21 晚） | ✅ 完成（主人验收）：设置 → 贴图新增 `pinInitialScale`（原图 80–100%，默认 100%）；`ComputeInitialZoom` 先取偏好再按工作区夹取，新贴图/左右切换历史生效；NumberBox 改 Inline 避免 PopupWindowSiteBridge 悬浮箭头关不掉 |
+| ★ | 热键删除 ✕（2026-10-22 凌晨） | ✅ 完成（主人验收）：设置 → 截图与热键五行各加 28×28 ✕；删除后行显示「未设置」、✕ 变灰，钩子与 RegisterHotKey 同时注销；截图/全屏写 `-1` 哨兵，重启不回退 F1/F2；「修改」可重新录制 |
 
 ## 3. 关键文件
 
 ```
 src/PrtScr.App/
   App.xaml.cs                 日志(加锁)、启动、单实例(\Local\IshWY.Activate)、--startup 静默模式、注入 WGC/DXGI 日志钩子、安装键盘钩子
-  MainWindow.xaml(.cs)        设置窗、托盘、四个动作的热键录制器、延时截图/取消入口、鼠标指针开关、默认截图模式、开机自启动开关、截图历史开关/窗口、OCR 状态、Umi 端口
+  MainWindow.xaml(.cs)        设置窗、托盘、五个动作的热键录制器与删除 ✕、延时截图/取消入口、鼠标指针开关、默认截图模式、开机自启动开关、截图历史开关/窗口、贴图管理入口、OCR 状态、Umi 端口
   Services/ConfigService.cs   便携 config.json
   Services/StartupService.cs  HKCU Run 开机自启动（值 IshWY，命令 exe --startup；移动目录后自动刷新）
-  Services/CaptureHistoryService.cs  本机截图历史（data\history，最多 30 张；写入/读取/删除/清空/修剪）
+  Services/CaptureHistoryService.cs  本机截图历史（data\history，每类默认 30 张；写入/读取/删除/清空/修剪）
   Services/FileSaveService.cs 系统 FileSavePicker 另存为（PNG/JPEG，JPEG 质量 92；取消/异常只记日志）
-  Services/HotkeyService.cs   RegisterHotKey 封装：截图/全屏/贴图/OCR 四个 id（+ 取景取消 id），统一 RegistrationFailed 提示
+  Services/HotkeyService.cs   RegisterHotKey 封装：截图/全屏/贴图/OCR/切换档位五个 id（+ 取景取消 id），统一 RegistrationFailed 提示；删除热键时注销并返回「未设置」
   Services/KeyInterceptor.cs  窗口消息层拦截 Enter/Esc/Tab/O（可选）；MakeClientAreaFullWindow 把 1px 非客户区并进客户区
   Services/EscRouter.cs       全局 Esc 统一仲裁：编辑中只退编辑、OCR/贴图重叠关最上层、不重叠先关 OCR
   Services/EscOverPinHook.cs  WH_KEYBOARD_LL：全屏截图组合键 + 取景窗可见期间的 Tab/Esc/Enter/O/Ctrl+C/Ctrl+S 直通（不依赖取景窗焦点；钩子内自记账修饰键 + 300ms 去抖；回调内不写盘、日志走队列；兜底命中时请求重装自愈）
   Services/FullscreenBypass.cs 抢前台逼游戏退出独占全屏（1×1 全透明分层窗 + AttachThreadInput，等 500ms，退出时还原前台/还原最小化）
   Services/ClipboardService.cs 剪贴板重试
   Services/CaptureService.cs  采集编排；CaptureMonitorBestAsync 四层引擎；DrawCursorIfEnabled 统一合成鼠标指针
-  Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService.PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板）
+  Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService 维护所有贴图的 PinRecord 注册表、快照、命令与 PinsChanged；PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板）
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部；`CaptureMode`（Window/Normal，Tab 切换，起始模式读 `defaultCaptureMode`）；窗口预高亮/单击选窗两种模式共用；指针事件挂在根 `Root`；选区右上角「保存」/`Ctrl+S` 另存为，保存后仍复制并写历史；`Ctrl+C`（无选区）复制放大镜色值；19×19 取色器复用 WriteableBitmap 与 byte 缓冲
   Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
-  Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键「另存为…」，标注工具栏「完成」= 烘焙+复制、「另存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；标注中键/右键拖动平移；拖动加 SWP_NOREDRAW，退出标注回收 DIB；工具栏按宽度分两排并在文字工具下显示字号步进器；窗口类挂 IDC_ARROW 光标，文字输入框按图片原点定位、输入中可用滚轮调字号）
+  Views/PinManagerWindow.xaml(.cs) + PinCardView.cs  贴图管理窗：全部贴图卡片、复制/另存/OCR/关闭/恢复交互、隐藏/显示/关闭全部；打开时把所有贴图降到 NOTOPMOST，关闭后恢复 TOPMOST
+  Views/PinSnapGuide.cs        拖动贴图时的 8px 吸附参考线（两条 1px 青色分层线，松手即隐藏）
+  Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键菜单可锁定/点击穿透/裁剪/另存/打开历史；标注工具栏「完成」= 烘焙+复制、「另存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；指针锚定滚轮缩放、左右半屏切换历史、8px 吸附、拖动加 SWP_NOREDRAW，退出标注回收 DIB；工具栏按宽度分两排并在文字工具下显示字号步进器；窗口类挂 IDC_ARROW 光标，文字输入框按图片原点定位、输入中可用滚轮调字号）
   Views/AnnotationWindow.xaml(.cs)      旧独立标注窗（已不用于贴图，保留）
   Views/OcrResultWindow.xaml(.cs)   OCR 结果窗（关闭时清空文本，释放大段 OCR 结果）
 src/PrtScr.Capture/
@@ -285,6 +291,17 @@ FullscreenBypass: 已归还原前台
 - 历史切换提速：`NativePinWindow.Navigate` 只解码一次源图，`SetWindowPos(SWP_NOREDRAW)` 后 `RenderAndPresent(highQuality:true, image)`，不再先解码两遍；主人确认明显跟手。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067 ×2）；`--smoke` 通过（四热键 + mode 热键 `register=0x1`、overlay pre-created）。菜单白边、自定位、点外关闭与四项行为由主人确认；其余档位/历史/裁剪行为主人已验收。
 
+### 2A 贴图管理、指针锚定缩放、初始大小与热键删除（2026-10-22 凌晨）
+
+- 贴图注册表：`PinService` 维护 `ConcurrentDictionary<nint,PinRecord>`，记录 HWND、压缩 PNG、像素尺寸、屏幕矩形、透明度、锁定/穿透/隐藏状态、来源分类与历史序号；`SnapshotPins()` 给管理窗，`PinsChanged` 合并刷新，`SendCommand` 统一投递 `NativePinWindow.WmAppPinCommand`。
+- 贴图管理：`PinManagerWindow` 1080×760，卡片显示缩略图、像素尺寸、透明度、状态与来源；单张可复制/另存/OCR/关闭/恢复交互，头部可隐藏/显示/关闭全部；入口只在主页历史摘要与托盘，不新增全局热键。打开时把所有贴图降到 `HWND_NOTOPMOST`，关闭后恢复 `HWND_TOPMOST`；管理窗内 Focus 用 `HWND_TOP`，避免选中的贴图盖住管理窗。
+- 贴图状态：右键菜单新增锁定位置与点击穿透；锁定时禁止拖动、滚轮缩放、左右半屏切换与双击关闭，但右键菜单仍可用；穿透设置 `WS_EX_TRANSPARENT`。左上角显示「锁 / 穿」徽标，状态变化写回 `PinService`。
+- 吸附：拖动结束按 8×DPI 吸附当前显示器工作区与其他可见贴图；`PinSnapGuide` 用两条 1px 青色分层线显示吸附边，松手即隐藏。
+- 指针锚定缩放：`WM_MOUSEWHEEL` 的 lParam 是屏幕坐标；先算 `anchorX/Y = clamp((screen - _winX)/_winW, 0, 1)`，更新窗口尺寸后令 `_winX = round(screenX - anchorX*_winW)`，Y 同理。缩放上限仍为 `min(8, workW/pixelW, workH/pixelH)`，保留分层 DIB 内存保护。
+- 初始大小：`AppConfig.PinInitialScale`（80–100，默认 100）；`ComputeInitialZoom()` 先取 `PinInitialScale/100`，再与工作区 fit 比例取 min，新贴图与左右切换历史图片生效，已有贴图不变。设置页 NumberBox 使用 `SpinButtonPlacementMode=Inline`（Compact 会创建独立 `PopupWindowSiteBridge`，悬浮箭头可能关不掉）。
+- 热键删除：设置页五个热键行各加 28×28 ✕；`ClearHotkey` 清空配置、注销 `RegisterHotKey` 与 `EscOverPinHook`，行内显示「未设置」并禁用 ✕。窗口/全屏截图写 `-1` 哨兵，`ResolveScreenshotVk/ResolveFullscreenVk` 不再回退旧 `hotkeyKey/fullScreenHotkeyKey`；贴图/OCR/切换档位写 0。`HotkeyService.Describe(0,0)` 返回「未设置」。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0，五个热键均 `register=0x1`；2026-10-22 00:xx 主人验收「验收通过，做的非常好」。
+
 ## 5. 踩坑与约定
 
 - **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。取景窗亮窗后可能既没前台也没 XAML 焦点，Tab/Ctrl+C/Esc 不能只靠焦点路径；现在由 `EscOverPinHook` 在取景激活期间直通，钩子失活时必须立刻放行，避免吞掉别的程序的按键。
@@ -305,7 +322,7 @@ FullscreenBypass: 已归还原前台
 - **批量另存为用 FolderPicker 而不是 FileSavePicker**：多选后逐张写同一文件夹，文件名用 `{Source}-{时间}` 并 `GenerateUniqueName` 防重名；单张「另存为」仍保留 FileSavePicker。
 - **取景器右键只在取景器取消**：`HandlePressed` 先判断 `IsRightButtonPressed` 再抓指针；贴图右键是菜单、标注中右键是平移，三者语义不同，不能共用同一个取消入口。
 - **进程标签要参与提示框宽度计算**：`SizeTip` 加了进程名后比原来宽，右边缘定位必须用 `MeasureSizeTipWidth()` 实测宽度，否则会超出屏幕。
-- **全局热键**：四个动作都用 `RegisterHotKey`（id 1 截图 / 3 全屏 / 4 贴图 / 5 OCR），注册失败（1409 = 被占用）必须通过 `RegistrationFailed` 在设置页明确提示，不要静默失败；默认组合键不能拍脑袋选字母组合，先用 RegisterHotKey 探针确认本机没被占用（本机 Ctrl+Alt+P/O 已占用）。
+- **全局热键**：五个动作都用 `RegisterHotKey`（id 1 截图 / 3 全屏 / 4 贴图 / 5 OCR / 6 切换档位），注册失败（1409 = 被占用）必须通过 `RegistrationFailed` 在设置页明确提示，不要静默失败；删除热键时截图/全屏写 `-1` 哨兵，其余写 0，并同步清钩子与 RegisterHotKey。默认组合键不能拍脑袋选字母组合，先用 RegisterHotKey 探针确认本机没被占用（本机 Ctrl+Alt+P/O 已占用）。
 - **剪贴板**：一律走 `ClipboardService`（CLIPBRD_E_CANT_OPEN 重试）。
 - **托盘退出/`--smoke`**：必须 `ExitProcess(0)`，`Application.Exit` 不可靠。
 - **H.NotifyIcon**：`ContextMenuMode="SecondWindow"` 才能触发 Click。
@@ -332,9 +349,15 @@ FullscreenBypass: 已归还原前台
 - **工具栏布局与扩窗共用一套来源**：`BuildToolbarLayout()` 同时决定 `ComputeToolbarHeight()` 和实际绘制；不要另写一套换行规则，否则扩窗高度与画出来的工具栏会错位。字号步进器放在动作行右侧，不参与行高计算，避免切换文字工具时窗口突然变高。
 - **改代码纪律**：字符串替换前先读文件、替换后验证命中；每轮改动后必须 `dotnet build` 0 错误再交主人。
 - **交付节奏**：构建后关掉旧实例时必须明确提示主人重新打开；验证靠主人实测 + `data\logs\app.log`。
+- **贴图管理/历史窗要临时降下置顶贴图**：`HWND_TOPMOST` 的贴图会盖住普通管理窗；打开前把所有 pin 改到 `HWND_NOTOPMOST`，关闭后恢复 `HWND_TOPMOST`，选中的贴图用 `HWND_TOP` 而不是再次置顶，否则它会盖住管理窗。
+- **热键删除必须用 -1 哨兵**：`hotkeyVk/fullHotkeyVk` 的 0 是「旧配置，按 hotkeyKey 回退」，不能拿来表示删除；用户删除时写 -1，解析函数见到 -1 直接返回 0，否则重启会复活默认 F1/F2。删除还要同时清 `EscOverPinHook` 与 `HotkeyService` 两条通道，截图键调用 `Restart(0,0)` 重建线程。
+- **指针锚定缩放用屏幕坐标**：`WM_MOUSEWHEEL` 的 lParam 是屏幕坐标，不是窗口客户区；先算归一化锚点再更新尺寸，最后用 anchor 反推 `_winX/_winY`。`UpdateLayeredWindow` 的 `psize` 会调整窗口尺寸，不要再额外 `MoveWindow`。
+- **NumberBox Compact 会生成独立弹窗**：WinUI 3 的 `SpinButtonPlacementMode=Compact` 上下箭头在单独的 `PopupWindowSiteBridge` 里，滚动/失焦后可能不消失且无法关闭；设置页一律用 `Inline`。
 
 ## 6. 待办
 
+- [x] 主人验收 2026-10-22 凌晨 2A 贴图批次：贴图管理、锁定/点击穿透、8px 吸附与参考线、左右半屏切换、指针锚定缩放、新贴图初始大小 80–100%、五个热键删除 ✕ 全部通过（主人原话「验收通过，做的非常好」）。构建 0 错误，`--smoke` 通过。
+- [x] 2026-10-22 补文档并提交本轮整批（2A + 指针缩放 + pinInitialScale + 热键删除），详见 README 与 ROADMAP。
 - [x] 主人用真实独占全屏游戏实测 Ctrl+Shift+F9 —— 2026-10-19 主人确认游戏内可用（合成按键链路同日更早跑通，见 §4）
 - [x] 主人实测「贴图 + Esc 关闭」—— 2026-10-19 23:24 连续三次贴图均由 `Pin: esc polled over pin, closing` → `Pin: WM_CLOSE (edit=False)` 关闭，主人确认
 - [x] README 补齐：特性、热键、构建/打包、配置、已知限制（独占全屏/多屏 DPI）、隐私声明（纯本地）—— 2026-10-19 重写
@@ -342,7 +365,7 @@ FullscreenBypass: 已归还原前台
 - [x] 产品改名「实践小梅IshWY」（短名 IshWY）—— 2026-10-19：`AssemblyName`=IshWY（发布 exe 为 `IshWY.exe`、PRI 为 `IshWY.pri`），设置/取景/标注/OCR/贴图标题、托盘提示、启动异常标题、通知、README、打包脚本与 release.yml 同步；Debug 与发布包 `--smoke` 均退出 0，窗口标题实测为「实践小梅IshWY 设置」。命名空间/解决方案仍保留内部代号 PrtScr
 - [x] 截图 / 全屏 / 贴图 / OCR 四个热键 + 组合键录制 —— 2026-10-20 完成：`HotkeyService` 四个 id、设置页四个录制按钮、四条配置字段与冲突检测；默认截图 F1、全屏 F2、贴图 Ctrl+Alt+V、OCR Ctrl+Alt+S；主人已改为 Alt+A / Alt+D / Alt+S / Alt+Q。Debug 构建 0 错误，应用启动日志四个 `register=0x1`；四热键已由主人验证成功
 - [x] 开机自启动 + 设置开关 + 单实例 —— 2026-10-20 完成：HKCU Run 值 `IshWY`（`IshWY.exe --startup`），`--startup` 静默驻留托盘；第二实例唤醒已有设置窗。调试构建 0 错误；UIA 切换开关实测写入/删除 Run 值，隐藏启动日志 `OnLaunched: startup 模式，静默驻留托盘`。默认关闭，当前注册表无该值；待主人在设置里开启并可选重启验证
-- [x] 截图历史 —— 2026-10-20 完成：框选/全屏自动写入 `data\history`（最多 30 张，可关闭），历史窗支持复制/贴图/删除/清空/打开文件夹；实测全屏保存 5.1 MB PNG 并在历史窗显示，UIA 切换开关写入 `saveHistory`
+- [x] 截图历史 —— 2026-10-20 完成：框选/全屏自动写入 `data\history`（每类默认 30 张，可关闭），历史窗支持复制/贴图/删除/清空/打开文件夹；实测全屏保存 5.1 MB PNG 并在历史窗显示，UIA 切换开关写入 `saveHistory`
 - [x] 另存为 / 历史标注 / 标注完成保存 —— 2026-10-20 完成：`FileSaveService` + 取景器 `Ctrl+S`/保存按钮 + 历史「标注」「另存为」+ 贴图右键「另存为…」+ 标注工具栏 id 24；历史/贴图另存为字节与源一致，主人实测取景器 Ctrl+S 后剪贴板与历史均正常
 - [x] 主人实测 Esc 仲裁：标注中 Esc 只退编辑；OCR+贴图重叠只关最上层、不重叠先关 OCR —— 2026-10-20 20:34 主人三步实测通过
 - [x] 内存与发布体积优化：已完成取景器位图释放、贴图按需解码+复用 DIB、历史缩略图释放、发布包裁剪（zip 69.6 MB）。2026-10-20 20:34 主人复测：整进程约 142 MB 基本稳定，滚轮/标注峰值与取景初帧命中均通过；WGC 常驻池（约 48 MB）保留

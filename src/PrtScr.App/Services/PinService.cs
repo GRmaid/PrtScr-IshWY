@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Drawing;
 using Microsoft.UI.Dispatching;
 using PrtScr.App.Views;
@@ -7,13 +8,88 @@ using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace PrtScr.App.Services;
 
+/// <summary>贴图窗口可执行的跨线程命令（管理器 / 菜单通过 PostMessage 发）。</summary>
+public enum PinCommand
+{
+    Focus,
+    Hide,
+    Show,
+    ToggleLock,
+    ToggleThrough,
+    RestoreInteraction,
+    Flash,
+    Close,
+}
+
+/// <summary>管理器用的贴图快照；由贴图窗口在自己的线程更新，避免跨线程读字段。</summary>
+public sealed record PinRecord(
+    nint Hwnd,
+    byte[] PngBytes,
+    int PixelWidth,
+    int PixelHeight,
+    int X,
+    int Y,
+    int Width,
+    int Height,
+    double Opacity,
+    bool Locked,
+    bool ClickThrough,
+    bool Hidden,
+    string SourceScope,
+    int NavIndex,
+    int NavCount,
+    DateTime CreatedAt);
+
 /// <summary>
 /// 从剪贴板读取图片并创建贴图（Snipaste 同逻辑：截图先落剪贴板，贴图再从剪贴板取）。
 /// </summary>
 public static class PinService
 {
+    private static readonly ConcurrentDictionary<nint, PinRecord> Registry = new();
+
+    /// <summary>贴图出现、移动、缩放、切换图片或状态变化时触发；可能来自任意线程。</summary>
+    public static event Action? PinsChanged;
+
     /// <summary>贴图右键菜单请求打开截图历史；由主窗口接管，先让贴图退居次层。</summary>
     public static Action<nint>? HistoryRequested { get; set; }
+
+    public static IReadOnlyList<PinRecord> SnapshotPins()
+        => Registry.Values.OrderBy(p => p.CreatedAt).ThenBy(p => p.Hwnd).ToList();
+
+    public static void UpsertPin(PinRecord record)
+    {
+        Registry[record.Hwnd] = record;
+        NotifyPinsChanged();
+    }
+
+    public static void RemovePin(nint hwnd)
+    {
+        if (Registry.TryRemove(hwnd, out _))
+            NotifyPinsChanged();
+    }
+
+    public static void SendCommand(nint hwnd, PinCommand command)
+    {
+        if (hwnd == 0)
+            return;
+        _ = Windows.Win32.PInvoke.PostMessage(
+            new Windows.Win32.Foundation.HWND(hwnd),
+            NativePinWindow.WmAppPinCommand,
+            new Windows.Win32.Foundation.WPARAM((nuint)command),
+            0);
+    }
+
+    private static void NotifyPinsChanged()
+    {
+        try
+        {
+            PinsChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin: 管理器刷新失败 {ex.Message}");
+        }
+    }
 
     public static void RequestHistory(nint pinOwner)
     {

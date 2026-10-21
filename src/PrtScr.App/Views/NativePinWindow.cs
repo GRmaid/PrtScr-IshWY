@@ -38,7 +38,12 @@ public sealed unsafe partial class NativePinWindow
     private const uint WM_APP_ZOOM_SETTLED = 0x8000 + 10;
     private const uint WM_APP_REASSERT_TOPMOST = 0x8000 + 11;
     private const uint WM_APP_ENTER_EDIT = 0x8000 + 12;
+    public const uint WmAppPinCommand = 0x8000 + 30;
+    private const uint WM_APP_CLEAR_NAV_HINT = 0x8000 + 31;
+    private const uint WM_APP_END_FLASH = 0x8000 + 32;
     private const uint WM_HOTKEY = 0x0312;
+    private const int GWL_EXSTYLE = -20;
+    private const long WS_EX_TRANSPARENT = 0x00000020;
 
 
     // 贴图自己轮询 Esc：不依赖低级键盘钩子（钩子会被系统静默摘除），也不抢焦点。
@@ -56,6 +61,8 @@ public sealed unsafe partial class NativePinWindow
     private const int CmdSaveAs = 5;
     private const int CmdCrop = 6;
     private const int CmdHistory = 7;
+    private const int CmdToggleLock = 8;
+    private const int CmdToggleThrough = 9;
     private const int CmdOpacity100 = 10;
     private const int CmdOpacity75 = 11;
     private const int CmdOpacity50 = 12;
@@ -233,6 +240,9 @@ public sealed unsafe partial class NativePinWindow
     private static extern HMONITOR MonitorFromPoint(NativePoint point, uint flags);
 
     [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint hwnd, uint flags);
+
+    [DllImport("user32.dll")]
     private static extern nint WindowFromPoint(NativePoint point);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -242,6 +252,12 @@ public sealed unsafe partial class NativePinWindow
     private static extern bool UpdateLayeredWindow(
         nint hwnd, nint hdcDst, ref NativePoint pptDst, ref NativeSize psize,
         nint hdcSrc, ref NativePoint pptSrc, uint crKey, ref BlendFunction pblend, uint dwFlags);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern nint GetWindowLongPtr(nint hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern nint SetWindowLongPtr(nint hwnd, int index, nint value);
 
     private static readonly object ClassLock = new();
     private static bool _classRegistered;
@@ -283,6 +299,19 @@ public sealed unsafe partial class NativePinWindow
     private int _renderedH;
     private bool _needsRedrawAfterZoom;
 
+    // 2A 贴图管理：状态只在这个贴图线程里改，管理器通过 PinService 快照读取。
+    private readonly DateTime _createdAt = DateTime.Now;
+    private RECT _workArea;
+    private string _sourceScope = "贴图";
+    private bool _locked;
+    private bool _clickThrough;
+    private bool _hidden;
+    private string? _navHint;
+    private long _navHintUntil;
+    private long _flashUntil;
+    private System.Threading.Timer? _navHintTimer;
+    private System.Threading.Timer? _flashTimer;
+
     // 常驻 GDI 资源（避免每帧创建/销毁造成卡顿）
     private nint _screenDc;
     private nint _destDc;
@@ -300,6 +329,40 @@ public sealed unsafe partial class NativePinWindow
         _uiQueue = uiQueue;
         _spawnOffsetX = spawnOffsetX;
         _spawnOffsetY = spawnOffsetY;
+    }
+
+    /// <summary>把当前状态发布给管理器；只传不可变快照，管理器不直接碰贴图字段。</summary>
+    private void PublishPinState()
+    {
+        if (_hwnd.IsNull)
+            return;
+        PinService.UpsertPin(new PinRecord(
+            (nint)_hwnd.Value,
+            _pngBytes,
+            _pixelWidth,
+            _pixelHeight,
+            _winX,
+            _winY,
+            _winW,
+            _winH,
+            _opacity,
+            _locked,
+            _clickThrough,
+            _hidden,
+            _sourceScope,
+            _navigation?.Index ?? 0,
+            _navigation?.Files.Count ?? 0,
+            _createdAt));
+    }
+
+    /// <summary>新贴图/切换历史图片时的初始缩放：用户设定的原图百分比，再受工作区上限约束。</summary>
+    private double ComputeInitialZoom()
+    {
+        var preferred = Math.Clamp(App.Config.Current.PinInitialScale, 80, 100) / 100.0;
+        var fit = Math.Min(
+            _maxWinW / (double)Math.Max(1, _pixelWidth),
+            _maxWinH / (double)Math.Max(1, _pixelHeight));
+        return Math.Max(0.01, Math.Min(preferred, fit));
     }
 
     /// <summary>当前所有贴图窗口句柄快照；用于临时让历史窗压过置顶贴图。</summary>
@@ -328,12 +391,17 @@ public sealed unsafe partial class NativePinWindow
     }
 
     /// <summary>设置左右点击浏览的截图列表（截图历史分类或全部分类）。</summary>
-    public void SetNavigation(PinService.PinNavigation navigation) => _navigation = navigation;
+    public void SetNavigation(PinService.PinNavigation navigation)
+    {
+        _navigation = navigation;
+        _sourceScope = navigation.Scope;
+        PublishPinState();
+    }
 
     /// <summary>在同一贴图窗内切换上一张/下一张截图，保持窗口中心不跳。</summary>
     private void Navigate(int direction)
     {
-        if (_navigation is null || _navigation.Files.Count == 0 || _editMode)
+        if (_navigation is null || _navigation.Files.Count == 0 || _editMode || _locked)
             return;
         if (Environment.TickCount64 - _lastNavigationTick < 400)
             return;
@@ -370,9 +438,7 @@ public sealed unsafe partial class NativePinWindow
             _pixelWidth = image.Width;
             _pixelHeight = image.Height;
 
-            var maxW = _maxWinW * 0.8;
-            var maxH = _maxWinH * 0.8;
-            _zoom = Math.Min(1, Math.Min(maxW / _pixelWidth, maxH / _pixelHeight));
+            _zoom = ComputeInitialZoom();
             _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
             _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
             _winX = centerX - _winW / 2;
@@ -387,6 +453,9 @@ public sealed unsafe partial class NativePinWindow
             RenderAndPresent(highQuality: true, image);
             _navigation = _navigation with { Index = next };
             _lastNavigationTick = Environment.TickCount64;
+            _sourceScope = _navigation.Scope;
+            ShowNavigationHint(next + 1, _navigation.Files.Count, _navigation.Scope);
+            PublishPinState();
             var ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             App.Log($"Pin navigate: {_navigation.Scope} {next + 1}/{_navigation.Files.Count} {Path.GetFileName(path)} {ms}ms");
         }
@@ -410,14 +479,13 @@ public sealed unsafe partial class NativePinWindow
                 _ = PInvoke.GetMonitorInfo(monitor, &info);
             }
 
+            _workArea = info.rcWork;
             var workW = info.rcWork.right - info.rcWork.left;
             var workH = info.rcWork.bottom - info.rcWork.top;
-            var maxW = workW * 0.8;
-            var maxH = workH * 0.8;
             // 滚轮放大上限 = 工作区；避免贴图 DIB/分层表面随缩放无限膨胀（旧实现可到 8× = 数百 MB）
             _maxWinW = Math.Min(8192, workW);
             _maxWinH = Math.Min(8192, workH);
-            _zoom = Math.Min(1, Math.Min(maxW / _pixelWidth, maxH / _pixelHeight));
+            _zoom = ComputeInitialZoom();
             _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
             _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
 
@@ -459,6 +527,7 @@ public sealed unsafe partial class NativePinWindow
             _ = PInvoke.SetFocus(_hwnd);
             StartEscPoll();
             _ok = true;
+            PublishPinState();
             _ready.Set();
 
             while (PInvoke.GetMessage(out var msg, default, 0, 0).Value > 0)
@@ -476,11 +545,14 @@ public sealed unsafe partial class NativePinWindow
         {
             _settleTimer?.Dispose();
             _topmostTimer?.Dispose();
+            _navHintTimer?.Dispose();
+            _flashTimer?.Dispose();
             _escPollStop = true;
             ReleaseGdiResources();
             if (!_hwnd.IsNull)
             {
                 EscRouter.Unregister((nint)_hwnd.Value);
+                PinService.RemovePin((nint)_hwnd.Value);
                 lock (ClassLock)
                     ByHwnd.Remove((nint)_hwnd.Value);
             }
@@ -546,6 +618,15 @@ public sealed unsafe partial class NativePinWindow
 
             switch (msg)
             {
+                case WmAppPinCommand:
+                    self.HandlePinCommand((PinCommand)(int)wParam.Value);
+                    return default;
+
+                case WM_LBUTTONDBLCLK when !self._editMode:
+                    if (!self._locked)
+                        _ = PInvoke.DestroyWindow(hwnd);
+                    return default;
+
                 case WM_LBUTTONDOWN when self._editMode:
                     self.OnEditPointerDown(lParam);
                     return default;
@@ -599,12 +680,15 @@ public sealed unsafe partial class NativePinWindow
                     return default;
 
                 case WM_LBUTTONDOWN:
+                    if (self._locked)
+                        return default;
                     GetCursorPos(out self._dragStartCursor);
                     self._clickDownCursor = self._dragStartCursor;
                     self._clickMoved = false;
                     self._dragStartX = self._winX;
                     self._dragStartY = self._winY;
                     self._dragging = true;
+                    PinSnapGuide.Hide();
                     _ = PInvoke.SetCapture(hwnd);
                     _ = PInvoke.SetFocus(hwnd);
                     return default;
@@ -616,6 +700,8 @@ public sealed unsafe partial class NativePinWindow
                         self._clickMoved = true;
                     self._winX = self._dragStartX + (pt.x - self._dragStartCursor.x);
                     self._winY = self._dragStartY + (pt.y - self._dragStartCursor.y);
+                    if (self._clickMoved)
+                        self.ApplySnap();
                     _ = PInvoke.SetWindowPos(hwnd, default, self._winX, self._winY, 0, 0,
                         SET_WINDOW_POS_FLAGS.SWP_NOSIZE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
                         SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOREDRAW);
@@ -623,15 +709,17 @@ public sealed unsafe partial class NativePinWindow
 
                 case WM_LBUTTONUP:
                     self._dragging = false;
+                    PinSnapGuide.Hide();
                     _ = PInvoke.ReleaseCapture();
                     // 未拖动的单击：左半边看更新的一张，右半边看更旧的一张。
                     // 有分类上下文时只在当前分类内循环；Alt+S 贴图使用全部分类。
-                    if (!self._clickMoved && self._navigation is not null && !self._editMode)
+                    if (!self._clickMoved && self._navigation is not null && !self._editMode && !self._locked)
                     {
                         GetCursorPos(out var up);
                         var direction = up.x < self._winX + self._winW / 2 ? -1 : 1;
                         self.Navigate(direction);
                     }
+                    self.PublishPinState();
                     return default;
 
                 case WM_RBUTTONUP:
@@ -639,12 +727,32 @@ public sealed unsafe partial class NativePinWindow
                     return default;
 
                 case WM_MOUSEWHEEL:
-                    self.OnWheel((short)((long)wParam.Value >> 16));
+                    // WM_MOUSEWHEEL 的 lParam 是屏幕坐标；用它做缩放锚点，消息积压时也不会
+                    // 因为此刻 GetCursorPos 已经移动而把锚点带偏。
+                    var wheelPos = (long)lParam.Value;
+                    self.OnWheel(
+                        (short)((long)wParam.Value >> 16),
+                        (short)(wheelPos & 0xFFFF),
+                        (short)((wheelPos >> 16) & 0xFFFF));
                     return default;
 
                 case WM_APP_ZOOM_SETTLED:
                     // 缩小后把曾经为最大尺寸分配的 DIB 换回当前尺寸，避免峰值内存长期驻留。
                     self.MaybeShrinkDestDib();
+                    self.RenderAndPresent(highQuality: true);
+                    self.PublishPinState();
+                    return default;
+
+                case WM_APP_CLEAR_NAV_HINT:
+                    self._navHint = null;
+                    self._navHintUntil = 0;
+                    self._needsRedrawAfterZoom = true;
+                    self.RenderAndPresent(highQuality: true);
+                    return default;
+
+                case WM_APP_END_FLASH:
+                    self._flashUntil = 0;
+                    self._needsRedrawAfterZoom = true;
                     self.RenderAndPresent(highQuality: true);
                     return default;
 
@@ -671,6 +779,7 @@ public sealed unsafe partial class NativePinWindow
                     return default;
 
                 case WM_CLOSE:
+                    PinSnapGuide.Hide();
                     App.Log($"Pin: WM_CLOSE (edit={self._editMode})");
                     _ = PInvoke.DestroyWindow(hwnd);
                     return default;
@@ -739,9 +848,11 @@ public sealed unsafe partial class NativePinWindow
         return false;
     }
 
-    private void OnWheel(int delta)
+    private void OnWheel(int delta, int screenX, int screenY)
     {
         if (delta == 0)
+            return;
+        if (_locked && !_editMode)
             return;
         if (_editMode)
         {
@@ -760,9 +871,17 @@ public sealed unsafe partial class NativePinWindow
         if (Math.Abs(newZoom - _zoom) < 0.0001)
             return;
 
+        // 以鼠标指针为锚点缩放：记录指针在当前窗口里的归一化位置，
+        // 尺寸变化后反推窗口左上角，让指针下的同一图像素留在指针下。
+        // 之前只改 _winW/_winH 不动 _winX/_winY，所以永远从左上方固定缩放。
+        var anchorX = Math.Clamp((screenX - _winX) / (double)Math.Max(1, _winW), 0, 1);
+        var anchorY = Math.Clamp((screenY - _winY) / (double)Math.Max(1, _winH), 0, 1);
+
         _zoom = newZoom;
         _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
         _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
+        _winX = (int)Math.Round(screenX - anchorX * _winW);
+        _winY = (int)Math.Round(screenY - anchorY * _winH);
 
         // 不再先 MoveWindow 再 UpdateLayeredWindow：后者本身就会按 psize 调整窗口尺寸和位置。
         // 连续滚轮时每帧只提交一次分层表面，避免 DWM 为每个中间尺寸各留一张表面。
@@ -777,6 +896,73 @@ public sealed unsafe partial class NativePinWindow
         }, null, 350, Timeout.Infinite);
     }
 
+    private RECT CurrentWorkArea()
+    {
+        var monitor = new HMONITOR(MonitorFromWindow((nint)_hwnd.Value, 2 /* MONITOR_DEFAULTTONEAREST */));
+        var info = new MONITORINFO { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
+        unsafe
+        {
+            if (!PInvoke.GetMonitorInfo(monitor, &info))
+                return _workArea;
+        }
+        return info.rcWork;
+    }
+
+    /// <summary>拖动时吸附到工作区边缘或其他贴图边缘，并在命中处显示 1px 参考线。</summary>
+    private void ApplySnap()
+    {
+        var work = CurrentWorkArea();
+        var threshold = Math.Max(3, (int)Math.Round(8 * Math.Max(1, _dpiScale)));
+        var x = _winX;
+        var y = _winY;
+        int? guideX = null;
+        int? guideY = null;
+        var bestX = int.MaxValue;
+        var bestY = int.MaxValue;
+
+        void ConsiderX(int target, int guide, int distance)
+        {
+            if (distance <= threshold && distance < bestX)
+            {
+                bestX = distance;
+                x = target;
+                guideX = guide;
+            }
+        }
+
+        void ConsiderY(int target, int guide, int distance)
+        {
+            if (distance <= threshold && distance < bestY)
+            {
+                bestY = distance;
+                y = target;
+                guideY = guide;
+            }
+        }
+
+        ConsiderX(work.left, work.left, Math.Abs(_winX - work.left));
+        ConsiderX(work.right - _winW, work.right, Math.Abs(_winX + _winW - work.right));
+        ConsiderY(work.top, work.top, Math.Abs(_winY - work.top));
+        ConsiderY(work.bottom - _winH, work.bottom, Math.Abs(_winY + _winH - work.bottom));
+
+        foreach (var pin in PinService.SnapshotPins())
+        {
+            if (pin.Hwnd == (nint)_hwnd.Value || pin.Hidden)
+                continue;
+            ConsiderX(pin.X - _winW, pin.X, Math.Abs(_winX + _winW - pin.X));
+            ConsiderX(pin.X + pin.Width, pin.X + pin.Width, Math.Abs(_winX - (pin.X + pin.Width)));
+            ConsiderY(pin.Y - _winH, pin.Y, Math.Abs(_winY + _winH - pin.Y));
+            ConsiderY(pin.Y + pin.Height, pin.Y + pin.Height, Math.Abs(_winY - (pin.Y + pin.Height)));
+        }
+
+        _winX = x;
+        _winY = y;
+        if (guideX.HasValue || guideY.HasValue)
+            PinSnapGuide.Show(guideX, work.top, work.bottom, guideY, work.left, work.right);
+        else
+            PinSnapGuide.Hide();
+    }
+
     private void ShowMenu()
     {
         App.Log("Pin: menu enter");
@@ -788,7 +974,7 @@ public sealed unsafe partial class NativePinWindow
         int command;
         try
         {
-            command = PinMenuWindow.Show((nint)_hwnd.Value, pt.x, pt.y, _opacity);
+            command = PinMenuWindow.Show((nint)_hwnd.Value, pt.x, pt.y, _opacity, _locked, _clickThrough);
         }
         finally
         {
@@ -821,6 +1007,12 @@ public sealed unsafe partial class NativePinWindow
                 break;
             case PinMenuWindow.CmdHistory:
                 PinService.RequestHistory((nint)_hwnd.Value);
+                break;
+            case PinMenuWindow.CmdToggleLock:
+                HandlePinCommand(PinCommand.ToggleLock);
+                break;
+            case PinMenuWindow.CmdToggleThrough:
+                HandlePinCommand(PinCommand.ToggleThrough);
                 break;
             case PinMenuWindow.CmdOpacity100:
                 SetOpacity(1);
@@ -920,6 +1112,124 @@ public sealed unsafe partial class NativePinWindow
         _opacity = value;
         _needsRedrawAfterZoom = true;
         RenderAndPresent(highQuality: true);
+        PublishPinState();
+    }
+
+    /// <summary>管理器发来的贴图命令：只在这个贴图线程执行，避免跨线程碰窗口字段。</summary>
+    private void HandlePinCommand(PinCommand command)
+    {
+        switch (command)
+        {
+            case PinCommand.Focus:
+                if (_hidden)
+                {
+                    _hidden = false;
+                    _ = PInvoke.ShowWindow(_hwnd, SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE);
+                }
+                // 管理器打开时所有贴图已被临时降为 NOTOPMOST；这里只提到普通窗口顶端，
+                // 不能重新宣布 TOPMOST，否则选中的贴图会盖住管理器。关闭管理器时统一恢复置顶。
+                _ = PInvoke.SetWindowPos(_hwnd, default, 0, 0, 0, 0,
+                    SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
+                FlashPin(900);
+                PublishPinState();
+                break;
+
+            case PinCommand.Hide:
+                _hidden = true;
+                _ = PInvoke.ShowWindow(_hwnd, SHOW_WINDOW_CMD.SW_HIDE);
+                PublishPinState();
+                break;
+
+            case PinCommand.Show:
+                _hidden = false;
+                _ = PInvoke.ShowWindow(_hwnd, SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE);
+                _ = PInvoke.SetWindowPos(_hwnd, new HWND(-1), 0, 0, 0, 0,
+                    SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
+                PublishPinState();
+                break;
+
+            case PinCommand.ToggleLock:
+                _locked = !_locked;
+                if (_locked && _dragging)
+                {
+                    _dragging = false;
+                    _ = PInvoke.ReleaseCapture();
+                }
+                PublishPinState();
+                RefreshPinOverlays();
+                break;
+
+            case PinCommand.ToggleThrough:
+                _clickThrough = !_clickThrough;
+                ApplyClickThrough();
+                PublishPinState();
+                RefreshPinOverlays();
+                break;
+
+            case PinCommand.RestoreInteraction:
+                _locked = false;
+                _clickThrough = false;
+                ApplyClickThrough();
+                PublishPinState();
+                RefreshPinOverlays();
+                break;
+
+            case PinCommand.Flash:
+                FlashPin(1000);
+                break;
+
+            case PinCommand.Close:
+                _ = PInvoke.DestroyWindow(_hwnd);
+                break;
+        }
+    }
+
+    private void ApplyClickThrough()
+    {
+        if (_hwnd.IsNull)
+            return;
+        var style = GetWindowLongPtr((nint)_hwnd.Value, GWL_EXSTYLE).ToInt64();
+        style = _clickThrough ? style | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT;
+        _ = SetWindowLongPtr((nint)_hwnd.Value, GWL_EXSTYLE, (nint)style);
+        _ = PInvoke.SetWindowPos(_hwnd, default, 0, 0, 0, 0,
+            SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+            SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE |
+            SET_WINDOW_POS_FLAGS.SWP_FRAMECHANGED);
+    }
+
+    private void RefreshPinOverlays()
+    {
+        _needsRedrawAfterZoom = true;
+        RenderAndPresent(highQuality: true);
+    }
+
+    private void FlashPin(int milliseconds)
+    {
+        _flashUntil = Environment.TickCount64 + milliseconds;
+        RefreshPinOverlays();
+        _flashTimer?.Dispose();
+        _flashTimer = new System.Threading.Timer(_ =>
+        {
+            if (!_hwnd.IsNull)
+                _ = PInvoke.PostMessage(_hwnd, WM_APP_END_FLASH, default, default);
+        }, null, milliseconds + 40, Timeout.Infinite);
+    }
+
+    private void ShowNavigationHint(int index, int count, string scope)
+    {
+        if (_winW < 140 * (_dpiScale <= 0 ? 1.0 : _dpiScale))
+            return;
+        _navHint = $"{index} / {count} · {scope}";
+        _navHintUntil = Environment.TickCount64 + 1200;
+        RefreshPinOverlays();
+        _navHintTimer?.Dispose();
+        _navHintTimer = new System.Threading.Timer(_ =>
+        {
+            if (!_hwnd.IsNull)
+                _ = PInvoke.PostMessage(_hwnd, WM_APP_CLEAR_NAV_HINT, default, default);
+        }, null, 1250, Timeout.Infinite);
     }
 
     /// <summary>交互期：GDI StretchBlt 快速缩放；停手后 GDI+ 双三次高清精修。</summary>
@@ -1088,6 +1398,57 @@ public sealed unsafe partial class NativePinWindow
                 graphics.DrawImage(image, new Rectangle(0, 0, _winW, _winH),
                     0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attributes);
             }
+
+            DrawPinOverlays(graphics);
+        }
+    }
+
+    /// <summary>锁定 / 点击穿透徽标、切换截图索引提示、管理器聚焦时的闪烁边框。</summary>
+    private void DrawPinOverlays(Graphics graphics)
+    {
+        var scale = _hwnd.IsNull ? 1.0 : Math.Max(1.0, PInvoke.GetDpiForWindow(_hwnd) / 96.0);
+        var size = 22 * scale;
+        var gap = 5 * scale;
+        var x = 8 * scale;
+        var y = 8 * scale;
+
+        using var badgeBrush = new SolidBrush(Color.FromArgb(0xCC, 0x1E, 0x1E, 0x20));
+        using var badgeText = new SolidBrush(Color.White);
+        using var badgeFont = new Font("Microsoft YaHei UI", 10 * (float)scale, FontStyle.Bold, GraphicsUnit.Pixel);
+        if (_locked)
+        {
+            var rect = new RectangleF((float)x, (float)y, (float)size, (float)size);
+            FillRoundedRectangle(graphics, badgeBrush, rect, 4 * (float)scale);
+            DrawCenteredText(graphics, "锁", badgeFont, badgeText, rect);
+            x += size + gap;
+        }
+        if (_clickThrough)
+        {
+            var rect = new RectangleF((float)x, (float)y, (float)size, (float)size);
+            FillRoundedRectangle(graphics, badgeBrush, rect, 4 * (float)scale);
+            DrawCenteredText(graphics, "穿", badgeFont, badgeText, rect);
+        }
+
+        if (_flashUntil > Environment.TickCount64)
+        {
+            using var pen = new Pen(Color.FromArgb(0xFF, 0x00, 0xC8, 0xFF), 3 * (float)scale);
+            DrawRoundedBorder(graphics, pen, new RectangleF(1.5f, 1.5f, _winW - 3f, _winH - 3f), 4 * (float)scale);
+        }
+
+        if (_navHint is not null && _navHintUntil > Environment.TickCount64)
+        {
+            using var chipBrush = new SolidBrush(Color.FromArgb(0xD8, 0x1E, 0x1E, 0x20));
+            using var chipText = new SolidBrush(Color.White);
+            using var chipFont = new Font("Microsoft YaHei UI", 11 * (float)scale, FontStyle.Regular, GraphicsUnit.Pixel);
+            var measured = graphics.MeasureString(_navHint, chipFont);
+            var chipW = Math.Max(150 * (float)scale, measured.Width + 26 * (float)scale);
+            var chipH = 28 * (float)scale;
+            var chip = new RectangleF(
+                (float)(_winW - chipW) / 2f,
+                (float)(_winH - chipH) - 14 * (float)scale,
+                chipW, chipH);
+            FillRoundedRectangle(graphics, chipBrush, chip, 6 * (float)scale);
+            DrawCenteredText(graphics, _navHint, chipFont, chipText, chip);
         }
     }
 

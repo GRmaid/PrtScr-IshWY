@@ -686,6 +686,8 @@ public sealed unsafe partial class NativePinWindow
         }
 
         ExitEditMode(apply: true);
+        // 标注会改写 _pngBytes，管理器缩略图与复制/另存都要拿到新图。
+        PublishPinState();
 
         if (saveAs && bytes is not null)
         {

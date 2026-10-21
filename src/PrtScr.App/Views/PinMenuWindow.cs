@@ -29,6 +29,8 @@ public sealed partial class PinMenuWindow : Window
     public const int CmdSaveAs = 5;
     public const int CmdCrop = 6;
     public const int CmdHistory = 7;
+    public const int CmdToggleLock = 8;
+    public const int CmdToggleThrough = 9;
     public const int CmdOpacity100 = 10;
     public const int CmdOpacity75 = 11;
     public const int CmdOpacity50 = 12;
@@ -36,6 +38,8 @@ public sealed partial class PinMenuWindow : Window
 
     private readonly nint _owner;
     private readonly double _opacity;
+    private readonly bool _locked;
+    private readonly bool _clickThrough;
     private readonly Action<int> _done;
     private readonly int _screenX;
     private readonly int _screenY;
@@ -53,7 +57,8 @@ public sealed partial class PinMenuWindow : Window
     private static PinMenuWindow? _current;
 
     /// <summary>贴图线程调用：回到主 UI 线程弹出菜单，并等待选择结果。</summary>
-    public static int Show(nint owner, int screenX, int screenY, double opacity)
+    public static int Show(nint owner, int screenX, int screenY, double opacity,
+        bool locked = false, bool clickThrough = false)
     {
         var queue = App.UiQueue;
         if (queue is null)
@@ -68,7 +73,7 @@ public sealed partial class PinMenuWindow : Window
         {
             try
             {
-                var window = new PinMenuWindow(owner, screenX, screenY, opacity, command =>
+                var window = new PinMenuWindow(owner, screenX, screenY, opacity, locked, clickThrough, command =>
                 {
                     result = command;
                     done.Set();
@@ -94,12 +99,15 @@ public sealed partial class PinMenuWindow : Window
         return result;
     }
 
-    private PinMenuWindow(nint owner, int screenX, int screenY, double opacity, Action<int> done)
+    private PinMenuWindow(nint owner, int screenX, int screenY, double opacity,
+        bool locked, bool clickThrough, Action<int> done)
     {
         _owner = owner;
         _screenX = screenX;
         _screenY = screenY;
         _opacity = opacity;
+        _locked = locked;
+        _clickThrough = clickThrough;
         _done = done;
         _current = this;
 
@@ -235,6 +243,8 @@ public sealed partial class PinMenuWindow : Window
         AddRow("识别文字", "", CmdOcr);
         AddRow("另存为…", "", CmdSaveAs);
         AddRow("打开截图历史", "", CmdHistory);
+        AddRow("锁定位置", "", CmdToggleLock, check: _locked);
+        AddRow("点击穿透", "", CmdToggleThrough, check: _clickThrough);
         AddSeparator();
         AddRow("不透明度", "", -1, chevron: true);
         AddSeparator();
