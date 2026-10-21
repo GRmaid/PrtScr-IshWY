@@ -234,7 +234,8 @@ public sealed partial class CaptureOverlayWindow : Window
         SelectionBorder.Visibility = Visibility.Collapsed;
         HoverBorder.Visibility = Visibility.Collapsed;
         SizeTip.Visibility = Visibility.Collapsed;
-        SaveButton.Visibility = Visibility.Collapsed;
+        SelectionActions.Visibility = Visibility.Collapsed;
+        HudBar.Visibility = Visibility.Visible;
         LoupePanel.Visibility = Visibility.Collapsed;
         CopyToast.Visibility = Visibility.Collapsed;
     }
@@ -987,6 +988,14 @@ public sealed partial class CaptureOverlayWindow : Window
         }
     }
 
+    private void Capture_Click(object sender, RoutedEventArgs e) => _ = ConfirmAsync();
+
+    private void Ocr_Click(object sender, RoutedEventArgs e)
+    {
+        if (_hasSelection)
+            _ = OcrSelectionAsync();
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e) => _ = SaveSelectionAsync();
 
     private void OnSaveShortcut(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
@@ -1188,15 +1197,20 @@ public sealed partial class CaptureOverlayWindow : Window
             LoupePanel.Visibility = Visibility.Visible;
 
             var panelW = LoupePanel.ActualWidth > 0 ? LoupePanel.ActualWidth : 202;
-            var panelH = LoupePanel.ActualHeight > 0 ? LoupePanel.ActualHeight : 238;
+            var panelH = LoupePanel.ActualHeight > 0 ? LoupePanel.ActualHeight : 256;
+            // 底部 HUD 常驻，放大镜不能压住它：把可用高度收窄后再决定翻到光标上方
+            var hudReserve = HudBar.Visibility == Visibility.Visible
+                ? Math.Max(32, HudBar.ActualHeight) + 20
+                : 0;
+            var bottomLimit = rootH - hudReserve;
             var x = dipPoint.X + 18;
             if (x + panelW > rootW - 4)
                 x = dipPoint.X - panelW - 18;
             var y = dipPoint.Y + 18;
-            if (y + panelH > rootH - 4)
+            if (y + panelH > bottomLimit - 4)
                 y = dipPoint.Y - panelH - 18;
             Canvas.SetLeft(LoupePanel, Math.Clamp(x, 4, Math.Max(4, rootW - panelW - 4)));
-            Canvas.SetTop(LoupePanel, Math.Clamp(y, 4, Math.Max(4, rootH - panelH - 4)));
+            Canvas.SetTop(LoupePanel, Math.Clamp(y, 4, Math.Max(4, bottomLimit - panelH - 4)));
             _loupeErrorLogged = false;
         }
         catch (Exception ex)
@@ -1265,10 +1279,10 @@ public sealed partial class CaptureOverlayWindow : Window
     private void ShowModeToast(bool clearedSelection)
     {
         var modeName = _captureMode == CaptureMode.Window ? "窗口截图" : "常规截图";
-        ShowCopyToast(clearedSelection ? $"已切换到{modeName}，原选区已清除" : $"已切换到{modeName}", nearTop: true);
+        ShowCopyToast(clearedSelection ? $"已切换到{modeName}，原选区已清除" : $"已切换到{modeName}");
     }
 
-    private void ShowCopyToast(string text, bool nearTop = false)
+    private void ShowCopyToast(string text)
     {
         try
         {
@@ -1279,8 +1293,11 @@ public sealed partial class CaptureOverlayWindow : Window
             var rootH = Root.ActualHeight > 0 ? Root.ActualHeight : _monitor.Height / _scale;
             var toastW = CopyToast.ActualWidth > 0 ? CopyToast.ActualWidth : 160;
             var toastH = CopyToast.ActualHeight > 0 ? CopyToast.ActualHeight : 30;
+            var hudH = HudBar.Visibility == Visibility.Visible
+                ? Math.Max(32, HudBar.ActualHeight)
+                : 0;
             Canvas.SetLeft(CopyToast, Math.Max(4, (rootW - toastW) / 2));
-            Canvas.SetTop(CopyToast, nearTop ? 46 : Math.Max(4, rootH - toastH - 48));
+            Canvas.SetTop(CopyToast, Math.Max(4, rootH - toastH - hudH - 36));
 
             _toastTimer?.Stop();
             var timer = DispatcherQueue.CreateTimer();
@@ -1314,13 +1331,8 @@ public sealed partial class CaptureOverlayWindow : Window
         if (width <= 0 || height <= 0)
             return;
 
-        // 模式徽标：始终可见，用户随时知道 Tab 会切到哪
-        ModeText.Text = _captureMode == CaptureMode.Window
-            ? "窗口截图 · Tab 切换常规"
-            : "常规截图 · Tab 切换窗口";
-        var badgeW = ModeBadge.ActualWidth > 0 ? ModeBadge.ActualWidth : 170;
-        Canvas.SetLeft(ModeBadge, Math.Max(4, (width - badgeW) / 2));
-        Canvas.SetTop(ModeBadge, 8);
+        // 底部常驻 HUD：模式 + 当前状态下最该知道的按键，替代原先散落的徽标/提示文案
+        var hudH = UpdateHud(width, height);
 
         var sel = _hasSelection ? _selection : Rect.Empty;
         var tipShown = false;
@@ -1349,18 +1361,14 @@ public sealed partial class CaptureOverlayWindow : Window
             HoverBorder.Stroke = hover.IsOverlayClass ? _overlayHoverBrush : _normalHoverBrush;
             HoverBorder.Visibility = Visibility.Visible;
 
-            SizeText.Text = $"{hover.FrameBounds.Width} × {hover.FrameBounds.Height}"
-                + (_hoverCandidates.Count > 1 ? " · 滚轮切换" : "")
-                + " · 回车截此窗"
-                + (_captureMode == CaptureMode.Window
-                    ? " / 拖拽截窗口局部"
-                    : " / 单击选中 / 拖拽自由框选");
+            // 尺寸提示只留数据；操作提示统一交给底部 HUD，避免提示框越贴边越挤
+            SizeText.Text = $"{hover.FrameBounds.Width} × {hover.FrameBounds.Height}";
             SetProcessLabel(_captureMode == CaptureMode.Window ? hover : null);
             _lastTipWindow = hover;
             SizeTip.Visibility = Visibility.Visible;
             var tipW = MeasureSizeTipWidth(200);
             var tipX = Math.Clamp(r.X + r.Width - tipW, 4, Math.Max(4, width - tipW - 4));
-            var tipY = r.Y + r.Height + 6 < height - 30 ? r.Y + r.Height + 6 : r.Y - 30;
+            var tipY = r.Y + r.Height + 6 < height - hudH - 30 ? r.Y + r.Height + 6 : r.Y - 30;
             Canvas.SetLeft(SizeTip, tipX);
             Canvas.SetTop(SizeTip, Math.Max(4, tipY));
             SizeTip.Visibility = Visibility.Visible;
@@ -1371,42 +1379,144 @@ public sealed partial class CaptureOverlayWindow : Window
             HoverBorder.Visibility = Visibility.Collapsed;
         }
 
-        // 选区边框
+        // 选区边框 + 操作条
         if (_hasSelection)
         {
             HideColorLoupe();
             SetRect(SelectionBorder, sel.X, sel.Y, sel.Width, sel.Height);
             SelectionBorder.Visibility = Visibility.Visible;
 
+            // 尺寸提示只显示数据，操作方式由底部 HUD 说明
             var prefix = _subregionWindow is not null ? "窗口内容 " : "";
-            SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)} · 回车复制 / Ctrl+S 保存 / O 识别 / Tab 切换模式";
+            SizeText.Text = prefix + $"{(int)Math.Round(sel.Width * _scale)} × {(int)Math.Round(sel.Height * _scale)}";
             SetProcessLabel(_subregionWindow ?? (_captureMode == CaptureMode.Window ? _clickedWindow : null));
-            SizeTip.Visibility = Visibility.Visible;
-            var tipW = MeasureSizeTipWidth(200);
-            var tipX = Math.Clamp(sel.Right - tipW - 8, 4, Math.Max(4, width - tipW - 4));
-            var tipY = sel.Bottom + 6 < height - 30 ? sel.Bottom + 6 : sel.Y - 30;
-            Canvas.SetLeft(SizeTip, tipX);
-            Canvas.SetTop(SizeTip, Math.Max(4, tipY));
-            SizeTip.Visibility = Visibility.Visible;
-            tipShown = true;
 
-            // 保存按钮贴在选区右上角内侧；选区太矮时挪到下方，避免压住尺寸提示
-            var saveW = SaveButton.ActualWidth > 0 ? SaveButton.ActualWidth : 56;
-            var saveH = Math.Max(26, SaveButton.ActualHeight);
-            var saveX = Math.Clamp(sel.Right - saveW - 6, 4, Math.Max(4, width - saveW - 4));
-            var saveY = sel.Height >= saveH + 12 ? sel.Y + 6 : sel.Bottom + 6;
-            Canvas.SetLeft(SaveButton, saveX);
-            Canvas.SetTop(SaveButton, Math.Clamp(saveY, 4, Math.Max(4, height - saveH - 4)));
-            SaveButton.Visibility = Visibility.Visible;
+            SelectionActions.Visibility = Visibility.Visible;
+            SelectionActions.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            var actionsW = SelectionActions.DesiredSize.Width > 0 ? SelectionActions.DesiredSize.Width : 176;
+            var actionsH = SelectionActions.DesiredSize.Height > 0 ? SelectionActions.DesiredSize.Height : 32;
+
+            SizeTip.Visibility = Visibility.Visible;
+            var tipSize = MeasureSizeTip(200, 26);
+            var tipW = tipSize.Width;
+            var tipH = tipSize.Height;
+
+            var hudTop = Math.Max(0, height - hudH - 16);
+            var floatBottom = Math.Max(8, hudTop - 6);
+            var barBelow = sel.Bottom + 6 + actionsH <= floatBottom;
+            var barAbove = !barBelow && sel.Y - 6 - actionsH >= 6;
+            var actionsInside = !barBelow && !barAbove;
+
+            var actionsX = Math.Clamp(sel.Right - actionsW, 4, Math.Max(4, width - actionsW - 4));
+            var actionsY = barBelow
+                ? sel.Bottom + 6
+                : barAbove
+                    ? sel.Y - 6 - actionsH
+                    : Math.Clamp(sel.Y + 6, 4, Math.Max(4, floatBottom - actionsH));
+
+            // 尺寸提示优先贴在选区下方；操作条也优先在下方外侧，两者并排。
+            // 只有横向放不下（进程名 + 操作条超过选区宽）或纵向放不下时才翻到选区上方。
+            var tipX = Math.Clamp(sel.X, 4, Math.Max(4, width - tipW - 4));
+            var tipY = sel.Bottom + 6;
+            if (barBelow)
+            {
+                var sideBySide = sel.Width >= actionsW + tipW + 18 && tipY + tipH <= floatBottom;
+                if (sideBySide)
+                {
+                    // 左：尺寸/进程，右：截图/识别/保存，共用选区下方一条带
+                    actionsX = Math.Clamp(sel.Right - actionsW, 4, Math.Max(4, width - actionsW - 4));
+                }
+                else if (sel.Y - 6 - tipH >= 4)
+                {
+                    tipX = Math.Clamp(sel.Right - tipW, 4, Math.Max(4, width - tipW - 4));
+                    tipY = Math.Max(4, sel.Y - tipH - 6);
+                }
+                else
+                {
+                    // 横向过窄且上方也没有空间：提示留在下方，操作条再下移一层；
+                    // 仍然放不下时只能把操作条压回选区内右上角，至少保证可点。
+                    var stackedY = tipY + tipH + 4;
+                    if (stackedY + actionsH <= floatBottom)
+                    {
+                        actionsY = stackedY;
+                    }
+                    else
+                    {
+                        actionsInside = true;
+                        actionsX = Math.Clamp(sel.Right - actionsW - 6, 4, Math.Max(4, width - actionsW - 4));
+                        actionsY = Math.Clamp(sel.Y + 6, 4, Math.Max(4, floatBottom - actionsH));
+                    }
+                }
+            }
+            else if (barAbove)
+            {
+                if (sel.Bottom + 6 + tipH <= floatBottom)
+                {
+                    tipX = Math.Clamp(sel.X, 4, Math.Max(4, width - tipW - 4));
+                    tipY = sel.Bottom + 6;
+                }
+                else
+                {
+                    // 下方被 HUD 顶住：提示翻到操作条上方，仍保持窗口外
+                    tipX = Math.Clamp(sel.Right - tipW, 4, Math.Max(4, width - tipW - 4));
+                    tipY = Math.Max(4, actionsY - tipH - 4);
+                }
+            }
+
+            Canvas.SetLeft(SelectionActions, actionsX);
+            Canvas.SetTop(SelectionActions, Math.Clamp(actionsY, 4, Math.Max(4, height - actionsH - 4)));
+            Canvas.SetLeft(SizeTip, Math.Clamp(tipX, 4, Math.Max(4, width - tipW - 4)));
+            Canvas.SetTop(SizeTip, Math.Clamp(tipY, 4, Math.Max(4, height - tipH - 4)));
+            tipShown = true;
         }
         else
         {
             SelectionBorder.Visibility = Visibility.Collapsed;
-            SaveButton.Visibility = Visibility.Collapsed;
+            SelectionActions.Visibility = Visibility.Collapsed;
             // 悬停提示是独立的：没有选区但有悬浮窗口时必须留着，否则进程名永远看不见
             if (!tipShown)
                 SizeTip.Visibility = Visibility.Collapsed;
         }
+    }
+
+    /// <summary>
+    /// 底部常驻 HUD：模式芯片 + 当前状态下的快捷键提示。
+    /// 提示文案只在这里维护，尺寸提示框保持纯数据，避免贴边时被长文案挤出屏幕。
+    /// </summary>
+    private double UpdateHud(double width, double height)
+    {
+        HudModeText.Text = _captureMode == CaptureMode.Window ? "窗口截图" : "常规截图";
+
+        if (_dragging)
+        {
+            HudHintText.Text = _dragMoved
+                ? "松开 完成选区"
+                : "拖拽 框选 · 单击 选中窗口";
+        }
+        else if (_hasSelection)
+        {
+            HudHintText.Text = "回车 截图 · O 识别 · Ctrl+S 保存 · Tab 切换";
+        }
+        else if (_hoverWindow is not null)
+        {
+            HudHintText.Text = _captureMode == CaptureMode.Window
+                ? "滚轮 切换窗口 · 回车 截取 · 拖拽 截取局部"
+                : "滚轮 切换窗口 · 单击 选中 · 拖拽 自由框选";
+        }
+        else
+        {
+            HudHintText.Text = "拖拽 框选区域 · 滚轮 选窗 · Tab 切换模式";
+        }
+
+        HudBar.Visibility = Visibility.Visible;
+        HudBar.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var hudW = HudBar.DesiredSize.Width > 0 ? HudBar.DesiredSize.Width : 420;
+        var hudH = HudBar.DesiredSize.Height > 0 ? HudBar.DesiredSize.Height : 32;
+        var hudX = Math.Clamp((width - hudW) / 2, 8, Math.Max(8, width - hudW - 8));
+        var hudY = Math.Max(8, height - hudH - 16);
+        Canvas.SetLeft(HudBar, hudX);
+        Canvas.SetTop(HudBar, hudY);
+        return hudH;
     }
 
     /// <summary>窗口模式在尺寸提示里附带进程名；常规模式或未知进程时收起，避免多占横向空间。</summary>
@@ -1428,9 +1538,18 @@ public sealed partial class CaptureOverlayWindow : Window
     /// <summary>进程标签宽度不定，先测量 SizeTip 再决定贴边位置，避免提示框被挤出屏幕。</summary>
     private double MeasureSizeTipWidth(double fallback)
     {
+        return MeasureSizeTip(fallback, 26).Width;
+    }
+
+    /// <summary>同时测量提示框宽高：选区下方要判断能否与操作条并排，高度也参与翻转判断。</summary>
+    private Windows.Foundation.Size MeasureSizeTip(double fallbackWidth, double fallbackHeight)
+    {
         SizeTip.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-        var measured = SizeTip.DesiredSize.Width;
-        return measured > 0 ? measured : fallback;
+        var width = SizeTip.DesiredSize.Width;
+        var height = SizeTip.DesiredSize.Height;
+        return new Windows.Foundation.Size(
+            width > 0 ? width : fallbackWidth,
+            height > 0 ? height : fallbackHeight);
     }
 
     private static void SetRect(FrameworkElement element, double x, double y, double w, double h)

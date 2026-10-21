@@ -52,33 +52,54 @@
                 </StackPanel>
             </Border>
 
-            <!-- 模式徽标：取景器始终显示当前模式，Tab 随时切换 -->
-            <Border
-                x:Name="ModeBadge"
-                Background="#E6202020"
-                CornerRadius="3"
-                Padding="8,3"
-                IsHitTestVisible="False">
-                <TextBlock
-                    x:Name="ModeText"
-                    Foreground="White"
-                    FontSize="12" />
-            </Border>
         </Canvas>
 
-        <!-- 选区操作层：保存按钮浮在选区右上角，不遮挡取景交互 -->
+        <!-- 选区操作层：截图/识别/保存操作条 + 底部常驻 HUD，不遮挡取景交互 -->
         <Canvas x:Name="ActionLayer" Background="{x:Null}">
-            <Button
-                x:Name="SaveButton"
-                Content="保存"
-                Padding="12,4"
-                FontSize="12"
-                MinWidth="0"
-                CornerRadius="4"
-                IsTabStop="False"
-                Visibility="Collapsed"
-                Style="{StaticResource AccentButtonStyle}"
-                Click="Save_Click" />
+            <!-- 选区操作条：截图 / 识别 / 保存，优先浮在选区下方外侧 -->
+            <Border
+                x:Name="SelectionActions"
+                Background="#E6202020"
+                CornerRadius="6"
+                Padding="4"
+                Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button
+                        x:Name="CaptureButton"
+                        Content="截图"
+                        Padding="12,4"
+                        FontSize="12"
+                        MinWidth="0"
+                        CornerRadius="4"
+                        IsTabStop="False"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="Capture_Click" />
+                    <Button
+                        x:Name="OcrButton"
+                        Content="识别"
+                        Padding="12,4"
+                        FontSize="12"
+                        MinWidth="0"
+                        CornerRadius="4"
+                        IsTabStop="False"
+                        Background="#33FFFFFF"
+                        BorderBrush="#33FFFFFF"
+                        Foreground="White"
+                        Click="Ocr_Click" />
+                    <Button
+                        x:Name="SaveButton"
+                        Content="保存"
+                        Padding="12,4"
+                        FontSize="12"
+                        MinWidth="0"
+                        CornerRadius="4"
+                        IsTabStop="False"
+                        Background="#33FFFFFF"
+                        BorderBrush="#33FFFFFF"
+                        Foreground="White"
+                        Click="Save_Click" />
+                </StackPanel>
+            </Border>
 
             <!-- 取色放大镜：跟随鼠标，19×19 像素放大 10 倍；无选区时才显示 -->
             <Border
@@ -105,6 +126,10 @@
                             Foreground="#FFB8B8B8"
                             FontSize="12" />
                     </StackPanel>
+                    <TextBlock
+                        Text="Ctrl+C 复制色值"
+                        Foreground="#FF9A9A9A"
+                        FontSize="11" />
                 </StackPanel>
             </Border>
 
@@ -120,6 +145,54 @@
                     x:Name="CopyToastText"
                     Foreground="White"
                     FontSize="14" />
+            </Border>
+
+            <!-- 底部常驻 HUD：Tab 键帽 + 模式芯片 + 随状态变化的按键提示 -->
+            <Border
+                x:Name="HudBar"
+                Background="#E6202020"
+                CornerRadius="6"
+                Padding="12,6"
+                IsHitTestVisible="False">
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <!-- Tab 与当前模式同属一个色框，明确两者是同一组「按 Tab 切模式」语义 -->
+                    <Border
+                        Background="#3300C8FF"
+                        BorderBrush="#5900C8FF"
+                        BorderThickness="1"
+                        CornerRadius="3"
+                        Padding="6,2">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock
+                                Text="Tab"
+                                Foreground="#FF8FE3FF"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                VerticalAlignment="Center" />
+                            <TextBlock
+                                x:Name="HudModeText"
+                                Foreground="#FF8FE3FF"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        x:Name="HudHintText"
+                        Foreground="White"
+                        FontSize="12"
+                        VerticalAlignment="Center" />
+                    <Border
+                        Width="1"
+                        Height="12"
+                        Background="#33FFFFFF"
+                        VerticalAlignment="Center" />
+                    <TextBlock
+                        Text="右键 / Esc 退出"
+                        Foreground="#FFB8B8B8"
+                        FontSize="12"
+                        VerticalAlignment="Center" />
+                </StackPanel>
             </Border>
         </Canvas>
 
