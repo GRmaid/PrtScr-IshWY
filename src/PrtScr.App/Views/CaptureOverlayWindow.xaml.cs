@@ -36,8 +36,8 @@ public sealed partial class CaptureOverlayWindow : Window
 
     private enum CaptureMode
     {
-        Window,   // 窗口截图：重建窗口本体，被遮挡也能取（默认）
-        Normal,   // 常规截图：直接裁冻结画面，菜单/提示/指针所见即所得
+        Window,   // 窗口截图：重建窗口本体，被遮挡也能取
+        Normal,   // 常规截图：直接裁冻结画面，菜单/提示/指针所见即所得（默认起始）
     }
 
     private Bitmap _full;

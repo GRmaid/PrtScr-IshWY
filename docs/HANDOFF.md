@@ -23,13 +23,13 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 
 | 里程碑 | 内容 |
 |---|---|
-| M0 | 托盘（H.NotifyIcon，`ContextMenuMode=SecondWindow`）、F1 全局热键、设置窗、自定义背景、便携式 config（程序目录 data） |
+| M0 | 托盘（H.NotifyIcon，`ContextMenuMode=SecondWindow`）、全局热键（历史默认 F1，v1.0.0 起 Alt+A）、设置窗、自定义背景、便携式 config（程序目录 data） |
 | M1 | 冻屏取景：Pointer 拖拽框选、窗口吸附（青色）/悬浮类橙色、滚轮循环遮挡窗口、**Tab 在窗口截图/常规截图间切换**、全局 Esc、回车/双击复制、窗口局部截图 |
 | M2 | WGC 窗口捕获（PrintWindow 优先，失败回退 WGC 窗口条目）+ D3D 设备缓存 |
 | M3 | 贴图：**原生分层窗口** `NativePinWindow`（真透明 per-pixel alpha）、拖动、滚轮缩放（占位框 + 停手高清精修）、右键菜单、Esc/双击关闭、任务栏置顶防拉锯 |
 | M4 | **原位标注**：贴图右键「标注」，窗口内自绘图标工具栏（矩形/箭头/画笔/文字/马赛克/序号 + 颜色 + HSV 取色 + 撤销/清空/完成）、按宽度自适应的分组工具栏、原生 IME 文字输入与 10–96 字号、完成=烘焙+更新贴图+复制 |
 | M5 | OCR：取景中按 `O`、贴图右键「识别文字」、托盘/设置「从剪贴板识别文字」；Windows OCR 优先（清理中文字间空格），Umi-OCR 可选（1224 端口，多端点探测 + 双 API 兼容）；结果窗可编辑复制，Esc 关闭 |
-| ★ | 全屏快速截图：默认 F2（可录制组合键）、静默进剪贴板、剪贴板写入 6 次重试 |
+| ★ | 全屏快速截图：默认 F2（v1.0.0 起 Alt+D，可录制组合键）、静默进剪贴板、剪贴板写入 6 次重试 |
 | ★ | 窗口局部截图：窗口内拖框，从未遮挡窗口本体裁剪，OCR 同样适用 |
 | ★ | 开机自启动：设置 → 常规开关，写 HKCU Run（值 `IshWY`，命令 `IshWY.exe --startup`）；登录后静默驻留托盘，单实例唤醒 |
 | ★ | 截图历史：框选/全屏截图自动写入 `data\history`（最多 30 张，可关闭）；历史窗支持复制/贴图/标注/另存为/删除/清空/打开文件夹 |
@@ -37,7 +37,7 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 | ★ | 放大取色器：跟随鼠标 19×19 放大 + 十字准星 + HEX/RGB；无选区 Ctrl+C 复制色值，有选区仍复制截图 |
 | ★ | 高分辨率应用图标：`tools/gen_icon.py` 以 256×256 为基底生成 16–256 共 10 档 ICO |
 | ★ | 另存为：取景器 `Ctrl+S`/「保存」、历史「另存为」、贴图右键「另存为…」、标注工具栏「另存」；取景器保存后仍复制并写历史 |
-| ★ | 延时截图与鼠标指针：设置 → 常规可选 0/3/5/10 秒，等待中再按截图热键取消；托盘有「延时截图」「取消延时截图」；可让 F1 与全屏截图包含当前指针 |
+| ★ | 延时截图与鼠标指针：设置 → 常规可选 0/3/5/10 秒，等待中再按截图热键取消；托盘有「延时截图」「取消延时截图」；可让截图取景与全屏截图包含当前指针 |
 | ★ | 2A 贴图工作流：贴图管理、锁定/穿透、吸附（2026-10-21 晚） | ✅ 完成（2026-10-22 00:xx 主人验收「验收通过，做的非常好」）：`PinService` 注册表 + `PinManagerWindow` 集中管理全部贴图；右键菜单可锁定位置、点击穿透；拖动 8px 吸附工作区/其他贴图并画 `PinSnapGuide`；左右半屏切换历史贴图、底部序号提示；管理/历史窗打开时临时降下置顶贴图，关闭后恢复 |
 | ★ | 贴图指针锚定滚轮缩放（2026-10-21 晚） | ✅ 完成（主人验收）：`WM_MOUSEWHEEL` 用屏幕坐标计算归一化锚点，缩放后贴图仍停在指针下；上限仍夹到当前显示器工作区，保留分层 DIB 内存保护 |
 | ★ | 新贴图初始大小设置（2026-10-21 晚） | ✅ 完成（主人验收）：设置 → 贴图新增 `pinInitialScale`（原图 80–100%，默认 100%）；`ComputeInitialZoom` 先取偏好再按工作区夹取，新贴图/左右切换历史生效；NumberBox 改 Inline 避免 PopupWindowSiteBridge 悬浮箭头关不掉 |
@@ -188,7 +188,7 @@ FullscreenBypass: 已归还原前台
 
 ### 常规截图与放大取色器（2026-10-20 晚）
 
-- 取景模式：`CaptureMode { Window, Normal }`，`_captureMode` 每次 F1 从配置 `defaultCaptureMode` 重置（`window` 默认 / `normal`）。`Tab` 调 `ToggleCaptureMode()`：清空选区、窗口引用与候选列表，`RefreshHoverFromCursor()` 后重绘，日志 `Overlay: mode=window|normal`；切换后在顶部徽标下方弹出 `CopyToast`（「已切换到常规截图」/「…原选区已清除」），避免连续按 Tab 却看不出模式变化。
+- 取景模式：`CaptureMode { Window, Normal }`，`_captureMode` 每次按截图热键从配置 `defaultCaptureMode` 重置（当时 `window` 默认 / `normal`；v1.0.0 起默认 `normal`）。`Tab` 调 `ToggleCaptureMode()`：清空选区、窗口引用与候选列表，`RefreshHoverFromCursor()` 后重绘，日志 `Overlay: mode=window|normal`；切换后在顶部徽标下方弹出 `CopyToast`（「已切换到常规截图」/「…原选区已清除」），避免连续按 Tab 却看不出模式变化。
 - 两种模式**都**做窗口预高亮与单击选中：`HitTestHover` 不再对 Normal 提前返回，`ContainsNear(rect,x,y,2)` 给窗口右/下边界留 2px 容差（`WindowRect.Contains` 本身不含右/下边界），`HandlePressed` 统一 `_clickedWindow = _hoverWindow`。因此 Normal 模式也能从屏幕/窗口边界开始拖框、单击选中整个窗口并看到高亮；`_subregionCandidate` 仍仅 Window 模式，Normal 不会走窗口局部重建。
 - `CaptureSelectionAsync()` 的第一分支是模式闸门：`Normal` 直接 `CropFullScreenSelection()`（DIP×scale、夹在显示器内、`_full.Clone`），**不调用** `WindowCapture.CaptureAsync`，所以右键菜单、悬停提示、下拉框、鼠标指针都按冻结画面原样裁；`Window` 仍走窗口局部/窗口本体重建。
 - 旧 Tab「是否识别悬浮窗」已合并进窗口模式：`HitTestHover` 不再按 `IsOverlayClass` 过滤，`_includeOverlays`、`captureOverlayWindows`、设置页 `OverlayToggle` 全部删除。取景器顶部 `ModeBadge` 常显「窗口截图 · Tab 切换常规」/「常规截图 · Tab 切换窗口」。
@@ -200,7 +200,7 @@ FullscreenBypass: 已归还原前台
 
 ### 默认截图模式、子对话框与重操作内存回收（2026-10-20 晚补）
 
-- 默认模式：配置项 `defaultCaptureMode`（`window` / `normal`）；设置 → 常规的 `DefaultModeCombo` 选择后立即写 config 并刷新提示，日志 `CaptureOptions: defaultMode=...`。每次按截图热键由 `CaptureOverlayWindow.Prepare` 读取该值决定起始模式，Tab 仍只做本次取景的临时切换。设置项旁写明「取景中按 Tab 临时切换，切换会清除已有选区」。
+- 默认模式：配置项 `defaultCaptureMode`（`window` / `normal`，v1.0.0 起默认 `normal`）；设置 → 常规的 `DefaultModeCombo` 选择后立即写 config 并刷新提示，日志 `CaptureOptions: defaultMode=...`。每次按截图热键由 `CaptureOverlayWindow.Prepare` 读取该值决定起始模式，Tab 仍只做本次取景的临时切换。设置项旁写明「取景中按 Tab 临时切换，切换会清除已有选区」。
 - 子对话框自动识别：`WindowEnumerator` 先 `EnumWindows`，再对每个可见顶层窗做 `EnumChildWindows`；只把 `#32770` 且宽≥120、高≥60 的子窗当作独立候选，插入到父窗之前（Z 序命中优先）。这样屏幕中间的错误框不会被父窗口吞掉；`WindowInfo.IsChild` 供调试日志使用。DWM `DWMWA_EXTENDED_FRAME_BOUNDS` 返回空矩形时回退 `GetWindowRect`。
 - 边界起拖：取景器的 Pointer 事件从 `Layer` 移到根 `Root`，避免点在非命中子元素时丢事件；`HandlePressed` 不再立即把整窗矩形设为选区，而是先清空选区，等到 `HandleReleased` 且 `!_dragMoved` 时才把 `_clickedWindow` 的整窗矩形设为选区。单击（未拖动）才选整窗。**仅移动 Pointer 事件不够**：取景窗 Win32 非客户区 1px 仍会把屏幕边缘按下截走，真正修复见下一节 `MakeClientAreaFullWindow()`。
 - 命中日志：`UpdateHover` 在悬停目标变化时输出 `Overlay: hover 0x... class="..." child=false rect=... title="..."` 或 `Overlay: hover none`，排查「为什么选不到某个窗口」先看这行。
@@ -302,6 +302,16 @@ FullscreenBypass: 已归还原前台
 - 热键删除：设置页五个热键行各加 28×28 ✕；`ClearHotkey` 清空配置、注销 `RegisterHotKey` 与 `EscOverPinHook`，行内显示「未设置」并禁用 ✕。窗口/全屏截图写 `-1` 哨兵，`ResolveScreenshotVk/ResolveFullscreenVk` 不再回退旧 `hotkeyKey/fullScreenHotkeyKey`；贴图/OCR/切换档位写 0。`HotkeyService.Describe(0,0)` 返回「未设置」。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0，五个热键均 `register=0x1`；2026-10-22 00:xx 主人验收「验收通过，做的非常好」。
 
+### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
+
+- 主人确认的首次启动状态：窗口截图 `Alt+A`、全屏快速截图 `Alt+D`、默认「常规截图」、默认 Windows OCR（Umi 默认关闭）、开机自启动默认关闭、关闭主窗口驻留托盘。只影响全新配置；旧配置不迁移、不覆盖。
+- `Services/ConfigService.cs`：`HotkeyVk=0x41`(65)、`HotkeyModifiers=1`、`FullHotkeyVk=0x44`(68)、`FullHotkeyModifiers=1`、`DefaultCaptureMode="normal"`、`PreferUmiOcr=false`。`hotkeyKey`/`fullScreenHotkeyKey` 仅保留为旧配置回退，不能写成 `"A"`/`"D"`——`HotkeyService.KeyNameToVirtualKey` 只认 F1–F12/Pause/Scroll，其余一律回退 F1，所以默认组合键必须走显式 vk 字段。
+- UI 文案同步：设置页鼠标指针说明改为「截图取景和全屏截图都生效」；OCR 说明标明 Windows OCR 默认、Umi 需手动开启；默认模式提示与历史空状态改为「按截图热键」，不再写死 F1。
+- 打包：`PrtScr.App.csproj` 增加 `BuiltInComInteropSupport=true`、`JsonSerializerIsReflectionEnabledByDefault=true`（partial trim 下 WGC 的 built-in COM 与 ConfigService 的反射 JSON 都依赖它们）；`scripts/publish.ps1` 使用 `-p:PublishTrimmed=true -p:TrimMode=partial`，并继续删除 57 个未加载的 App SDK 可选组件（约 65 MB）、37 个 `.winmd`（约 2.4 MB），语言目录只留 en-us/en-GB/zh-CN/zh-TW（约 3.2 MB）。
+- 产物：`artifacts/IshWY-1.0.0-win-x64/` 72.7 MB；`artifacts/IshWY-1.0.0-win-x64.zip` 30,588,110 字节（约 29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`--smoke` 退出 0。全新目录首次启动生成的 `data/config.json` 实测为 `hotkeyVk=65/mod=1`、`fullHotkeyVk=68/mod=1`、`defaultCaptureMode=normal`、`preferUmiOcr=false`，日志五个热键均 `register=0x1`。包内解压后再次 `--smoke` 同样退出 0；trim 后 WGC 2560×1600 帧与 Windows OCR 探针此前已通过。启动内存 `ws=150MB private=98MB`，仅作 smoke 记录，不代表主人性能验收。
+- 发布注意：`--smoke` 会像正常启动一样读取并写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY`，把启动路径改成当前测试副本的 exe。对复制/解压出来的包做 smoke 前先临时删除该 Run 值，测完恢复原路径；否则主人下次登录会启动到临时目录。本轮已按此恢复。
+
 ## 5. 踩坑与约定
 
 - **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。取景窗亮窗后可能既没前台也没 XAML 焦点，Tab/Ctrl+C/Esc 不能只靠焦点路径；现在由 `EscOverPinHook` 在取景激活期间直通，钩子失活时必须立刻放行，避免吞掉别的程序的按键。
@@ -335,6 +345,9 @@ FullscreenBypass: 已归还原前台
 - **WinRT interop 别猜参数顺序**：`IGraphicsCaptureItemInterop` 的 `CreateForWindow/CreateForMonitor` 原生签名是 `(HWND/HMONITOR, REFIID, void**)`，写反了只会得到误导性的 `E_INVALIDARG`，看起来像「系统不支持」。不确定就写个探针（`tools/WgcProbe` 用原始函数指针把两种顺序都调一遍）再改生产代码。
 - **COM 接口别手写 vtable 下标**：DXGI 的 `IDXGIOutput1.DuplicateOutput` 在槽位 22，旧代码写成 16（`SetDisplaySurface`），于是“S_OK + 空指针”被误判成环境不支持。要调用新 COM 接口，先在 `NativeMethods.txt` 加类型名让 CsWin32 生成，或 `dotnet build -p:EmitCompilerGeneratedFiles=true` 看生成源码确认下标；用完记得删掉 `generated/` 目录（否则 `PrtScr.Interop` 会重复编译报 CS0579）。
 - **未打包发布必须手工补 PRI/XBF**：`WindowsPackageType=None` 时 Windows App SDK 只在 `AppxPackage=true` 才把 `IshWY.pri`（程序集名 IshWY）放进发布清单，`dotnet publish` 会漏掉它和 `.xbf`，产物启动即 `XamlParseException`。`PrtScr.App.csproj` 里的 `CopyPriAndXbfToPublish`（AfterTargets=Publish）负责补拷；改发布逻辑后务必用 `scripts/publish.ps1` 或 `--smoke` 验证。
+- **partial trim 必须保留 COM 与反射 JSON 开关**：`PublishTrimmed=true` + `TrimMode=partial` 会裁掉 WGC 依赖的 built-in COM 和 `ConfigService` 的反射序列化，表现为 `Built-in COM has been disabled via a feature switch`（0x80131515）和「配置保存失败: Reflection-based serialization has been disabled」。csproj 必须保留 `BuiltInComInteropSupport=true`、`JsonSerializerIsReflectionEnabledByDefault=true`；改 trim 开关后先 `dotnet clean PrtScr.sln -c Release` 再发布，否则 ILLink 会复用旧产物而 runtimeconfig 已变，看到的现象不可信。
+- **默认组合键不能写进旧 key 字段**：`HotkeyService.KeyNameToVirtualKey` 只认 F1–F12/Pause/Scroll，`HotkeyKey="A"` 会静默回退 F1；首次启动默认 Alt+A/Alt+D 必须写显式 `HotkeyVk=65`/`FullHotkeyVk=68` 与 `HotkeyModifiers=1`，旧 `hotkeyKey/fullScreenHotkeyKey` 只作回退。
+- **`--smoke` 会改开机自启动路径**：启动流程会按当前 exe 重写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY`。对复制/解压出来的包做 smoke 前先删除该 Run 值，测完恢复原路径；否则主人下次登录会启动到临时目录。
 - **发布包不要带 PDB**：PDB 的 CodeView 会写入构建机绝对路径（含用户目录下的 `.nuget` 缓存路径），DLL 的调试目录也会保留 `obj/...pdb` 路径。`scripts/publish.ps1` 用 `-p:DebugType=None -p:DebugSymbols=false` 发布并兜底删除 `*.pdb`；发布后扫描 zip 中的 PDB、`data/`、日志与绝对路径。
 - **HistoryWindow 没有 `Loaded` 事件**：`Microsoft.UI.Xaml.Window` 本身不暴露 `Loaded`；要在构造函数里用 `((FrameworkElement)Content).Loaded += ...`，否则 `CS0103: 当前上下文中不存在名称 Loaded`。
 - **HistoryWindow 的 Esc 不能在 top-level WndProc 拦截**：WinUI 3 的键盘焦点在 `InputSiteWindowClass` 子窗（`GetGUIThreadInfo` 可确认，焦点 HWND 不是 `WinUIDesktopWin32WindowClass` 顶层窗），所以顶层 `KeyInterceptor` 收不到 Esc；用根 `Grid` 的 `PreviewKeyDown` 才能在 XAML 路由里关闭窗口，并在 `Loaded`/`Activated` 时把焦点放到 `HistoryGrid`（空列表也能聚焦），否则窗口刚打开、焦点尚未进入 XAML 树时 Esc 仍可能丢失。`KeyInterceptor` 保留作兜底。
@@ -356,6 +369,9 @@ FullscreenBypass: 已归还原前台
 
 ## 6. 待办
 
+- [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
+- [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
+- [ ] GitHub Release：删除旧 `v0.1.0`，发布 `v1.0.0` 并上传 `IshWY-1.0.0-win-x64.zip`。
 - [x] 主人验收 2026-10-22 凌晨 2A 贴图批次：贴图管理、锁定/点击穿透、8px 吸附与参考线、左右半屏切换、指针锚定缩放、新贴图初始大小 80–100%、五个热键删除 ✕ 全部通过（主人原话「验收通过，做的非常好」）。构建 0 错误，`--smoke` 通过。
 - [x] 2026-10-22 补文档并提交本轮整批（2A + 指针缩放 + pinInitialScale + 热键删除），详见 README 与 ROADMAP。
 - [x] 主人用真实独占全屏游戏实测 Ctrl+Shift+F9 —— 2026-10-19 主人确认游戏内可用（合成按键链路同日更早跑通，见 §4）

@@ -162,7 +162,7 @@
 
                 <TextBlock
                     x:Name="EmptyText"
-                    Text="当前分类还没有截图。按 F1 截一张图，或检查“保存截图历史”是否已打开。"
+                    Text="当前分类还没有截图。按截图热键截一张图，或检查“保存截图历史”是否已打开。"
                     TextWrapping="Wrap"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"

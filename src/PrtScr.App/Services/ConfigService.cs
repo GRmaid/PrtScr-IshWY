@@ -10,29 +10,29 @@ public sealed class AppConfig
     [JsonPropertyName("configVersion")]
     public int? ConfigVersion { get; set; }
 
-    /// <summary>截图热键的虚拟键名（F1..F12、Pause、Scroll）。</summary>
+    /// <summary>旧版截图键名（F1..F12、Pause、Scroll），仅在 hotkeyVk=0 时兜底。</summary>
     [JsonPropertyName("hotkeyKey")]
     public string HotkeyKey { get; set; } = "F1";
 
-    /// <summary>全屏快速截图热键的虚拟键名（F1..F12）。</summary>
+    /// <summary>旧版全屏快速截图键名（F1..F12），仅在 fullHotkeyVk=0 时兜底。</summary>
     [JsonPropertyName("fullScreenHotkeyKey")]
     public string FullScreenHotkeyKey { get; set; } = "F2";
 
-    /// <summary>全屏截图热键：虚拟键码（0 表示按旧字段解析，-1 表示用户已删除）。</summary>
+    /// <summary>全屏截图热键：虚拟键码；默认 Alt+D，0 表示按旧字段解析，-1 表示用户已删除。</summary>
     [JsonPropertyName("fullHotkeyVk")]
-    public int FullHotkeyVk { get; set; }
+    public int FullHotkeyVk { get; set; } = 0x44;
 
     /// <summary>修饰键位：Alt=1 / Ctrl=2 / Shift=4 / Win=8。</summary>
     [JsonPropertyName("fullHotkeyModifiers")]
-    public int FullHotkeyModifiers { get; set; }
+    public int FullHotkeyModifiers { get; set; } = 1;
 
-    /// <summary>截图热键：虚拟键码（0 表示按旧字段 hotkeyKey 解析，-1 表示用户已删除）。</summary>
+    /// <summary>截图热键：虚拟键码；默认 Alt+A，0 表示按旧字段 hotkeyKey 解析，-1 表示用户已删除。</summary>
     [JsonPropertyName("hotkeyVk")]
-    public int HotkeyVk { get; set; }
+    public int HotkeyVk { get; set; } = 0x41;
 
     /// <summary>热键修饰键位掩码：MOD_ALT=1 / MOD_CONTROL=2 / MOD_SHIFT=4 / MOD_WIN=8。</summary>
     [JsonPropertyName("hotkeyModifiers")]
-    public uint HotkeyModifiers { get; set; } = 0;
+    public uint HotkeyModifiers { get; set; } = 1;
 
     /// <summary>「从剪贴板贴图」热键：默认 Ctrl+Alt+V（V = paste）。</summary>
     [JsonPropertyName("pinHotkeyVk")]
@@ -55,9 +55,9 @@ public sealed class AppConfig
     [JsonPropertyName("backgroundOpacity")]
     public double BackgroundOpacity { get; set; } = 0.25;
 
-    /// <summary>优先使用 Umi-OCR（在线时；不在线自动回退 Windows OCR）。</summary>
+    /// <summary>优先使用 Umi-OCR（默认关闭；开启后在线才用，不在线自动回退 Windows OCR）。</summary>
     [JsonPropertyName("preferUmiOcr")]
-    public bool PreferUmiOcr { get; set; } = true;
+    public bool PreferUmiOcr { get; set; } = false;
 
     /// <summary>Umi-OCR 端口（可选引擎）。</summary>
     [JsonPropertyName("umiOcrPort")]
@@ -90,9 +90,9 @@ public sealed class AppConfig
     [JsonPropertyName("modeHotkeyModifiers")]
     public int ModeHotkeyModifiers { get; set; } = 5;
 
-    /// <summary>默认取景模式：window = 窗口截图（抗遮挡），normal = 常规截图（所见即所得）。仅常规档位生效。</summary>
+    /// <summary>默认取景模式：normal = 常规截图（所见即所得，新用户默认），window = 窗口截图（抗遮挡）。</summary>
     [JsonPropertyName("defaultCaptureMode")]
-    public string DefaultCaptureMode { get; set; } = "window";
+    public string DefaultCaptureMode { get; set; } = "normal";
 
     /// <summary>新贴图初始大小（原图百分比，80–100）。超过工作区时仍会自动缩到工作区。</summary>
     [JsonPropertyName("pinInitialScale")]

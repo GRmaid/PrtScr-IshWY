@@ -407,7 +407,7 @@ public sealed partial class HistoryWindow : Window
             + $"仅保存在本机 data\\history · 共 {_allItems.Count} 张 / {FormatSize(totalBytes)}";
 
         EmptyText.Text = _allItems.Count == 0
-            ? "还没有截图历史。按 F1 截一张图，或检查“保存截图历史”是否已打开。"
+            ? "还没有截图历史。按截图热键截一张图，或检查“保存截图历史”是否已打开。"
             : "当前分类还没有截图。";
         EmptyText.Visibility = shown == 0 ? Visibility.Visible : Visibility.Collapsed;
 

@@ -47,7 +47,8 @@ if (Test-Path $outDir) {
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
 & dotnet publish $project -c $Configuration -r $Runtime --self-contained true -o $outDir `
-    -p:DebugType=None -p:DebugSymbols=false
+    -p:DebugType=None -p:DebugSymbols=false `
+    -p:PublishTrimmed=true -p:TrimMode=partial
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish 失败（exit $LASTEXITCODE）"
 }
@@ -87,7 +88,28 @@ $trimPatterns = @(
     'Microsoft.Windows.SemanticSearch*.winmd',
     'Microsoft.Windows.Widgets*.dll',
     'Microsoft.Windows.Widgets*.winmd',
-    'Microsoft.DiaSymReader.Native.amd64.dll'
+    'Microsoft.DiaSymReader.Native.amd64.dll',
+    # 以下组件本应用从未加载：调试支持、WebView2、AI 推理周边、通知代理、工作负载管理。
+    'mscordaccore*.dll',
+    'mscordbi.dll',
+    'createdump.exe',
+    'Microsoft.UI.Xaml.Phone.dll',
+    'Microsoft.UI.Designer.dll',
+    'Microsoft.Web.WebView2.Core.dll',
+    'WebView2Loader.dll',
+    'msquic.dll',
+    'PerceptiveStreaming.dll',
+    'NPUDetect.dll',
+    'Microsoft.Windows.Workloads*.dll',
+    'Microsoft.Windows.Workloads.pri',
+    'workloads.*.json',
+    'Microsoft.Windows.ApplicationModel.Background.UniversalBGTask.dll',
+    'SessionHandleIPCProxyStub.dll',
+    'PushNotificationsLongRunningTask.ProxyStub.dll',
+    'RestartAgent.exe',
+    'Microsoft.Graphics.Imaging.dll',
+    'System.Numerics.Tensors.dll',
+    'System.IO.Compression.Native.dll'
 )
 $trimmedFiles = @()
 foreach ($pattern in $trimPatterns) {
@@ -97,6 +119,28 @@ if ($trimmedFiles.Count -gt 0) {
     $trimmedMb = [math]::Round((($trimmedFiles | Measure-Object Length -Sum).Sum / 1MB), 1)
     $trimmedFiles | Remove-Item -Force
     Write-Host "    已移除 $($trimmedFiles.Count) 个未使用的 App SDK 可选组件（约 $trimmedMb MB）" -ForegroundColor Yellow
+}
+
+# .winmd 是编译期 WinRT 元数据，发布运行时不需要；.NET 投影已编进 Microsoft.Windows.SDK.NET.dll。
+$winmdFiles = @(Get-ChildItem $outDir -File -Filter *.winmd -ErrorAction SilentlyContinue)
+if ($winmdFiles.Count -gt 0) {
+    $winmdMb = [math]::Round((($winmdFiles | Measure-Object Length -Sum).Sum / 1MB), 1)
+    $winmdFiles | Remove-Item -Force
+    Write-Host "    已移除 $($winmdFiles.Count) 个 WinRT 元数据文件（约 $winmdMb MB）" -ForegroundColor Yellow
+}
+
+# WinUI/App SDK 自带数十种语言的 .mui；产品只使用中英文，保留这四种即可。
+# 其它语言缺失时会回退到 en-us，不会影响启动。
+$keepLocales = @('en-us', 'en-GB', 'zh-CN', 'zh-TW')
+$localeDirs = @(Get-ChildItem $outDir -Directory | Where-Object {
+    $_.Name -match '^[a-z]{2,3}(-[A-Za-z0-9]+)*$' -and $_.Name -notin $keepLocales
+})
+if ($localeDirs.Count -gt 0) {
+    $localeMb = [math]::Round((($localeDirs | ForEach-Object {
+        Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum
+    } | Measure-Object Sum -Sum).Sum / 1MB), 1)
+    $localeDirs | Remove-Item -Recurse -Force
+    Write-Host "    已移除 $($localeDirs.Count) 个未使用语言目录（约 $localeMb MB）" -ForegroundColor Yellow
 }
 
 $exe = Join-Path $outDir 'IshWY.exe'

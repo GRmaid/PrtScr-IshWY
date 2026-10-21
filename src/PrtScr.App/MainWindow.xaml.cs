@@ -397,8 +397,8 @@ public sealed partial class MainWindow : Window
         CaptureModeHintText.Text = quick
             ? "常规取景的起始模式将在切回常规后生效。"
             : normal
-                ? "当前常规起始：常规截图。看到什么就截什么；按 F1 后按 Tab 可切到窗口截图。"
-                : "当前常规起始：窗口截图。会重建窗口本体，抗遮挡；按 F1 后按 Tab 可切到常规截图。";
+                ? "当前常规起始：常规截图。看到什么就截什么；按截图热键后按 Tab 可切到窗口截图。"
+                : "当前常规起始：窗口截图。会重建窗口本体，抗遮挡；按截图热键后按 Tab 可切到常规截图。";
     }
 
     private void OpenHistory()

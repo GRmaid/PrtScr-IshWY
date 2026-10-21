@@ -538,7 +538,7 @@
                         </StackPanel>
                         <ToggleSwitch
                             x:Name="CaptureCursorToggle"
-                            Header="截图包含鼠标指针（F1 取景和全屏截图都生效）"
+                            Header="截图包含鼠标指针（截图取景和全屏截图都生效）"
                             Toggled="CaptureCursorToggle_Toggled" />
                         <TextBlock x:Name="CaptureModeHintText" Style="{StaticResource HintTextStyle}" />
                         <TextBlock x:Name="CaptureOptionsText" Style="{StaticResource HintTextStyle}" />
@@ -652,7 +652,7 @@
                             Text="检测中…"
                             TextWrapping="Wrap" />
                         <TextBlock
-                            Text="Windows OCR 为内置默认、零依赖，但中文精度一般；Umi-OCR（PaddleOCR）精度更高，属于可选引擎——检测到本机 1224 端口在线才会启用，没安装则自动跳过。"
+                            Text="Windows OCR 是默认引擎、零依赖；Umi-OCR（PaddleOCR）精度更高，默认关闭。打开上方开关后，检测到本机 1224 端口在线才会使用，没安装则自动回退 Windows OCR。"
                             Opacity="0.6"
                             TextWrapping="Wrap" />
                     </StackPanel>
