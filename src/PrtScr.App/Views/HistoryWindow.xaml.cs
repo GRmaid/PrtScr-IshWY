@@ -1,13 +1,18 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
+using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PrtScr.App.Services;
 using Windows.Storage;
+using Windows.UI;
 using WinRT.Interop;
 
 namespace PrtScr.App.Views;
@@ -18,6 +23,7 @@ public sealed partial class HistoryWindow : Window
     private const string AllCategoryKey = "all";
     private const string WindowModeKey = "mode:Window";
     private const string NormalModeKey = "mode:Normal";
+    private const string PinCropModeKey = "mode:PinCrop";
     private const string LegacyModeKey = "mode:Legacy";
     private const int DisplayCap = 120;
 
@@ -29,6 +35,9 @@ public sealed partial class HistoryWindow : Window
     private int _loadVersion;
     private bool _suppressCategoryChange;
     private bool _closed;
+    private bool _selectionMode;
+    private bool _suppressSelectionSync;
+    private long _lastEscapeTick;
 
     public HistoryWindow()
     {
@@ -52,7 +61,7 @@ public sealed partial class HistoryWindow : Window
         _keys = new PrtScr.App.Services.KeyInterceptor(WindowNative.GetWindowHandle(this));
         _keys.KeyDown += vk =>
         {
-            if (vk == 0x1B)
+            if (vk == 0x1B && !HandleEscape())
                 Close();
         };
 
@@ -83,11 +92,154 @@ public sealed partial class HistoryWindow : Window
 
     private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key != Windows.System.VirtualKey.Escape)
+        if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            if (!HandleEscape())
+                Close();
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Delete)
+        {
+            e.Handled = true;
+            _ = DeleteSelectedAsync();
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.A && IsControlDown())
+        {
+            e.Handled = true;
+            EnterSelectionMode(null);
+            HistoryGrid.SelectAll();
+            UpdateSelectionVisuals();
+        }
+    }
+
+    /// <summary>
+    /// Esc 的两级语义：先退出多选/清空选择，再按一次才关窗。
+    /// KeyInterceptor 与 XAML PreviewKeyDown 可能同时收到同一次按键，用时间窗去重。
+    /// </summary>
+    private bool HandleEscape()
+    {
+        var now = Environment.TickCount64;
+        if (now - _lastEscapeTick < 250)
+            return true;
+        _lastEscapeTick = now;
+
+        if (_selectionMode || HistoryGrid.SelectedItems.Count > 0)
+        {
+            ExitSelectionMode();
+            StatusText.Text = "已退出多选";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsControlDown()
+    {
+        var state = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(
+            Windows.System.VirtualKey.Control);
+        return (state & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+    }
+
+    private void EnterSelectionMode(HistoryItemView? item)
+    {
+        _selectionMode = true;
+        HistoryGrid.SelectionMode = ListViewSelectionMode.Multiple;
+        if (item is not null && !HistoryGrid.SelectedItems.Contains(item))
+            HistoryGrid.SelectedItems.Add(item);
+        UpdateSelectionVisuals();
+    }
+
+    private void ExitSelectionMode()
+    {
+        _selectionMode = false;
+        _suppressSelectionSync = true;
+        try
+        {
+            // SelectedItems 在 Single 模式下是只读集合，先按当前模式清空再切模式，否则会抛 COMException。
+            ClearGridSelection();
+            HistoryGrid.SelectionMode = ListViewSelectionMode.Single;
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+        UpdateSelectionVisuals();
+    }
+
+    /// <summary>SelectedItems 在 Single 模式下只读；清空必须按当前模式分开处理。</summary>
+    private void ClearGridSelection()
+    {
+        if (HistoryGrid.SelectionMode == ListViewSelectionMode.Single)
+            HistoryGrid.SelectedItem = null;
+        else
+            HistoryGrid.SelectedItems.Clear();
+    }
+
+    private void HistoryGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionSync || _closed)
+            return;
+        UpdateSelectionVisuals();
+    }
+
+    private void UpdateSelectionVisuals()
+    {
+        var selected = HistoryGrid.SelectedItems.OfType<HistoryItemView>().ToHashSet();
+        foreach (var view in _items)
+            view.IsSelected = selected.Contains(view);
+
+        if (_selectionMode)
+        {
+            StatusText.Text = selected.Count > 0
+                ? $"已选 {selected.Count} 张 · Esc 退出选择"
+                : "多选模式 · 单击勾选 · Esc 退出";
+            return;
+        }
+
+        if (selected.Count == 1)
+        {
+            var view = selected.First();
+            StatusText.Text = $"{view.Caption} · {view.Detail}";
+        }
+    }
+
+    private void HistoryGrid_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var view = FindItemView(e.OriginalSource as DependencyObject);
+        if (view is null)
             return;
 
         e.Handled = true;
-        Close();
+        EnterSelectionMode(view);
+    }
+
+    private static HistoryItemView? FindItemView(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is FrameworkElement { DataContext: HistoryItemView view })
+                return view;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
+    }
+
+    private void DeleteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        _ = DeleteSelectedAsync();
+    }
+
+    private void SelectAllAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        EnterSelectionMode(null);
+        HistoryGrid.SelectAll();
+        UpdateSelectionVisuals();
     }
 
     /// <summary>历史被删除/清空后通知外部刷新统计。</summary>
@@ -150,6 +302,9 @@ public sealed partial class HistoryWindow : Window
             NormalModeKey, "常规截图",
             _allItems.Count(i => i.Mode == HistoryCaptureMode.Normal)));
         rebuilt.Add(new HistoryCategoryView(
+            PinCropModeKey, "贴图裁剪",
+            _allItems.Count(i => i.Mode == HistoryCaptureMode.PinCrop)));
+        rebuilt.Add(new HistoryCategoryView(
             LegacyModeKey, "早期未分类",
             _allItems.Count(i => i.Mode == HistoryCaptureMode.Legacy)));
 
@@ -182,11 +337,22 @@ public sealed partial class HistoryWindow : Window
             if (views is null || _closed || version != _loadVersion)
                 return;
 
+            _suppressSelectionSync = true;
+            try
+            {
+                ClearGridSelection();
+            }
+            finally
+            {
+                _suppressSelectionSync = false;
+            }
+
             _items.Clear();
             foreach (var view in views)
                 _items.Add(view);
 
             UpdateSummary();
+            UpdateSelectionVisuals();
         }
         catch (Exception ex)
         {
@@ -223,6 +389,7 @@ public sealed partial class HistoryWindow : Window
             AllCategoryKey => _allItems,
             WindowModeKey => _allItems.Where(i => i.Mode == HistoryCaptureMode.Window),
             NormalModeKey => _allItems.Where(i => i.Mode == HistoryCaptureMode.Normal),
+            PinCropModeKey => _allItems.Where(i => i.Mode == HistoryCaptureMode.PinCrop),
             LegacyModeKey => _allItems.Where(i => i.Mode == HistoryCaptureMode.Legacy),
             _ when categoryKey.StartsWith("window:", StringComparison.Ordinal) =>
                 _allItems.Where(i => i.CategoryKey == categoryKey),
@@ -262,6 +429,7 @@ public sealed partial class HistoryWindow : Window
             return;
 
         _selectedCategoryKey = category.Key;
+        ExitSelectionMode();
         _ = LoadVisibleAsync();
     }
 
@@ -301,15 +469,40 @@ public sealed partial class HistoryWindow : Window
         if (e.ClickedItem is not HistoryItemView view)
             return;
 
-        var selected = HistoryGrid.SelectedItems.Count;
-        StatusText.Text = selected > 1
-            ? $"已选择 {selected} 张 · 双击复制第一张"
-            : $"{view.Caption} · {view.Detail}";
+        if (_selectionMode)
+        {
+            // Multiple 模式下 GridView 自己负责“点一次选中、再点取消”，
+            // SelectionChanged 会刷新卡片边框与计数。
+            UpdateSelectionVisuals();
+            return;
+        }
+
+        StatusText.Text = $"{view.Caption} · {view.Detail}";
     }
 
     private async void HistoryGrid_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        await CopySelectedAsync();
+        var view = FindItemView(e.OriginalSource as DependencyObject)
+            ?? HistoryGrid.SelectedItems.OfType<HistoryItemView>().FirstOrDefault();
+        if (view is null)
+            return;
+
+        // 双击 = 直接贴图；多选状态下先退出多选，避免残留勾选。
+        if (_selectionMode)
+            ExitSelectionMode();
+
+        _suppressSelectionSync = true;
+        try
+        {
+            HistoryGrid.SelectedItem = view;
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+        UpdateSelectionVisuals();
+
+        await PinViewAsync(view);
     }
 
     private HistoryItemView? RequireSelection()
@@ -353,6 +546,11 @@ public sealed partial class HistoryWindow : Window
         if (view is null)
             return;
 
+        await PinViewAsync(view);
+    }
+
+    private async Task PinViewAsync(HistoryItemView view)
+    {
         var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
         if (bytes is null)
         {
@@ -360,8 +558,13 @@ public sealed partial class HistoryWindow : Window
             return;
         }
 
-        var created = PinService.PastePng(bytes);
-        StatusText.Text = created ? "已贴到桌面" : "贴图失败";
+        var files = FilterItems(_selectedCategoryKey).Select(i => i.FilePath).ToList();
+        var index = files.IndexOf(view.Item.FilePath);
+        var scope = _categories.FirstOrDefault(c => c.Key == _selectedCategoryKey)?.Title ?? "全部";
+        var created = files.Count > 1 && index >= 0
+            ? PinService.PastePngWithNavigation(bytes, files, index, scope)
+            : PinService.PastePng(bytes);
+        StatusText.Text = created ? $"已贴到桌面 · 左/右半边切换「{scope}」" : "贴图失败";
     }
 
     private async void Annotate_Click(object sender, RoutedEventArgs e)
@@ -435,7 +638,9 @@ public sealed partial class HistoryWindow : Window
             : $"已批量保存 {saved} 张到：{folder}";
     }
 
-    private async void Delete_Click(object sender, RoutedEventArgs e)
+    private async void Delete_Click(object sender, RoutedEventArgs e) => await DeleteSelectedAsync();
+
+    private async Task DeleteSelectedAsync()
     {
         var selected = SelectedViews();
         if (selected.Count == 0)
@@ -466,8 +671,9 @@ public sealed partial class HistoryWindow : Window
 
     private void SelectAll_Click(object sender, RoutedEventArgs e)
     {
+        EnterSelectionMode(null);
         HistoryGrid.SelectAll();
-        StatusText.Text = $"已选择 {HistoryGrid.SelectedItems.Count} 张";
+        UpdateSelectionVisuals();
     }
 
     private void OpenFolder_Click(object sender, RoutedEventArgs e)
@@ -497,22 +703,96 @@ public sealed partial class HistoryWindow : Window
 }
 
 /// <summary>历史网格的显示模型（x:Bind 需要公开属性）。</summary>
-public sealed class HistoryItemView
+public sealed class HistoryItemView : INotifyPropertyChanged
 {
+    private static readonly Brush TransparentBrush = new SolidColorBrush(Colors.Transparent);
+    private static Brush? _defaultBorderBrush;
+    private static Brush? _selectedBorderBrush;
+    private static Brush? _selectionTintBrush;
+
+    private bool _isSelected;
+
     public HistoryItemView(HistoryItem item, BitmapImage? thumbnail)
     {
         Item = item;
         Thumbnail = thumbnail;
     }
 
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     public HistoryItem Item { get; }
     public BitmapImage? Thumbnail { get; }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value)
+                return;
+
+            _isSelected = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CardBorderThickness));
+            OnPropertyChanged(nameof(CardBorderBrush));
+            OnPropertyChanged(nameof(SelectionTintBrush));
+            OnPropertyChanged(nameof(SelectionBadgeBrush));
+            OnPropertyChanged(nameof(SelectionVisibility));
+        }
+    }
+
+    public Thickness CardBorderThickness => _isSelected ? new Thickness(2.5) : new Thickness(1);
+
+    public Brush CardBorderBrush => _isSelected ? SelectedBorderBrush : DefaultBorderBrush;
+
+    public Brush SelectionTintBrush => _isSelected ? SelectionTint : TransparentBrush;
+
+    public Brush SelectionBadgeBrush => SelectedBorderBrush;
+
+    public Visibility SelectionVisibility =>
+        _isSelected ? Visibility.Visible : Visibility.Collapsed;
 
     public string Caption => $"{Item.Source} · {Item.CreatedAt:MM-dd HH:mm:ss}";
 
     public string Detail => Item.Width > 0
         ? $"{Item.Width}×{Item.Height} · {FormatSize(Item.SizeBytes)}"
         : FormatSize(Item.SizeBytes);
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    private static Brush DefaultBorderBrush =>
+        _defaultBorderBrush ??= ResourceBrush("CardStrokeColorDefaultBrush", Color.FromArgb(255, 128, 128, 128));
+
+    private static Brush SelectedBorderBrush =>
+        _selectedBorderBrush ??= ResourceBrush("AccentFillColorDefaultBrush", Color.FromArgb(255, 0, 120, 212));
+
+    private static Brush SelectionTint
+    {
+        get
+        {
+            if (_selectionTintBrush is not null)
+                return _selectionTintBrush;
+
+            var color = (SelectedBorderBrush as SolidColorBrush)?.Color
+                ?? Color.FromArgb(255, 0, 120, 212);
+            _selectionTintBrush = new SolidColorBrush(Color.FromArgb(38, color.R, color.G, color.B));
+            return _selectionTintBrush;
+        }
+    }
+
+    private static Brush ResourceBrush(string key, Color fallback)
+    {
+        try
+        {
+            if (Application.Current.Resources[key] is Brush brush)
+                return brush;
+        }
+        catch
+        {
+        }
+        return new SolidColorBrush(fallback);
+    }
 
     private static string FormatSize(long bytes) =>
         bytes >= 1024L * 1024 ? $"{bytes / 1024.0 / 1024.0:0.0} MB" : $"{bytes / 1024.0:0} KB";

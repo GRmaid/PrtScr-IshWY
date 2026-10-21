@@ -6,6 +6,10 @@
     xmlns:local="using:PrtScr.App.Views">
 
     <Grid Padding="18" RowSpacing="12" PreviewKeyDown="RootGrid_PreviewKeyDown">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="Delete" Invoked="DeleteAccelerator_Invoked" />
+            <KeyboardAccelerator Key="A" Modifiers="Control" Invoked="SelectAllAccelerator_Invoked" />
+        </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -76,9 +80,11 @@
             <Grid Grid.Column="1">
                 <GridView
                     x:Name="HistoryGrid"
-                    SelectionMode="Extended"
+                    SelectionMode="Single"
                     IsItemClickEnabled="True"
                     ItemClick="HistoryGrid_ItemClick"
+                    SelectionChanged="HistoryGrid_SelectionChanged"
+                    RightTapped="HistoryGrid_RightTapped"
                     DoubleTapped="HistoryGrid_DoubleTapped">
                     <GridView.ItemContainerStyle>
                         <Style TargetType="GridViewItem">
@@ -103,9 +109,9 @@
                                 Height="184"
                                 Padding="8"
                                 CornerRadius="8"
-                                BorderThickness="1"
+                                BorderThickness="{x:Bind CardBorderThickness, Mode=OneWay}"
                                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                BorderBrush="{x:Bind CardBorderBrush, Mode=OneWay}">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="*" />
                                     <RowDefinition Height="Auto" />
@@ -126,6 +132,29 @@
                                         Opacity="0.6"
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
+                                <Border
+                                    Grid.RowSpan="2"
+                                    Margin="-8"
+                                    CornerRadius="8"
+                                    Background="{x:Bind SelectionTintBrush, Mode=OneWay}"
+                                    Visibility="{x:Bind SelectionVisibility, Mode=OneWay}"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    Grid.RowSpan="2"
+                                    Width="22"
+                                    Height="22"
+                                    CornerRadius="11"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Margin="0,-4,-4,0"
+                                    Background="{x:Bind SelectionBadgeBrush, Mode=OneWay}"
+                                    Visibility="{x:Bind SelectionVisibility, Mode=OneWay}"
+                                    IsHitTestVisible="False">
+                                    <FontIcon
+                                        Glyph="&#xE73E;"
+                                        FontSize="11"
+                                        Foreground="White" />
+                                </Border>
                             </Grid>
                         </DataTemplate>
                     </GridView.ItemTemplate>

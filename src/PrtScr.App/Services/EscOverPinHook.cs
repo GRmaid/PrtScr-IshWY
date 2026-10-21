@@ -33,7 +33,13 @@ internal static unsafe class EscOverPinHook
 
     private static int _fullScreenVk = 0x71;   // F2
     private static int _fullScreenMods;
+    private static int _screenshotVk = 0x70;   // F1
+    private static int _screenshotMods;
+    private static int _modeVk = 0x43;         // C
+    private static int _modeMods = 5;          // Alt + Shift
     private static long _lastFullScreenTick;
+    private static long _lastScreenshotTick;
+    private static long _lastModeTick;
     private static long _lastDiagTick;
     private static long _lastReinstallTick;
     private const int FullScreenDebounceMs = 300;
@@ -57,10 +63,28 @@ internal static unsafe class EscOverPinHook
     /// <summary>全局键盘钩子捕获到全屏截图热键（在钩子线程上触发，订阅方自行切线程）。</summary>
     public static event Action? FullScreenPressed;
 
+    /// <summary>主截图热键的钩子通道（游戏吞键时 RegisterHotKey 收不到）。</summary>
+    public static event Action? ScreenshotPressed;
+
+    /// <summary>切换截图模式热键的钩子通道。</summary>
+    public static event Action? ModeSwitchPressed;
+
     public static void SetFullScreenKey(int virtualKey, int modifiers = 0)
     {
         _fullScreenVk = virtualKey;
         _fullScreenMods = modifiers;
+    }
+
+    public static void SetScreenshotKey(int virtualKey, int modifiers = 0)
+    {
+        _screenshotVk = virtualKey;
+        _screenshotMods = modifiers;
+    }
+
+    public static void SetModeSwitchKey(int virtualKey, int modifiers = 0)
+    {
+        _modeVk = virtualKey;
+        _modeMods = modifiers;
     }
 
     /// <summary>
@@ -78,15 +102,23 @@ internal static unsafe class EscOverPinHook
     /// 全屏热键去抖/去重：钩子路径与 RegisterHotKey 兜底路径共用，
     /// 同一物理按键只允许触发一次（300ms 内视为同一次）。
     /// </summary>
-    public static bool TryClaimFullScreenHotkey()
+    public static bool TryClaimFullScreenHotkey() => TryClaim(ref _lastFullScreenTick);
+
+    /// <summary>主截图热键去重：钩子与 RegisterHotKey 兜底只允许一次生效。</summary>
+    public static bool TryClaimScreenshotHotkey() => TryClaim(ref _lastScreenshotTick);
+
+    /// <summary>切换截图模式热键去重。</summary>
+    public static bool TryClaimModeSwitchHotkey() => TryClaim(ref _lastModeTick);
+
+    private static bool TryClaim(ref long tick)
     {
         var now = Environment.TickCount64;
         while (true)
         {
-            var last = Interlocked.Read(ref _lastFullScreenTick);
+            var last = Interlocked.Read(ref tick);
             if (now - last < FullScreenDebounceMs)
                 return false;
-            if (Interlocked.CompareExchange(ref _lastFullScreenTick, now, last) == last)
+            if (Interlocked.CompareExchange(ref tick, now, last) == last)
                 return true;
         }
     }
@@ -263,18 +295,20 @@ internal static unsafe class EscOverPinHook
     /// 要求的修饰键必须都按住；**允许多按**（例如 Win 键状态卡住、用户顺手带 Alt），
     /// 精确相等会让一次卡键永久废掉热键。
     /// </summary>
-    private static bool RequiredModifiersDown()
+    private static bool ModifiersDown(int mods)
     {
         var ctrl = _ctrlDown || Down(0x11);
         var alt = _altDown || Down(0x12);
         var shift = _shiftDown || Down(0x10);
         var win = _winDown || Down(0x5B) || Down(0x5C);
 
-        return ((_fullScreenMods & 2) == 0 || ctrl)
-            && ((_fullScreenMods & 1) == 0 || alt)
-            && ((_fullScreenMods & 4) == 0 || shift)
-            && ((_fullScreenMods & 8) == 0 || win);
+        return ((mods & 2) == 0 || ctrl)
+            && ((mods & 1) == 0 || alt)
+            && ((mods & 4) == 0 || shift)
+            && ((mods & 8) == 0 || win);
     }
+
+    private static bool RequiredModifiersDown() => ModifiersDown(_fullScreenMods);
 
     private static string DescribeModifiers()
     {
@@ -338,6 +372,36 @@ internal static unsafe class EscOverPinHook
         }
     }
 
+    private static void EvaluateScreenshotHotkey()
+    {
+        if (Volatile.Read(ref _overlayKeysActive) != 0)
+            return;
+
+        if (!ModifiersDown(_screenshotMods))
+            return;
+
+        if (TryClaimScreenshotHotkey())
+        {
+            HookLog($"Hook: screenshot key vk=0x{_screenshotVk:X} mods={_screenshotMods} pressed");
+            ScreenshotPressed?.Invoke();
+        }
+    }
+
+    private static void EvaluateModeHotkey()
+    {
+        if (Volatile.Read(ref _overlayKeysActive) != 0)
+            return;
+
+        if (!ModifiersDown(_modeMods))
+            return;
+
+        if (TryClaimModeSwitchHotkey())
+        {
+            HookLog($"Hook: mode key vk=0x{_modeVk:X} mods={_modeMods} pressed");
+            ModeSwitchPressed?.Invoke();
+        }
+    }
+
     private static void EvaluateFullScreenHotkey()
     {
         if (RequiredModifiersDown())
@@ -383,6 +447,10 @@ internal static unsafe class EscOverPinHook
 
                     if (isDown && data->vkCode == (uint)_fullScreenVk)
                         EvaluateFullScreenHotkey();
+                    if (isDown && data->vkCode == (uint)_screenshotVk)
+                        EvaluateScreenshotHotkey();
+                    if (isDown && data->vkCode == (uint)_modeVk)
+                        EvaluateModeHotkey();
                 }
             }
         }

@@ -27,12 +27,14 @@ public sealed unsafe class HotkeyService : IDisposable
     private const uint WM_APP_SET_FULLSCREEN = 0x8003;    // WM_APP + 3
     private const uint WM_APP_SET_PIN = 0x8004;           // WM_APP + 4
     private const uint WM_APP_SET_OCR = 0x8005;           // WM_APP + 5
+    private const uint WM_APP_SET_MODE = 0x8006;          // WM_APP + 6
 
     private const int ScreenshotHotkeyId = 1;
     private const int CancelHotkeyId = 2;
     private const int FullScreenHotkeyId = 3;
     private const int PinHotkeyId = 4;
     private const int OcrHotkeyId = 5;
+    private const int ModeHotkeyId = 6;
 
     /// <summary>截图（冻屏取景）热键。</summary>
     public event Action? HotkeyPressed;
@@ -49,6 +51,9 @@ public sealed unsafe class HotkeyService : IDisposable
 
     /// <summary>从剪贴板识别文字热键。</summary>
     public event Action? OcrHotkeyPressed;
+
+    /// <summary>切换截图模式（常规取景 / 快捷全屏）。</summary>
+    public event Action? ModeHotkeyPressed;
 
     /// <summary>取景期间按下全局 Esc（无视焦点，微信同款）。</summary>
     public event Action? CancelPressed;
@@ -70,6 +75,8 @@ public sealed unsafe class HotkeyService : IDisposable
     private volatile int _pinMods;
     private volatile int _ocrVk;
     private volatile int _ocrMods;
+    private volatile int _modeVk;
+    private volatile int _modeMods;
 
     public HotkeyService() { }
 
@@ -139,6 +146,8 @@ public sealed unsafe class HotkeyService : IDisposable
             RegisterPinHotkey(_hwnd);
         if (_ocrVk != 0)
             RegisterOcrHotkey(_hwnd);
+        if (_modeVk != 0)
+            RegisterModeHotkey(_hwnd);
 
         while (!_stop)
         {
@@ -193,6 +202,16 @@ public sealed unsafe class HotkeyService : IDisposable
 
         if (!_hwnd.IsNull)
             _ = PInvoke.PostMessage(_hwnd, WM_APP_SET_OCR, default, default);
+    }
+
+    /// <summary>设置/更换「切换截图模式」热键。</summary>
+    public void SetModeKey(int virtualKey, int modifiers)
+    {
+        _modeVk = virtualKey;
+        _modeMods = modifiers;
+
+        if (!_hwnd.IsNull)
+            _ = PInvoke.PostMessage(_hwnd, WM_APP_SET_MODE, default, default);
     }
 
     private void RegisterScreenshotHotkey(HWND hwnd)
@@ -267,6 +286,24 @@ public sealed unsafe class HotkeyService : IDisposable
             ReportFailure("OCR", _ocrVk, _ocrMods);
     }
 
+    private void RegisterModeHotkey(HWND hwnd)
+    {
+        _ = PInvoke.UnregisterHotKey(hwnd, ModeHotkeyId);
+
+        if (_modeVk == 0)
+            return;
+
+        var ok = PInvoke.RegisterHotKey(
+            hwnd,
+            ModeHotkeyId,
+            (HOT_KEY_MODIFIERS)((uint)_modeMods | MOD_NOREPEAT),
+            (uint)_modeVk);
+
+        App.Log($"Hotkey: mode vk=0x{_modeVk:X} mods={_modeMods} register={ok}");
+        if (!ok)
+            ReportFailure("切换截图模式", _modeVk, _modeMods);
+    }
+
     private void ReportFailure(string name, int vk, int mods) =>
         RegistrationFailed?.Invoke($"{name}热键 {Describe(vk, mods)} 注册失败（可能被其他程序占用，换一个组合键）");
 
@@ -301,6 +338,10 @@ public sealed unsafe class HotkeyService : IDisposable
                 self.OcrHotkeyPressed?.Invoke();
                 break;
 
+            case WM_HOTKEY when (int)wParam.Value == ModeHotkeyId:
+                self.ModeHotkeyPressed?.Invoke();
+                break;
+
             case WM_HOTKEY when (int)wParam.Value == CancelHotkeyId:
                 self.CancelPressed?.Invoke();
                 break;
@@ -317,6 +358,10 @@ public sealed unsafe class HotkeyService : IDisposable
                 self.RegisterOcrHotkey(hwnd);
                 return default;
 
+            case WM_APP_SET_MODE:
+                self.RegisterModeHotkey(hwnd);
+                return default;
+
             case WM_APP_REGISTER_CANCEL:
                 _ = PInvoke.RegisterHotKey(hwnd, CancelHotkeyId, (HOT_KEY_MODIFIERS)MOD_NOREPEAT, VK_ESCAPE);
                 return default;
@@ -331,6 +376,7 @@ public sealed unsafe class HotkeyService : IDisposable
                 _ = PInvoke.UnregisterHotKey(hwnd, FullScreenHotkeyId);
                 _ = PInvoke.UnregisterHotKey(hwnd, PinHotkeyId);
                 _ = PInvoke.UnregisterHotKey(hwnd, OcrHotkeyId);
+                _ = PInvoke.UnregisterHotKey(hwnd, ModeHotkeyId);
                 _ = PInvoke.DestroyWindow(hwnd);
                 return default;
 

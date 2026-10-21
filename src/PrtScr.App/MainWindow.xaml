@@ -244,6 +244,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Text="操作" FontSize="12" Opacity="0.55" />
@@ -317,16 +318,106 @@
                                     Tag="ocr"
                                     Click="HotkeyRecord_Click"
                                     KeyDown="HotkeyRecord_KeyDown" />
+
+                                <TextBlock Grid.Row="5" Text="切换截图模式" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="ModeHotkeyText"
+                                    Grid.Row="5"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="ModeHotkeyRecordButton"
+                                    Grid.Row="5"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="mode"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
                             </Grid>
                         </Border>
                         <TextBlock
                             x:Name="HotkeyStatusText"
                             Style="{StaticResource HintTextStyle}" />
+
+                        <TextBlock Text="完整快捷键目录" Style="{StaticResource SectionTitleStyle}" />
+                        <Border
+                            Padding="12"
+                            CornerRadius="10"
+                            Background="{ThemeResource ControlFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1">
+                            <Grid ColumnSpacing="12" RowSpacing="7">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="170" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="范围" FontSize="12" Opacity="0.55" />
+                                <TextBlock Grid.Column="1" Text="按键" FontSize="12" Opacity="0.55" />
+                                <TextBlock Grid.Column="2" Text="动作" FontSize="12" Opacity="0.55" />
+
+                                <TextBlock Grid.Row="1" Text="取景器" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" Text="Tab" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="在窗口截图与常规截图之间切换" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="1" Text="滚轮 / 回车" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="切换窗口候选 / 直接截取当前窗口" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="1" Text="O / Ctrl+S" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="3" Grid.Column="2" Text="识别选区文字 / 选区另存为" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="1" Text="Ctrl+C" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="4" Grid.Column="2" Text="无选区复制指针色值；有选区复制图片" />
+
+                                <TextBlock Grid.Row="5" Grid.Column="1" Text="Esc / 鼠标右键" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="5" Grid.Column="2" Text="取消取景（始终可用，不可改键）" />
+
+                                <TextBlock Grid.Row="6" Text="贴图 / 裁剪" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="6" Grid.Column="1" Text="Ctrl+Z / Ctrl+S" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="6" Grid.Column="2" Text="撤销标注 / 另存为" />
+
+                                <TextBlock Grid.Row="7" Grid.Column="1" Text="回车 / Esc" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="7" Grid.Column="2" Text="完成标注或裁剪贴图 / 退出当前状态" />
+
+                                <TextBlock Grid.Row="8" Text="截图历史" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="8" Grid.Column="1" Text="双击 / 右键 / Ctrl+A / Delete" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="8" Grid.Column="2" Text="直接贴图 / 进入多选 / 全选 / 删除选中" />
+
+                                <TextBlock Grid.Row="9" Grid.Column="1" Text="Esc" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="9" Grid.Column="2" Text="先退出多选；再按一次关闭历史窗" />
+                            </Grid>
+                        </Border>
                         <TextBlock
-                            Text="取景中按 Tab 在窗口截图与常规截图之间切换；Esc 或鼠标右键取消；滚轮切换窗口，回车直接截取当前窗口。"
+                            Text="全局组合键可在上表修改；取景器与贴图内的按键是固定语义，Esc 与鼠标右键始终作为兜底退出。"
                             Style="{StaticResource HintTextStyle}" />
 
                         <TextBlock Text="截图行为" Style="{StaticResource SectionTitleStyle}" />
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="截图热键行为" />
+                            <ComboBox
+                                x:Name="CaptureProfileCombo"
+                                Width="390"
+                                SelectionChanged="CaptureProfileCombo_SelectionChanged">
+                                <ComboBoxItem Content="常规取景（冻屏后框选 / 选窗）" Tag="normal" />
+                                <ComboBoxItem Content="快捷全屏（直接复制到剪贴板）" Tag="quick" />
+                            </ComboBox>
+                            <TextBlock x:Name="CaptureProfileHintText" Style="{StaticResource HintTextStyle}" />
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="24">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="延时截图" />
@@ -341,7 +432,7 @@
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Spacing="4">
-                                <TextBlock Text="默认截图模式" />
+                                <TextBlock Text="常规取景起始模式" />
                                 <ComboBox
                                     x:Name="DefaultModeCombo"
                                     Width="390"
@@ -378,6 +469,10 @@
                             SmallChange="1"
                             SpinButtonPlacementMode="Compact"
                             ValueChanged="HistoryLimit_ValueChanged" />
+                        <ToggleSwitch
+                            x:Name="HistoryPinCropToggle"
+                            Header="贴图裁剪结果也写入历史（分类：贴图裁剪）"
+                            Toggled="HistoryPinCropToggle_Toggled" />
                         <TextBlock x:Name="HistoryStatusText" Style="{StaticResource HintTextStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="打开截图历史" Click="OpenHistory_Click" />

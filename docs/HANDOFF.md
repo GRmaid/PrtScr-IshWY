@@ -275,6 +275,16 @@ FullscreenBypass: 已归还原前台
   4. `MaybeShrinkDestDib()` 在 `WM_APP_ZOOM_SETTLED` 调用：窗口面积不到 DIB 分配面积一半时释放并重建 DIB（日志 `Pin zoom: 收缩 DIB A×B -> C×D`），避免滚轮放大一次后 16 MB 的 DIB 永久驻留。
 - 尚未做的根治方案：把贴图 HWND 缩到「逻辑图像矩形 ∩ 显示器工作区」，只渲染可见部分。全尺寸透明窗口即使不画屏外像素，系统分层表面仍按整窗分配，所以单靠裁绘制不省表面内存。视口化会牵动拖动、滚轮锚点、标注坐标、工具栏与右键菜单，需单独立项并让主人复测。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误，`IshWY.exe --smoke` 退出 0；滚轮峰值是否下降待主人用任务管理器复测，代理不做合成输入测试。
+### 截图档位、快捷键目录、历史交互与贴图菜单/裁剪（2026-10-21 晚）
+- 截图档位：`AppConfig.CaptureProfile` 为 `normal` / `quick`；`CaptureProfileCombo` 保存默认档位，`Alt+Shift+C`（`modeHotkeyVk=0x43`、`modeHotkeyModifiers=5`）走 `HotkeyService` 的 mode id 6 与 `EscOverPinHook` 的 `ModeSwitchPressed` 双通道，游戏前台也能收到。切换只改本次运行的 `_runtimeCaptureProfile`，设置下拉是下次启动默认值；旧的 `persistCaptureProfile` 与“切换模式后记住选择”已删除。`OnHotkeyPressed` 在快捷档位直接调用 `OnFullScreenPressed`，固定全屏热键仍保留。
+- 快捷键目录：设置页「完整快捷键目录」按「取景器 / 贴图·裁剪 / 截图历史」列固定语义；全局组合键仍在上面表格录制。取景器键由 `EscOverPinHook` 直通，不依赖焦点；`Esc` / 鼠标右键始终作为兜底。
+- 历史交互：浏览模式单击只更新状态；双击直接 `PinViewAsync` 贴图；右键 `HistoryGrid_RightTapped` 进入多选并选中该项；选择模式下左键切换勾选、`Ctrl+A` 全选、`Delete` 删除、`Esc` 先退多选再关窗。选中卡片用 2.5px 强调色边框 + 右上勾选徽标 + 半透明底色；缩略图只加载当前分类，「全部」最多 120 张。
+- 贴图菜单：`PinMenuWindow` 改为 WinUI 3 窗口自身就是面板，`MoveAndResize` 到指针处，`DesktopAcrylicBackdrop` + DWM 圆角 + `BORDER_COLOR_NONE`；`KeyInterceptor.MakeClientAreaFullWindow()` 去掉 1px 非客户区白边。`WH_MOUSE_LL` 在菜单打开期间调用 `PinClickGuard.Suppress(450ms)`，关闭菜单的那一下不会被贴图误当成左右半屏切换。命令：复制/标注/裁剪/识别/另存/打开历史/不透明度/关闭。
+- 贴图裁剪：`PinCropWindow` 是 WinUI 3 选区层，结果只带回源 PNG 与全分辨率矩形；`NativePinWindow.StartCrop()` 在后台线程解码、裁剪、PNG 编码，再回 UI 线程创建偏移新贴图 / OCR / 另存。`HistoryCaptureMode.PinCrop` 与 `historyPinCrop` 控制「贴图裁剪」历史分类。裁剪时 Enter/O/Ctrl+S/Esc 由裁剪窗自己的 `WH_KEYBOARD_LL` 消费，不依赖前台。
+- 贴图历史打开：`PinService.HistoryRequested` → `MainWindow.ShowHistoryAbovePins()`，先用 `HWND_NOTOPMOST` 降下所有贴图，再把历史窗设为 `HWND_TOPMOST`；关闭历史时 `RestorePinsAfterHistory()` 恢复。
+- 历史切换提速：`NativePinWindow.Navigate` 只解码一次源图，`SetWindowPos(SWP_NOREDRAW)` 后 `RenderAndPresent(highQuality:true, image)`，不再先解码两遍；主人确认明显跟手。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067 ×2）；`--smoke` 通过（四热键 + mode 热键 `register=0x1`、overlay pre-created）。菜单白边、自定位、点外关闭与四项行为由主人确认；其余档位/历史/裁剪行为主人已验收。
+
 ## 5. 踩坑与约定
 
 - **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。取景窗亮窗后可能既没前台也没 XAML 焦点，Tab/Ctrl+C/Esc 不能只靠焦点路径；现在由 `EscOverPinHook` 在取景激活期间直通，钩子失活时必须立刻放行，避免吞掉别的程序的按键。

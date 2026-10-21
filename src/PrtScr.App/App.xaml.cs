@@ -10,6 +10,9 @@ public partial class App : Application
 {
     public static ConfigService Config { get; } = new();
 
+    /// <summary>主 UI 线程队列：贴图线程要弹 WinUI 菜单时，必须回到这里创建窗口。</summary>
+    public static Microsoft.UI.Dispatching.DispatcherQueue? UiQueue { get; private set; }
+
     private MainWindow? _window;
     private EventWaitHandle? _activateEvent;
 
@@ -53,6 +56,7 @@ public partial class App : Application
         try
         {
             _window = new MainWindow(startHidden);
+            UiQueue = _window.DispatcherQueue;
             Log($"OnLaunched: window created (startHidden={startHidden})");
             StartActivationListener();
 

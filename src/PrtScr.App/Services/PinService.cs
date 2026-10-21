@@ -12,6 +12,21 @@ namespace PrtScr.App.Services;
 /// </summary>
 public static class PinService
 {
+    /// <summary>贴图右键菜单请求打开截图历史；由主窗口接管，先让贴图退居次层。</summary>
+    public static Action<nint>? HistoryRequested { get; set; }
+
+    public static void RequestHistory(nint pinOwner)
+    {
+        try
+        {
+            HistoryRequested?.Invoke(pinOwner);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin: 打开历史失败 {ex.Message}");
+        }
+    }
+
     /// <summary>读取剪贴板里的图片字节（供 OCR 使用）。</summary>
     public static async Task<byte[]?> ReadClipboardImageBytesAsync()
     {
@@ -50,7 +65,15 @@ public static class PinService
             var bytes = new byte[(int)source.Size];
             await source.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
 
-            return CreatePin(bytes) is not null;
+            var window = CreatePin(bytes);
+            if (window is null)
+                return false;
+
+            // Alt+S 贴图没有分类上下文：左右点击按全部分类的最新顺序浏览。
+            var all = CaptureHistoryService.Instance.GetItems();
+            if (all.Count > 0)
+                window.SetNavigation(new PinNavigation(all.Select(i => i.FilePath).ToList(), 0, "全部"));
+            return true;
         }
         catch (Exception ex)
         {
@@ -59,8 +82,43 @@ public static class PinService
         }
     }
 
+    /// <summary>贴图内左右点击浏览的列表（文件路径按显示顺序，Index 为当前项）。</summary>
+    public sealed record PinNavigation(IReadOnlyList<string> Files, int Index, string Scope);
+
     /// <summary>用一张 PNG 直接创建贴图（截图历史等入口复用）。</summary>
     public static bool PastePng(byte[] bytes) => PastePng(bytes, edit: false);
+
+    /// <summary>从截图历史贴图：左右点击只在当前分类内切换。</summary>
+    public static bool PastePngWithNavigation(byte[] bytes, IReadOnlyList<string> files, int index, string scope)
+    {
+        try
+        {
+            var window = CreatePin(bytes, edit: false);
+            if (window is null)
+                return false;
+            window.SetNavigation(new PinNavigation(files, index, scope));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin: 失败 {ex}");
+            return false;
+        }
+    }
+
+    /// <summary>裁剪生成的新贴图稍微错开，避免和原贴图完全重合。</summary>
+    public static bool PastePngOffset(byte[] bytes, int offsetX, int offsetY)
+    {
+        try
+        {
+            return CreatePin(bytes, edit: false, offsetX, offsetY) is not null;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin: 失败 {ex}");
+            return false;
+        }
+    }
 
     /// <summary>用一张 PNG 创建贴图并直接进入标注模式（截图历史「标注」入口）。</summary>
     public static bool PastePngAndEdit(byte[] bytes) => PastePng(bytes, edit: true);
@@ -78,7 +136,7 @@ public static class PinService
         }
     }
 
-    private static NativePinWindow? CreatePin(byte[] bytes, bool edit = false)
+    private static NativePinWindow? CreatePin(byte[] bytes, bool edit = false, int offsetX = 0, int offsetY = 0)
     {
         using var image = Image.FromStream(new MemoryStream(bytes));
         var pixelWidth = image.Width;
@@ -87,7 +145,7 @@ public static class PinService
             return null;
 
         var queue = DispatcherQueue.GetForCurrentThread();
-        var window = NativePinWindow.TryCreate(bytes, pixelWidth, pixelHeight, queue);
+        var window = NativePinWindow.TryCreate(bytes, pixelWidth, pixelHeight, queue, offsetX, offsetY);
         if (window is null)
         {
             App.Log("Pin: 创建贴图窗口失败");

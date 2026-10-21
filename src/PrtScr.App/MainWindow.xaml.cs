@@ -1,4 +1,5 @@
 using H.NotifyIcon;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -7,6 +8,9 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PrtScr.App.Services;
 using System.IO;
+using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace PrtScr.App;
 
@@ -22,6 +26,11 @@ public sealed partial class MainWindow : Window
     private bool _suppressHistoryToggle;
     private bool _suppressHistoryLimit;
     private bool _suppressCaptureOptions;
+    private bool _suppressProfile;
+    private bool _suppressPinCropToggle;
+    private string? _runtimeCaptureProfile;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _memoryTimer;
+    private nint[] _historyLoweredPins = [];
     private CancellationTokenSource? _delayCts;
     private Views.HistoryWindow? _historyWindow;
 
@@ -58,7 +67,9 @@ public sealed partial class MainWindow : Window
         InitHotkey();
         InitFullHotkey();
         InitPinOcrHotkeys();
+        InitModeHotkey();
         SyncHotkeyTexts();
+        PinService.HistoryRequested = ShowHistoryAbovePins;
         AboutText.Text = $"{AppInfo.Name} v{typeof(App).Assembly.GetName().Version} · {AppInfo.Tagline} · 分窗口截屏截图工具";
     }
 
@@ -81,6 +92,10 @@ public sealed partial class MainWindow : Window
         _suppressHistoryLimit = true;
         HistoryLimitBox.Value = CaptureHistoryService.PerCategoryLimit;
         _suppressHistoryLimit = false;
+
+        _suppressPinCropToggle = true;
+        HistoryPinCropToggle.IsOn = App.Config.Current.HistoryPinCrop;
+        _suppressPinCropToggle = false;
         RefreshHistoryStatus();
 
         _suppressCaptureOptions = true;
@@ -88,6 +103,10 @@ public sealed partial class MainWindow : Window
         CaptureCursorToggle.IsOn = App.Config.Current.CaptureCursor;
         DefaultModeCombo.SelectedIndex = IsNormalDefaultMode() ? 1 : 0;
         _suppressCaptureOptions = false;
+
+        _suppressProfile = true;
+        CaptureProfileCombo.SelectedIndex = IsQuickProfile() ? 1 : 0;
+        _suppressProfile = false;
         UpdateCaptureOptions();
 
         // 预热：成像（UI 线程）+ 抓屏/枚举/PrintWindow（后台），让第一次 F1 就是全热状态
@@ -108,6 +127,20 @@ public sealed partial class MainWindow : Window
         Services.CaptureService.Instance.EnsureOverlay();
 
         _ = RefreshOcrStatusAsync();
+        StartMemoryTimer();
+    }
+
+    /// <summary>每 60 秒记一次工作集/私有内存/托管堆，主人长测后可对照操作时间线。</summary>
+    private void StartMemoryTimer()
+    {
+        if (_memoryTimer is not null)
+            return;
+        _memoryTimer = DispatcherQueue.CreateTimer();
+        _memoryTimer.Interval = TimeSpan.FromSeconds(60);
+        _memoryTimer.IsRepeating = true;
+        _memoryTimer.Tick += (_, _) => MemoryProbe.Log("periodic");
+        _memoryTimer.Start();
+        MemoryProbe.Log("startup");
     }
 
     private void HistoryToggle_Toggled(object sender, RoutedEventArgs e)
@@ -128,6 +161,18 @@ public sealed partial class MainWindow : Window
         App.Log($"History: 保存开关 = {enabled}");
     }
 
+    private void HistoryPinCropToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressPinCropToggle || HistoryPinCropToggle is null)
+            return;
+        App.Config.Current.HistoryPinCrop = HistoryPinCropToggle.IsOn;
+        App.Config.Save();
+        SetStatus(HistoryPinCropToggle.IsOn
+            ? "贴图裁剪结果会写入截图历史的「贴图裁剪」分类。"
+            : "贴图裁剪结果不再写入截图历史。");
+        App.Log($"History: pinCrop = {HistoryPinCropToggle.IsOn}");
+    }
+
     private void RefreshHistoryStatus()
     {
         if (!App.Config.Current.SaveHistory)
@@ -139,7 +184,7 @@ public sealed partial class MainWindow : Window
 
         var count = CaptureHistoryService.Instance.GetItems().Count;
         var limit = CaptureHistoryService.PerCategoryLimit;
-        HistoryStatusText.Text = $"已开启：窗口截图按进程、常规/早期按模式分类，每类保留最近 {limit} 张（data\\history，当前共 {count} 张）。";
+        HistoryStatusText.Text = $"已开启：窗口截图按进程分栏，常规、早期未分类各一类；贴图裁剪{(App.Config.Current.HistoryPinCrop ? "单独成类" : "不收录")}。每类保留最近 {limit} 张（data\\history，当前共 {count} 张）。";
         HistoryHomeSummaryText.Text = count == 0
             ? "还没有截图；按截图热键后会自动出现在这里。"
             : $"{count} 张 · 窗口截图按进程分栏 · 每类保留 {limit} 张";
@@ -185,6 +230,52 @@ public sealed partial class MainWindow : Window
         App.Config.Save();
         UpdateCaptureOptions();
         App.Log($"CaptureOptions: delay={seconds}s");
+    }
+
+    private string CurrentCaptureProfile =>
+        _runtimeCaptureProfile ?? App.Config.Current.CaptureProfile;
+
+    private bool IsQuickProfile() =>
+        string.Equals(CurrentCaptureProfile, "quick", StringComparison.OrdinalIgnoreCase);
+
+    private void CaptureProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressProfile || CaptureProfileCombo is null)
+            return;
+
+        var profile = CaptureProfileCombo.SelectedIndex == 1 ? "quick" : "normal";
+        _runtimeCaptureProfile = null;
+        if (string.Equals(App.Config.Current.CaptureProfile, profile, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        App.Config.Current.CaptureProfile = profile;
+        App.Config.Save();
+        UpdateCaptureOptions();
+        App.Log($"CaptureProfile: default={profile}");
+    }
+
+    /// <summary>
+    /// Alt+Shift+C：立即切换本次运行使用的截图档位。
+    /// 不排队、不写配置——设置里的下拉框仍作为下次启动的默认档位。
+    /// </summary>
+    private void ToggleCaptureProfile()
+    {
+        var next = IsQuickProfile() ? "normal" : "quick";
+        _runtimeCaptureProfile = next;
+        SetProfileCombo(next);
+        UpdateCaptureOptions();
+
+        var label = string.Equals(next, "quick", StringComparison.OrdinalIgnoreCase) ? "快捷全屏" : "常规取景";
+        SetStatus($"截图模式已切换为「{label}」，下一次截图立即生效");
+        TrayIcon.ShowNotification($"{AppInfo.Name} 截图模式", $"已切换为「{label}」，下一次截图立即生效。");
+        App.Log($"CaptureProfile: toggled to {next} (runtime, next launch={App.Config.Current.CaptureProfile})");
+    }
+
+    private void SetProfileCombo(string profile)
+    {
+        _suppressProfile = true;
+        CaptureProfileCombo.SelectedIndex = string.Equals(profile, "quick", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        _suppressProfile = false;
     }
 
     private static bool IsNormalDefaultMode() =>
@@ -249,10 +340,22 @@ public sealed partial class MainWindow : Window
             : "当前：截图热键立即冻结画面；托盘菜单的「延时截图」默认等 3 秒。";
         CaptureOptionsText.Text += cursor ? " 截图会包含鼠标指针。" : " 截图不包含鼠标指针。";
 
+        var quick = IsQuickProfile();
+        DefaultModeCombo.IsEnabled = !quick;
+        CaptureProfileHintText.Text = (quick
+            ? "当前：快捷全屏。按截图热键立即抓整屏、复制到剪贴板并写入历史，不出取景器；Alt+Shift+C 可随时切回常规取景。"
+            : "当前：常规取景。按截图热键冻结画面后框选或选窗；Alt+Shift+C 可随时切到快捷全屏。")
+            + " 下拉框是下次启动的默认档位，热键切换只影响本次运行。";
+        HomeStatusText.Text = quick
+            ? "提示：当前为快捷模式，截图热键会直接截取整屏；Alt+Shift+C 可切回常规取景。"
+            : "提示：截图热键随时可用；取景中按 Tab 切换模式，回车截取当前窗口。";
+
         var normal = IsNormalDefaultMode();
-        CaptureModeHintText.Text = normal
-            ? "当前默认：常规截图。看到什么就截什么；按 F1 后按 Tab 可切到窗口截图。"
-            : "当前默认：窗口截图。会重建窗口本体，抗遮挡；按 F1 后按 Tab 可切到常规截图。";
+        CaptureModeHintText.Text = quick
+            ? "常规取景的起始模式将在切回常规后生效。"
+            : normal
+                ? "当前常规起始：常规截图。看到什么就截什么；按 F1 后按 Tab 可切到窗口截图。"
+                : "当前常规起始：窗口截图。会重建窗口本体，抗遮挡；按 F1 后按 Tab 可切到常规截图。";
     }
 
     private void OpenHistory()
@@ -266,6 +369,7 @@ public sealed partial class MainWindow : Window
                 {
                     if (ReferenceEquals(_historyWindow, window))
                         _historyWindow = null;
+                    RestorePinsAfterHistory();
                     RefreshHistoryStatus();
                 };
                 window.HistoryChanged += RefreshHistoryStatus;
@@ -282,6 +386,44 @@ public sealed partial class MainWindow : Window
         {
             App.Log($"History: 打开窗口失败 {ex}");
         }
+    }
+
+    /// <summary>贴图右键菜单请求历史窗：临时把贴图降为非置顶，历史窗关闭后恢复。</summary>
+    private void ShowHistoryAbovePins(nint _)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            var pins = Views.NativePinWindow.SnapshotHandles();
+            foreach (var pin in pins)
+            {
+                _ = PInvoke.SetWindowPos(new HWND(pin), new HWND(-2) /* HWND_NOTOPMOST */,
+                    0, 0, 0, 0, SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOOWNERZORDER);
+            }
+            _historyLoweredPins = pins;
+
+            OpenHistory();
+            if (_historyWindow is not null)
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_historyWindow);
+                _ = PInvoke.SetWindowPos(new HWND(hwnd), new HWND(-1) /* HWND_TOPMOST */,
+                    0, 0, 0, 0, SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
+            }
+        });
+    }
+
+    private void RestorePinsAfterHistory()
+    {
+        if (_historyLoweredPins.Length == 0)
+            return;
+        foreach (var pin in _historyLoweredPins)
+        {
+            _ = PInvoke.SetWindowPos(new HWND(pin), new HWND(-1) /* HWND_TOPMOST */,
+                0, 0, 0, 0, SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOOWNERZORDER);
+        }
+        _historyLoweredPins = [];
     }
 
     private void OpenHistory_Click(object sender, RoutedEventArgs e) => OpenHistory();
@@ -519,7 +661,14 @@ public sealed partial class MainWindow : Window
         });
 
         Services.CaptureService.Instance.Hotkey = _hotkey;
-        _hotkey.HotkeyPressed += () => DispatcherQueue.TryEnqueue(OnHotkeyPressed);
+        _hotkey.HotkeyPressed += () =>
+        {
+            if (!Services.EscOverPinHook.TryClaimScreenshotHotkey())
+                return;
+            App.Log("Hotkey: RegisterHotKey 兜底命中截图键");
+            Services.EscOverPinHook.NotifyFallbackHit();
+            DispatcherQueue.TryEnqueue(OnHotkeyPressed);
+        };
         _hotkey.CancelPressed += () => DispatcherQueue.TryEnqueue(() =>
         {
             if (Services.CaptureService.Instance.IsCapturing)
@@ -532,9 +681,45 @@ public sealed partial class MainWindow : Window
             : (int)HotkeyService.KeyNameToVirtualKey(config.HotkeyKey);
         var mods = (int)config.HotkeyModifiers;
 
+        // 主截图热键也可能在游戏里被吞：钩子通道与 RegisterHotKey 兜底共用去重。
+        Services.EscOverPinHook.SetScreenshotKey(vk, mods);
+        Services.EscOverPinHook.ScreenshotPressed += () =>
+        {
+            // 钩子侧 EvaluateScreenshotHotkey 已经 claim 过；这里再 claim 会被 300ms 去重挡掉。
+            App.Log("Hotkey: 键盘钩子捕获截图键");
+            DispatcherQueue.TryEnqueue(OnHotkeyPressed);
+        };
+
         _hotkey.Start(vk, mods);
         ScreenshotHotkeyText.Text = HotkeyService.Describe(vk, mods);
         App.Log($"Hotkey: 截图配置 {HotkeyService.Describe(vk, mods)}");
+    }
+
+    private void InitModeHotkey()
+    {
+        var config = App.Config.Current;
+        var vk = config.ModeHotkeyVk;
+        var mods = config.ModeHotkeyModifiers;
+
+        Services.EscOverPinHook.SetModeSwitchKey(vk, mods);
+        Services.EscOverPinHook.ModeSwitchPressed += () =>
+        {
+            // 钩子侧 EvaluateModeHotkey 已经 claim 过；二次 claim 会被去重挡掉。
+            DispatcherQueue.TryEnqueue(ToggleCaptureProfile);
+        };
+
+        _hotkey.ModeHotkeyPressed += () =>
+        {
+            if (!Services.EscOverPinHook.TryClaimModeSwitchHotkey())
+                return;
+            App.Log("CaptureProfile: RegisterHotKey 兜底命中切换键");
+            Services.EscOverPinHook.NotifyFallbackHit();
+            DispatcherQueue.TryEnqueue(ToggleCaptureProfile);
+        };
+
+        _hotkey.SetModeKey(vk, mods);
+        ModeHotkeyText.Text = HotkeyService.Describe(vk, mods);
+        App.Log($"CaptureProfile: hotkey {ModeHotkeyText.Text}");
     }
 
     private void InitFullHotkey()
@@ -687,6 +872,7 @@ public sealed partial class MainWindow : Window
             "fullscreen" => "全屏截图",
             "pin" => "贴图",
             "ocr" => "文字识别",
+            "mode" => "切换截图模式",
             _ => action,
         };
         SetStatus($"正在录制「{label}」：请按下组合键，Esc 取消。");
@@ -763,9 +949,10 @@ public sealed partial class MainWindow : Window
                 config.HotkeyVk = vk;
                 config.HotkeyModifiers = (uint)mods;
                 App.Config.Save();
+                Services.EscOverPinHook.SetScreenshotKey(vk, mods);
                 _hotkey.Restart(vk, mods);
                 ScreenshotHotkeyText.Text = text;
-                SetStatus($"窗口截图热键已设为 {text}");
+                SetStatus($"截图热键已设为 {text}");
                 break;
 
             case "fullscreen":
@@ -794,6 +981,16 @@ public sealed partial class MainWindow : Window
                 _hotkey.SetOcrKey(vk, mods);
                 OcrHotkeyText.Text = text;
                 SetStatus($"OCR 热键已设为 {text}");
+                break;
+
+            case "mode":
+                config.ModeHotkeyVk = vk;
+                config.ModeHotkeyModifiers = mods;
+                App.Config.Save();
+                Services.EscOverPinHook.SetModeSwitchKey(vk, mods);
+                _hotkey.SetModeKey(vk, mods);
+                ModeHotkeyText.Text = text;
+                SetStatus($"切换截图模式热键已设为 {text}");
                 break;
         }
 
@@ -835,6 +1032,11 @@ public sealed partial class MainWindow : Window
             other = "OCR";
             return true;
         }
+        if (action != "mode" && vk == c.ModeHotkeyVk && mods == c.ModeHotkeyModifiers)
+        {
+            other = "切换截图模式";
+            return true;
+        }
 
         return false;
     }
@@ -863,6 +1065,13 @@ public sealed partial class MainWindow : Window
             if (Services.CaptureService.Instance.IsCapturing)
             {
                 await Services.CaptureService.Instance.StartCaptureAsync();
+                return;
+            }
+
+            if (IsQuickProfile())
+            {
+                App.Log("CaptureProfile: quick mode, capture fullscreen immediately");
+                OnFullScreenPressed();
                 return;
             }
 

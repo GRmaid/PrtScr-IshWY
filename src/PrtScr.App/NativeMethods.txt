@@ -17,6 +17,12 @@ GetCursorPos
 IsWindowVisible
 ShowWindow
 SetForegroundWindow
+SetActiveWindow
+GetForegroundWindow
+GetWindowThreadProcessId
+GetCurrentThreadId
+GetActiveWindow
+AttachThreadInput
 CreateCompatibleDC
 SelectObject
 DeleteObject

@@ -79,9 +79,25 @@ public sealed class AppConfig
     [JsonPropertyName("captureCursor")]
     public bool CaptureCursor { get; set; } = false;
 
-    /// <summary>默认取景模式：window = 窗口截图（抗遮挡），normal = 常规截图（所见即所得）。</summary>
+    /// <summary>截图档位：normal = 常规取景（冻屏后框选/选窗），quick = 快捷全屏（直接进剪贴板）。</summary>
+    [JsonPropertyName("captureProfile")]
+    public string CaptureProfile { get; set; } = "normal";
+
+    /// <summary>切换截图模式后是否记住选择（默认记住）。</summary>
+    /// <summary>「切换截图模式」全局热键：默认 Alt+Shift+C。</summary>
+    [JsonPropertyName("modeHotkeyVk")]
+    public int ModeHotkeyVk { get; set; } = 0x43;
+
+    [JsonPropertyName("modeHotkeyModifiers")]
+    public int ModeHotkeyModifiers { get; set; } = 5;
+
+    /// <summary>默认取景模式：window = 窗口截图（抗遮挡），normal = 常规截图（所见即所得）。仅常规档位生效。</summary>
     [JsonPropertyName("defaultCaptureMode")]
     public string DefaultCaptureMode { get; set; } = "window";
+
+    /// <summary>贴图裁剪后是否写入截图历史（分类「贴图裁剪」）。</summary>
+    [JsonPropertyName("historyPinCrop")]
+    public bool HistoryPinCrop { get; set; } = true;
 }
 
 public sealed class ConfigService

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -53,6 +54,8 @@ public sealed unsafe partial class NativePinWindow
     private const int CmdEdit = 3;
     private const int CmdOcr = 4;
     private const int CmdSaveAs = 5;
+    private const int CmdCrop = 6;
+    private const int CmdHistory = 7;
     private const int CmdOpacity100 = 10;
     private const int CmdOpacity75 = 11;
     private const int CmdOpacity50 = 12;
@@ -194,6 +197,11 @@ public sealed unsafe partial class NativePinWindow
         if (hwnd.IsNull)
             return;
 
+        // 裁剪层自己用低级钩子接管 Esc；刚关闭 600ms 内也别让同一次按键继续关贴图。
+        if (PinCropWindow.IsActive ||
+            Environment.TickCount64 - PinCropWindow.ClosedAtTick < 600)
+            return;
+
         try
         {
             var down = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
@@ -242,8 +250,11 @@ public sealed unsafe partial class NativePinWindow
     private static readonly Dictionary<nint, NativePinWindow> ByHwnd = new();
 
     private byte[] _pngBytes;
-    private readonly int _pixelWidth;
-    private readonly int _pixelHeight;
+    private int _pixelWidth;
+    private int _pixelHeight;
+    private PinService.PinNavigation? _navigation;
+    private long _lastNavigationTick;
+    private NativePoint _clickDownCursor;
     private readonly DispatcherQueue _uiQueue;
     private readonly ManualResetEventSlim _ready = new(false);
 
@@ -255,9 +266,12 @@ public sealed unsafe partial class NativePinWindow
     private int _winY;
     private int _winW;
     private int _winH;
+    private readonly int _spawnOffsetX;
+    private readonly int _spawnOffsetY;
     private int _maxWinW = 8192;
     private int _maxWinH = 8192;
     private bool _dragging;
+    private bool _clickMoved;
     private NativePoint _dragStartCursor;
     private int _dragStartX;
     private int _dragStartY;
@@ -277,17 +291,28 @@ public sealed unsafe partial class NativePinWindow
     private int _destAllocW;
     private int _destAllocH;
 
-    private NativePinWindow(byte[] pngBytes, int pixelWidth, int pixelHeight, DispatcherQueue uiQueue)
+    private NativePinWindow(byte[] pngBytes, int pixelWidth, int pixelHeight, DispatcherQueue uiQueue,
+        int spawnOffsetX = 0, int spawnOffsetY = 0)
     {
         _pngBytes = pngBytes;
         _pixelWidth = pixelWidth;
         _pixelHeight = pixelHeight;
         _uiQueue = uiQueue;
+        _spawnOffsetX = spawnOffsetX;
+        _spawnOffsetY = spawnOffsetY;
     }
 
-    public static NativePinWindow? TryCreate(byte[] pngBytes, int pixelWidth, int pixelHeight, DispatcherQueue uiQueue)
+    /// <summary>当前所有贴图窗口句柄快照；用于临时让历史窗压过置顶贴图。</summary>
+    public static nint[] SnapshotHandles()
     {
-        var pin = new NativePinWindow(pngBytes, pixelWidth, pixelHeight, uiQueue);
+        lock (ClassLock)
+            return [.. ByHwnd.Keys];
+    }
+
+    public static NativePinWindow? TryCreate(byte[] pngBytes, int pixelWidth, int pixelHeight, DispatcherQueue uiQueue,
+        int spawnOffsetX = 0, int spawnOffsetY = 0)
+    {
+        var pin = new NativePinWindow(pngBytes, pixelWidth, pixelHeight, uiQueue, spawnOffsetX, spawnOffsetY);
         pin._thread = new Thread(pin.Run) { IsBackground = true, Name = "PrtScr.Pin" };
         pin._thread.SetApartmentState(ApartmentState.STA);
         pin._thread.Start();
@@ -300,6 +325,75 @@ public sealed unsafe partial class NativePinWindow
     {
         if (!_hwnd.IsNull)
             _ = PInvoke.PostMessage(_hwnd, WM_APP_ENTER_EDIT, default, default);
+    }
+
+    /// <summary>设置左右点击浏览的截图列表（截图历史分类或全部分类）。</summary>
+    public void SetNavigation(PinService.PinNavigation navigation) => _navigation = navigation;
+
+    /// <summary>在同一贴图窗内切换上一张/下一张截图，保持窗口中心不跳。</summary>
+    private void Navigate(int direction)
+    {
+        if (_navigation is null || _navigation.Files.Count == 0 || _editMode)
+            return;
+        if (Environment.TickCount64 - _lastNavigationTick < 400)
+            return;
+
+        var index = _navigation.Index;
+        var next = (index + direction) % _navigation.Files.Count;
+        if (next < 0)
+            next += _navigation.Files.Count;
+        if (next == index)
+            return;
+
+        var path = _navigation.Files[next];
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin navigate: 读取失败 {path} {ex.Message}");
+            return;
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            using var image = Image.FromStream(new MemoryStream(bytes));
+            if (image.Width <= 0 || image.Height <= 0)
+                return;
+
+            var centerX = _winX + _winW / 2;
+            var centerY = _winY + _winH / 2;
+            _pngBytes = bytes;
+            _pixelWidth = image.Width;
+            _pixelHeight = image.Height;
+
+            var maxW = _maxWinW * 0.8;
+            var maxH = _maxWinH * 0.8;
+            _zoom = Math.Min(1, Math.Min(maxW / _pixelWidth, maxH / _pixelHeight));
+            _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
+            _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
+            _winX = centerX - _winW / 2;
+            _winY = centerY - _winH / 2;
+
+            _renderedW = -1;
+            _renderedH = -1;
+            _needsRedrawAfterZoom = true;
+            // 先不擦旧画面，等新尺寸的内容准备好了再一次性 UpdateLayeredWindow，避免缩放中间帧。
+            _ = PInvoke.SetWindowPos(_hwnd, default, _winX, _winY, _winW, _winH,
+                SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOREDRAW);
+            RenderAndPresent(highQuality: true, image);
+            _navigation = _navigation with { Index = next };
+            _lastNavigationTick = Environment.TickCount64;
+            var ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            App.Log($"Pin navigate: {_navigation.Scope} {next + 1}/{_navigation.Files.Count} {Path.GetFileName(path)} {ms}ms");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin navigate: 切换失败 {ex.Message}");
+        }
     }
 
     private void Run()
@@ -327,8 +421,8 @@ public sealed unsafe partial class NativePinWindow
             _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
             _winH = Math.Max(16, (int)Math.Round(_pixelHeight * _zoom));
 
-            _winX = Math.Clamp(cursor.x - _winW / 2, info.rcWork.left, Math.Max(info.rcWork.left, info.rcWork.right - _winW));
-            _winY = Math.Clamp(cursor.y - _winH / 2, info.rcWork.top, Math.Max(info.rcWork.top, info.rcWork.bottom - _winH));
+            _winX = Math.Clamp(cursor.x - _winW / 2 + _spawnOffsetX, info.rcWork.left, Math.Max(info.rcWork.left, info.rcWork.right - _winW));
+            _winY = Math.Clamp(cursor.y - _winH / 2 + _spawnOffsetY, info.rcWork.top, Math.Max(info.rcWork.top, info.rcWork.bottom - _winH));
 
             _hwnd = PInvoke.CreateWindowEx(
                 WINDOW_EX_STYLE.WS_EX_LAYERED | WINDOW_EX_STYLE.WS_EX_TOPMOST | WINDOW_EX_STYLE.WS_EX_TOOLWINDOW,
@@ -437,6 +531,19 @@ public sealed unsafe partial class NativePinWindow
 
         if (self is not null)
         {
+            // 右键菜单关闭的那一下点击会继续落到贴图上；菜单打开期间由低级鼠标钩子置位，
+            // 这里整段跳过左键，避免“关菜单”顺带切成另一张截图。
+            if (!self._editMode && PinClickGuard.IsSuppressed &&
+                msg is WM_LBUTTONDOWN or WM_LBUTTONUP or WM_LBUTTONDBLCLK)
+            {
+                if (msg == WM_LBUTTONUP && self._dragging)
+                {
+                    self._dragging = false;
+                    _ = PInvoke.ReleaseCapture();
+                }
+                return default;
+            }
+
             switch (msg)
             {
                 case WM_LBUTTONDOWN when self._editMode:
@@ -493,6 +600,8 @@ public sealed unsafe partial class NativePinWindow
 
                 case WM_LBUTTONDOWN:
                     GetCursorPos(out self._dragStartCursor);
+                    self._clickDownCursor = self._dragStartCursor;
+                    self._clickMoved = false;
                     self._dragStartX = self._winX;
                     self._dragStartY = self._winY;
                     self._dragging = true;
@@ -502,6 +611,9 @@ public sealed unsafe partial class NativePinWindow
 
                 case WM_MOUSEMOVE when self._dragging:
                     GetCursorPos(out var pt);
+                    if (Math.Abs(pt.x - self._clickDownCursor.x) > 4 ||
+                        Math.Abs(pt.y - self._clickDownCursor.y) > 4)
+                        self._clickMoved = true;
                     self._winX = self._dragStartX + (pt.x - self._dragStartCursor.x);
                     self._winY = self._dragStartY + (pt.y - self._dragStartCursor.y);
                     _ = PInvoke.SetWindowPos(hwnd, default, self._winX, self._winY, 0, 0,
@@ -512,10 +624,14 @@ public sealed unsafe partial class NativePinWindow
                 case WM_LBUTTONUP:
                     self._dragging = false;
                     _ = PInvoke.ReleaseCapture();
-                    return default;
-
-                case WM_LBUTTONDBLCLK when !self._editMode:
-                    _ = PInvoke.DestroyWindow(hwnd);
+                    // 未拖动的单击：左半边看更新的一张，右半边看更旧的一张。
+                    // 有分类上下文时只在当前分类内循环；Alt+S 贴图使用全部分类。
+                    if (!self._clickMoved && self._navigation is not null && !self._editMode)
+                    {
+                        GetCursorPos(out var up);
+                        var direction = up.x < self._winX + self._winW / 2 ? -1 : 1;
+                        self.Navigate(direction);
+                    }
                     return default;
 
                 case WM_RBUTTONUP:
@@ -664,94 +780,132 @@ public sealed unsafe partial class NativePinWindow
     private void ShowMenu()
     {
         App.Log("Pin: menu enter");
-        var menu = PInvoke.CreatePopupMenu();
-        var opacityMenu = PInvoke.CreatePopupMenu();
-        if (menu.IsNull)
-            return;
-
-        unsafe
-        {
-            fixed (char* copy = "复制图片")
-            fixed (char* edit = "标注…")
-            fixed (char* ocr = "识别文字")
-            fixed (char* saveAs = "另存为…")
-            fixed (char* close = "关闭贴图")
-            fixed (char* opacity = "不透明度")
-            fixed (char* p100 = "100%")
-            fixed (char* p75 = "75%")
-            fixed (char* p50 = "50%")
-            fixed (char* p25 = "25%")
-            {
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdCopy, new PCWSTR(copy));
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdEdit, new PCWSTR(edit));
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdOcr, new PCWSTR(ocr));
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdSaveAs, new PCWSTR(saveAs));
-                _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity100, new PCWSTR(p100));
-                _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity75, new PCWSTR(p75));
-                _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity50, new PCWSTR(p50));
-                _ = PInvoke.AppendMenu(opacityMenu, MENU_ITEM_FLAGS.MF_STRING, CmdOpacity25, new PCWSTR(p25));
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_POPUP, (nuint)opacityMenu.Value, new PCWSTR(opacity));
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_SEPARATOR, 0, default);
-                _ = PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, CmdClose, new PCWSTR(close));
-            }
-        }
-
         GetCursorPos(out var pt);
         _ = PInvoke.SetForegroundWindow(_hwnd);
 
-        // 菜单打开期间轮询让路：TrackPopupMenu 是模态循环，Esc 会先关菜单
+        // 菜单期间让 Esc 轮询让路：菜单线程自己处理 Esc 和点击外部。
         _menuOpen = true;
         int command;
         try
         {
-            command = (int)PInvoke.TrackPopupMenu(
-                menu,
-                TRACK_POPUP_MENU_FLAGS.TPM_RETURNCMD | TRACK_POPUP_MENU_FLAGS.TPM_LEFTALIGN | TRACK_POPUP_MENU_FLAGS.TPM_TOPALIGN,
-                pt.x, pt.y, 0, _hwnd, default).Value;
+            command = PinMenuWindow.Show((nint)_hwnd.Value, pt.x, pt.y, _opacity);
         }
         finally
         {
             _menuOpen = false;
         }
 
-        _ = PInvoke.DestroyMenu(menu);
         _ = PInvoke.PostMessage(_hwnd, WM_NULL, default, default);
         App.Log($"Pin: menu command={command}");
 
         switch (command)
         {
-            case CmdCopy:
+            case PinMenuWindow.CmdCopy:
                 PinClipboardHelper.Copy(_pngBytes, _uiQueue);
                 break;
-            case CmdEdit:
+            case PinMenuWindow.CmdEdit:
                 EnterEditMode();
                 break;
-            case CmdOcr:
+            case PinMenuWindow.CmdCrop:
+                StartCrop();
+                break;
+            case PinMenuWindow.CmdOcr:
                 App.Log("Pin: ocr menu clicked");
                 PinClipboardHelper.OpenOcr(_pngBytes, _uiQueue, (nint)_hwnd.Value);
                 break;
-            case CmdSaveAs:
+            case PinMenuWindow.CmdSaveAs:
                 if (_editMode)
                     ApplyEdit(saveAs: true);
                 else
                     SaveAs();
                 break;
-            case CmdOpacity100:
+            case PinMenuWindow.CmdHistory:
+                PinService.RequestHistory((nint)_hwnd.Value);
+                break;
+            case PinMenuWindow.CmdOpacity100:
                 SetOpacity(1);
                 break;
-            case CmdOpacity75:
+            case PinMenuWindow.CmdOpacity75:
                 SetOpacity(0.75);
                 break;
-            case CmdOpacity50:
+            case PinMenuWindow.CmdOpacity50:
                 SetOpacity(0.5);
                 break;
-            case CmdOpacity25:
+            case PinMenuWindow.CmdOpacity25:
                 SetOpacity(0.25);
                 break;
-            case CmdClose:
+            case PinMenuWindow.CmdClose:
                 _ = PInvoke.DestroyWindow(_hwnd);
                 break;
         }
+    }
+
+    /// <summary>
+    /// 裁剪：在贴图上方拖框，确认后按动作生成新贴图 / OCR / 保存，原贴图保留。
+    /// 选区和原图立即返回，解码/裁剪/编码放到线程池，避免回车后贴图线程和 UI 一起卡住。
+    /// </summary>
+    private void StartCrop()
+    {
+        var result = PinCropWindow.Show((nint)_hwnd.Value, _winX, _winY, _winW, _winH,
+            _pngBytes, _pixelWidth, _pixelHeight);
+        if (result is null)
+        {
+            App.Log("Pin: crop cancelled");
+            return;
+        }
+
+        App.Log($"Pin: crop {result.Action} {result.Width}x{result.Height} at {result.Left},{result.Top}");
+        ThreadPool.QueueUserWorkItem(_ => ProcessCrop(result));
+    }
+
+    /// <summary>线程池里只做 GDI+ 解码/裁剪/PNG 编码，结果再回 UI 线程执行贴图/OCR/保存。</summary>
+    private void ProcessCrop(PinCropResult result)
+    {
+        byte[]? bytes = null;
+        try
+        {
+            var started = Environment.TickCount64;
+            MemoryProbe.Log("crop-start");
+            using var source = Image.FromStream(new MemoryStream(result.SourcePngBytes, writable: false));
+            using var cropped = new Bitmap(result.Width, result.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(cropped))
+            {
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.DrawImage(source, new Rectangle(0, 0, cropped.Width, cropped.Height),
+                    result.Left, result.Top, result.Width, result.Height, GraphicsUnit.Pixel);
+            }
+            using var stream = new MemoryStream();
+            cropped.Save(stream, ImageFormat.Png);
+            bytes = stream.ToArray();
+            App.Log($"Pin crop: encoded {result.Width}x{result.Height} {bytes.Length / 1024}KB {Environment.TickCount64 - started}ms");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Pin crop: 生成失败 {ex}");
+            return;
+        }
+
+        MemoryProbe.Log("crop-encoded");
+        if (App.Config.Current.HistoryPinCrop)
+            _ = CaptureHistoryService.Instance.AddAsync(bytes, HistoryCaptureMode.PinCrop);
+
+        var hwnd = (nint)_hwnd.Value;
+        _uiQueue.TryEnqueue(() =>
+        {
+            switch (result.Action)
+            {
+                case PinCropAction.Pin:
+                    PinService.PastePngOffset(bytes, 24, 24);
+                    break;
+                case PinCropAction.Ocr:
+                    PinClipboardHelper.OpenOcr(bytes, _uiQueue, hwnd);
+                    break;
+                case PinCropAction.Save:
+                    _ = FileSaveService.SavePngAsync(hwnd, bytes, FileSaveService.SuggestedName("crop"));
+                    break;
+            }
+            MemoryProbe.Log("crop-done");
+        });
     }
 
     /// <summary>在当前贴图上打开系统另存为对话框。unsafe 类里不能写 async，因此只 fire-and-forget。</summary>
@@ -769,7 +923,7 @@ public sealed unsafe partial class NativePinWindow
     }
 
     /// <summary>交互期：GDI StretchBlt 快速缩放；停手后 GDI+ 双三次高清精修。</summary>
-    private void RenderAndPresent(bool highQuality)
+    private void RenderAndPresent(bool highQuality, Image? sourceOverride = null)
     {
         if (_hwnd.IsNull || _winW <= 0 || _winH <= 0)
             return;
@@ -781,7 +935,7 @@ public sealed unsafe partial class NativePinWindow
             EnsureScreenDc();
 
             if (highQuality)
-                RenderHighQuality();
+                RenderHighQuality(sourceOverride);
             else
                 RenderPlaceholder();
 
@@ -888,7 +1042,7 @@ public sealed unsafe partial class NativePinWindow
     /// 直接从 PNG 解码绘制到常驻 DIB，不再常驻一份全分辨率 Bitmap。
     /// 贴图闲置时只保留压缩 PNG + 目标 DIB（各一张），内存从 ~70MB 降到 ~25MB。
     /// </summary>
-    private void RenderHighQuality()
+    private void RenderHighQuality(Image? sourceOverride = null)
     {
         EnsureScreenDc();
         EnsureDestDib(_winW, _winH);
@@ -898,8 +1052,9 @@ public sealed unsafe partial class NativePinWindow
             return;
         }
 
-        using var source = DecodeSource();
-        if (source is null)
+        using var decoded = sourceOverride is null ? DecodeSource() : null;
+        var image = sourceOverride ?? decoded?.Image;
+        if (image is null)
         {
             RenderPlaceholder();
             return;
@@ -921,8 +1076,8 @@ public sealed unsafe partial class NativePinWindow
                 // 不透明度 100% 是最常见路径：SourceCopy 不做逐像素混合，也不建 ColorMatrix 临时面，
                 // 滚动缩放时的瞬时分配明显少于 SourceOver + ImageAttributes。
                 graphics.CompositingMode = CompositingMode.SourceCopy;
-                graphics.DrawImage(source.Image, new Rectangle(0, 0, _winW, _winH),
-                    0, 0, source.Image.Width, source.Image.Height, GraphicsUnit.Pixel);
+                graphics.DrawImage(image, new Rectangle(0, 0, _winW, _winH),
+                    0, 0, image.Width, image.Height, GraphicsUnit.Pixel);
             }
             else
             {
@@ -930,8 +1085,8 @@ public sealed unsafe partial class NativePinWindow
                 graphics.CompositingMode = CompositingMode.SourceOver;
                 var matrix = new ColorMatrix { Matrix33 = (float)_opacity };
                 attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-                graphics.DrawImage(source.Image, new Rectangle(0, 0, _winW, _winH),
-                    0, 0, source.Image.Width, source.Image.Height, GraphicsUnit.Pixel, attributes);
+                graphics.DrawImage(image, new Rectangle(0, 0, _winW, _winH),
+                    0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attributes);
             }
         }
     }

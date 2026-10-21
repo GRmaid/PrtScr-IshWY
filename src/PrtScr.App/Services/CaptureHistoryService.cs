@@ -10,6 +10,7 @@ public enum HistoryCaptureMode
     Window,
     Normal,
     Legacy,
+    PinCrop,
 }
 
 /// <summary>一条本机截图历史。</summary>
@@ -31,6 +32,7 @@ public sealed record HistoryItem(
     {
         HistoryCaptureMode.Window => $"窗口 · {DisplayProcess}",
         HistoryCaptureMode.Normal => "常规截图",
+        HistoryCaptureMode.PinCrop => "贴图裁剪",
         _ => "早期截图",
     };
 
@@ -112,6 +114,7 @@ public sealed class CaptureHistoryService
             {
                 HistoryCaptureMode.Window => "win",
                 HistoryCaptureMode.Normal => "normal",
+                HistoryCaptureMode.PinCrop => "pin",
                 _ => "legacy",
             };
             var name = $"{now:yyyyMMdd-HHmmss-fff}-{tag}-{Guid.NewGuid().ToString("N")[..6]}.png";

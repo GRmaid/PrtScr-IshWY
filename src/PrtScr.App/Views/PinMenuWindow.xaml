@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="PrtScr.App.Views.PinMenuWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border x:Name="Panel"
+            CornerRadius="10"
+            BorderThickness="0"
+            Padding="4">
+        <StackPanel x:Name="ItemsPanel" Spacing="1"/>
+    </Border>
+</Window>

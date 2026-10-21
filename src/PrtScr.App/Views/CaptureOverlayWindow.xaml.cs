@@ -64,6 +64,7 @@ public sealed partial class CaptureOverlayWindow : Window
     private bool _closed;
     private bool _saving;
     private bool _confirming;
+    private bool _sessionFinished;
     private PrtScr.App.Services.KeyInterceptor? _keys;
 
     private WriteableBitmap? _loupeBitmap;
@@ -126,6 +127,10 @@ public sealed partial class CaptureOverlayWindow : Window
             presenter.SetBorderAndTitleBar(false, false);
             presenter.IsAlwaysOnTop = true;
             presenter.IsResizable = false;
+
+            // 全屏取景窗没有任务栏按钮：否则每次按截图热键，任务栏都会闪出一个
+            // “实践小梅IshWY”图标再消失。必须在第一次 Show 之前设置。
+            AppWindow.IsShownInSwitchers = false;
         }
 
         // WinUI 无边框窗仍保留 1px 非客户边框：鼠标贴屏幕边缘时命中 HTBORDER，
@@ -215,6 +220,8 @@ public sealed partial class CaptureOverlayWindow : Window
     private void ResetSessionState()
     {
         _closed = false;
+        _confirming = false;
+        _sessionFinished = false;
         _dragging = false;
         _dragMoved = false;
         _hasSelection = false;
@@ -769,38 +776,76 @@ public sealed partial class CaptureOverlayWindow : Window
 
     public void Cancel() => Dismiss();
 
-    /// <summary>隐藏窗口（复用），并通知服务本次取景结束。</summary>
-    private void Dismiss()
+    /// <summary>
+    /// 确认截图时先把取景窗收掉：冻结图已经够用，没必要让遮罩/选区一直停在屏幕上
+    /// 等裁剪、PNG 编码、写剪贴板和落历史——那会看起来像“回车卡住”。
+    /// _closed 置位后重复按键不会再次进入。
+    /// </summary>
+    private void HideForCapture()
     {
         if (_closed)
             return;
         _closed = true;
         EscOverPinHook.SetOverlayKeysActive(false);
         AppWindow.Hide();
-
-        // 取景器常驻复用，但冻结图（2560×1600 WriteableBitmap + GDI Bitmap 各约 16 MB）
-        // 不能一直挂在窗口上；隐藏后立即释放，下次 Prepare 会重新填充。
         try
         {
             HideColorLoupe();
             _toastTimer?.Stop();
             CopyToast.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Overlay hide 异常: {ex.Message}");
+        }
+        App.Log("Overlay: hidden for capture");
+    }
+
+    /// <summary>捕获已经取完，释放冻结图并通知服务本次取景结束。</summary>
+    private void FinishCaptureSession()
+    {
+        if (_sessionFinished)
+            return;
+        _sessionFinished = true;
+
+        var before = GC.GetTotalMemory(false);
+        try
+        {
             Frozen.Source = null;
             _full.Dispose();
-            // 这两块（WriteableBitmap + GDI Bitmap）各约 16 MB，且 PixelBuffer 会进大对象堆。
-            // 不主动收一次，下次截图前私有内存会一直停在 ~120 MB；收一次回到 ~60 MB。
-            var managedBefore = GC.GetTotalMemory(false);
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
-            var managedAfter = GC.GetTotalMemory(false);
-            App.Log($"Overlay: frozen buffers released, managed={managedBefore / 1048576}->{managedAfter / 1048576}MB");
+            _full = new Bitmap(1, 1);
         }
         catch (Exception ex)
         {
             App.Log($"Overlay cleanup 异常: {ex.Message}");
         }
-        _full = new Bitmap(1, 1);
+
+        // 2560×1600 的 WriteableBitmap + GDI Bitmap 各约 16 MB，PixelBuffer 会进大对象堆。
+        // 但不能在 UI 线程上阻塞式 GC——那正是下一次截图“卡一下”的来源；放到后台延迟压缩。
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(180);
+                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                App.Log($"Overlay: frozen buffers released, managed={before / 1048576}->{GC.GetTotalMemory(false) / 1048576}MB");
+            }
+            catch (Exception ex)
+            {
+                App.Log($"Overlay GC 异常: {ex.Message}");
+            }
+        });
 
         Dismissed?.Invoke();
+    }
+
+    /// <summary>隐藏窗口（复用），并通知服务本次取景结束。</summary>
+    private void Dismiss()
+    {
+        if (_closed)
+            return;
+        HideForCapture();
+        FinishCaptureSession();
     }
 
     /// <summary>把选区按“窗口矩形 → 捕获位图”的比率映射到窗口图上并裁剪。</summary>
@@ -956,15 +1001,22 @@ public sealed partial class CaptureOverlayWindow : Window
     private async Task ConfirmAsync()
     {
         Bitmap? captured = null;
+        var ended = false;
         try
         {
+            // 先藏窗再取图：窗口捕获/PNG 编码期间主人不会再看到遮罩和选区。
+            HideForCapture();
             captured = await CaptureSelectionAsync();
+
+            // 图已经拿到，冻结缓冲可以释放，取景服务也立即进入空闲状态；
+            // 后面的编码/剪贴板/历史都在后台，不挡下一次热键。
+            FinishCaptureSession();
+            ended = true;
+
             if (captured is null)
                 return;
 
-            using var ms = new MemoryStream();
-            captured.Save(ms, ImageFormat.Png);
-            var bytes = ms.ToArray();
+            var bytes = await Task.Run(() => EncodePng(captured));
 
             var target = ResolveHistoryTarget();
             var copyTask = PrtScr.App.Services.ClipboardService.SetImageAsync(bytes);
@@ -984,8 +1036,16 @@ public sealed partial class CaptureOverlayWindow : Window
         finally
         {
             captured?.Dispose();
-            Dismiss();
+            if (!ended)
+                FinishCaptureSession();
         }
+    }
+
+    private static byte[] EncodePng(Bitmap bitmap)
+    {
+        using var ms = new MemoryStream();
+        bitmap.Save(ms, ImageFormat.Png);
+        return ms.ToArray();
     }
 
     private void Capture_Click(object sender, RoutedEventArgs e) => _ = ConfirmAsync();
