@@ -58,8 +58,9 @@ public sealed partial class CaptureOverlayWindow : Window
     private WindowInfo? _clickedWindow; // 按下那一刻吸附的窗口
     private WindowInfo? _subregionCandidate; // 本次拖拽可用的“窗口局部”目标
     private WindowInfo? _subregionWindow;    // 当前选区属于该窗口的局部（从窗口本体裁剪）
-    private bool _movingSelection;      // 常规模式：按住已有选区内部拖动 = 移动选框
+    private bool _movingSelection;      // 按住已有选区内部拖动 = 移动选框（常规/窗口模式都支持）
     private Rect _moveStartSelection;   // 移动开始时的选区，按总位移计算避免累计误差
+    private bool _moveWholeWindow;      // 窗口模式下移动的是整窗选区；一旦拖动就脱离窗口，改为冻结画面裁切
     private WindowInfo? _lastTipWindow; // 尺寸提示当前显示的窗口（避免每帧重设文本）
     private readonly List<WindowInfo> _hoverCandidates = new();   // 光标下按 Z 序排列的全部候选窗口（复用，零分配）
     private DateTimeOffset _lastPress;
@@ -227,6 +228,7 @@ public sealed partial class CaptureOverlayWindow : Window
         _dragging = false;
         _dragMoved = false;
         _movingSelection = false;
+        _moveWholeWindow = false;
         _hasSelection = false;
         _selection = Rect.Empty;
         _hoverWindow = null;
@@ -397,10 +399,16 @@ public sealed partial class CaptureOverlayWindow : Window
             return;
         }
 
+        var left = pointInfo.Properties.IsLeftButtonPressed;
+        var middle = pointInfo.Properties.IsMiddleButtonPressed && !left;
+        // 左键负责框选；滚轮键只用来拖动已有选区，不在空白处重新起框。
+        if (!left && !middle)
+            return;
+
         Layer.CapturePointer(e.Pointer);
 
-        // 双击已有选区 = 确认
-        if (_hasSelection && (now - _lastPress).TotalMilliseconds < 500 &&
+        // 双击已有选区 = 确认（滚轮键不参与双击）
+        if (left && _hasSelection && (now - _lastPress).TotalMilliseconds < 500 &&
             _selection.Contains(point))
         {
             _lastPress = now;
@@ -413,19 +421,26 @@ public sealed partial class CaptureOverlayWindow : Window
         _pressPoint = point;
         _lastHoverPoint = point;
 
-        // 常规截图：按在已有选区内部并拖动 = 移动整个选框（点一下不动仍保留选区）。
-        // 只对常规模式开放，窗口模式的选框仍代表某个窗口，移动后会失去窗口归属。
-        if (_captureMode == CaptureMode.Normal && _hasSelection && _selection.Contains(point))
+        // 两种模式：按在已有选区内部拖动 = 移动整个选框（左键或按住滚轮均可）。
+        // 窗口模式下整窗选区一动就会脱离原窗口；窗口局部选区则保留窗口归属，
+        // 并限制在窗口矩形内移动，确认时仍从窗口本体裁剪。
+        if (_hasSelection && _selection.Contains(point))
         {
             _movingSelection = true;
             _moveStartSelection = _selection;
+            _moveWholeWindow = _captureMode == CaptureMode.Window &&
+                               _clickedWindow is not null && _subregionWindow is null;
             _dragging = true;
             _dragMoved = false;
-            _clickedWindow = null;
-            _subregionCandidate = null;
-            _subregionWindow = null;
             HideColorLoupe();
             UpdateVisuals();
+            return;
+        }
+
+        // 滚轮键只用于移动已有选区：点在空白处时不做任何事，更不会重新框选。
+        if (!left)
+        {
+            Layer.ReleasePointerCapture(e.Pointer);
             return;
         }
 
@@ -480,12 +495,45 @@ public sealed partial class CaptureOverlayWindow : Window
                 if (_dragMoved)
                 {
                     HideColorLoupe();
+
+                    // 整窗选区一旦被拖动，就不再代表原来那个窗口；改为常规截图，
+                    // 从冻结画面裁切，避免把移动后的矩形错误地映射回窗口内容。
+                    if (_moveWholeWindow)
+                    {
+                        _moveWholeWindow = false;
+                        _clickedWindow = null;
+                        _subregionWindow = null;
+                        _subregionCandidate = null;
+                        _captureMode = CaptureMode.Normal;
+                        ShowCopyToast("已移动整窗选区，改为常规截图");
+                        App.Log("Overlay: whole-window selection moved -> normal screen crop");
+                    }
+
                     var dx = point.X - _pressPoint.X;
                     var dy = point.Y - _pressPoint.Y;
+
+                    var minX = 0.0;
+                    var minY = 0.0;
                     var maxX = Math.Max(0, Root.ActualWidth - _moveStartSelection.Width);
                     var maxY = Math.Max(0, Root.ActualHeight - _moveStartSelection.Height);
-                    var x = Math.Clamp(_moveStartSelection.X + dx, 0, maxX);
-                    var y = Math.Clamp(_moveStartSelection.Y + dy, 0, maxY);
+
+                    // 窗口局部选区：只能在原窗口矩形内移动，确认时仍走窗口本体裁剪。
+                    if (_subregionWindow is { } sub)
+                    {
+                        var wr = DipRect(sub.FrameBounds);
+                        var localMaxX = Math.Min(maxX, wr.X + wr.Width - _moveStartSelection.Width);
+                        var localMaxY = Math.Min(maxY, wr.Y + wr.Height - _moveStartSelection.Height);
+                        if (localMaxX >= wr.X && localMaxY >= wr.Y)
+                        {
+                            minX = Math.Max(0, wr.X);
+                            minY = Math.Max(0, wr.Y);
+                            maxX = localMaxX;
+                            maxY = localMaxY;
+                        }
+                    }
+
+                    var x = Math.Clamp(_moveStartSelection.X + dx, minX, Math.Max(minX, maxX));
+                    var y = Math.Clamp(_moveStartSelection.Y + dy, minY, Math.Max(minY, maxY));
                     _selection = new Rect(x, y, _moveStartSelection.Width, _moveStartSelection.Height);
                 }
 
@@ -552,6 +600,7 @@ public sealed partial class CaptureOverlayWindow : Window
         if (_movingSelection)
         {
             _movingSelection = false;
+            _moveWholeWindow = false;
             // 只是点了一下选框内部、没有拖动：保留选区，不进入“新框选”。
             UpdateVisuals();
             HideColorLoupe();
@@ -725,6 +774,7 @@ public sealed partial class CaptureOverlayWindow : Window
             _dragging = false;
             _dragMoved = false;
             _movingSelection = false;
+            _moveWholeWindow = false;
             _hasSelection = false;
             _selection = Rect.Empty;
             _hoverWindow = null;
@@ -1607,9 +1657,11 @@ public sealed partial class CaptureOverlayWindow : Window
         }
         else if (_hasSelection)
         {
-            HudHintText.Text = _captureMode == CaptureMode.Normal
-                ? "拖动选区 移动 · 回车 截图 · O 识别 · Ctrl+S 保存"
-                : "回车 截图 · O 识别 · Ctrl+S 保存 · Tab 切换";
+            // 已有选区：两种模式都能移动；整窗选区还可继续用滚轮切换窗口。
+            // 提示里明确写出滚轮/左键，避免“能做但没人知道”。
+            var wheel = _clickedWindow is not null ? " · 滚轮 切窗" : "";
+            HudHintText.Text =
+                $"拖动选区 移动（中键/左键）{wheel} · 回车 截图 · O 识别 · Ctrl+S 保存";
         }
         else if (_hoverWindow is not null)
         {
@@ -1619,7 +1671,7 @@ public sealed partial class CaptureOverlayWindow : Window
         }
         else
         {
-            HudHintText.Text = "拖拽 框选区域 · 滚轮 选窗 · Tab 切换模式";
+            HudHintText.Text = "拖拽 框选区域 · 滚轮 切换窗口 · Tab 切换模式";
         }
 
         HudBar.Visibility = Visibility.Visible;
