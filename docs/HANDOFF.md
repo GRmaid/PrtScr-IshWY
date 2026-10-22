@@ -375,6 +375,24 @@ FullscreenBypass: 已归还原前台
 - 发布验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`pwsh -NoProfile -File scripts/publish.ps1 -Version 1.0.1` 通过 PRI/XBF 校验与 `--smoke`；产物 `artifacts/IshWY-1.0.1-win-x64` 72.7 MB、`artifacts/IshWY-1.0.1-win-x64.zip` 29.2 MB；仅有预期 IL2026/IL2104 trim 警告。
 - 发布记录：提交 `8f8e6f5`「Release v1.0.1」，tag `v1.0.1`，main 与 tag 已推送；Release workflow 39777624267 成功（2m43s）。GitHub Release https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 为 Latest，资产 `IshWY-1.0.1-win-x64.zip` 30,598,128 字节，sha256 `444fc52dc9d310f788d41a8b0030b0324277d86a24c1cdfc866ac783ef346746`。本地发布 zip 与 CI 产物的哈希不同（zip 压缩非确定性），发布以 GitHub 资产为准；下载回读后已复制到桌面。
 
+### 滚轮切窗提示与窗口模式选区移动（2026-10-22 深夜七）
+
+- 需求：主人指出滚轮循环窗口没有提示；且窗口截图模式按住滚轮（中键）只会重新起框，已有选区无法移动。
+- 按键闸门：`CaptureOverlayWindow.HandlePressed` 先区分左右中键。右键仍是取消；左键负责框选/单击选中；中键只用于拖动已有选区，点在空白处直接 `ReleasePointerCapture` 返回，不再清空选区或重新起框。双击确认限定左键。
+- 选区移动：两种模式的 `_selection.Contains(point)` 都进入 `_movingSelection`，按总位移移动并夹在工作区；新增 `_moveWholeWindow` 标记窗口模式下的整窗选区。整窗选区一旦拖动就清空 `_clickedWindow`/`_subregionWindow`/`_subregionCandidate`，切到 `CaptureMode.Normal`，toast「已移动整窗选区，改为常规截图」——移动后的矩形已不对应原窗口，必须按冻结画面裁切。窗口局部选区保留 `_subregionWindow`，移动范围夹在 `DipRect(sub.FrameBounds)` 内，确认时仍截窗口本体。
+- 状态复位：`ResetSessionState`、`ToggleCaptureMode` 与 `HandleReleased` 都复位 `_moveWholeWindow`，避免跨取景/跨模式残留。
+- HUD 提示：有选区时显示「拖动选区 移动（中键/左键）」，若是整窗选区再追加「· 滚轮 切窗」，后面接「回车 截图 · O 识别 · Ctrl+S 保存」；无选区时由「滚轮 选窗」改为更明确的「滚轮 切换窗口」。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 36444 已启动，日志 20:42:20 五个热键 `register=0x1`、overlay pre-created，待主人实测。
+
+### v1.0.1 覆盖发布：滚轮提示与两种模式选区移动（2026-10-22 深夜八）
+
+- 主人决定：滚轮切窗提示与选区移动只是小插曲，不单独发版，仍登记为 v1.0.1，并覆盖 GitHub Release；新 zip 放到 `C:\Users\asus\DeskBox\我的桌面`。
+- 纳入代码：`CaptureOverlayWindow.xaml.cs` 的按键闸门、两种模式选区移动、整窗选区转常规截图、窗口局部选区夹取与 HUD 文案（详见深夜七）；README 已同步「两种模式都能拖动」、HUD 移动提示与整窗选区裁切语义。
+- 发布记录：提交 `222665b`「Republish v1.0.1 with overlay selection fixes」；tag `v1.0.1` 由 `8f8e6f5` 强制更新到 `222665b` 后推送。Release workflow 39781688548 成功（2m2s），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 仍为 Latest。
+- 资产：`IshWY-1.0.1-win-x64.zip` 30,598,488 字节，sha256 `c8dbe4f189c1f5faa5c0ec8e33e06de5dd42a04424bb4d0cd544ad741a55532d`；旧资产 30,598,128 字节 / `444fc52d…` 已被覆盖。本地发布 zip 为 30,598,462 字节 / `9332db30…`，与 CI 压缩结果不同，发布以 CI 资产为准。
+- 交付：GitHub 资产下载回读后复制到 `C:\Users\asus\DeskBox\我的桌面\IshWY-1.0.1-win-x64.zip`，大小与哈希一致。
+- 验证：Debug `dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`pwsh -NoProfile -File scripts/publish.ps1 -Version 1.0.1` 通过 PRI/XBF 校验与 `--smoke`；CI 发布与资产下载通过。
+
 ## 5. 踩坑与约定
 
 - **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。取景窗亮窗后可能既没前台也没 XAML 焦点，Tab/Ctrl+C/Esc 不能只靠焦点路径；现在由 `EscOverPinHook` 在取景激活期间直通，钩子失活时必须立刻放行，避免吞掉别的程序的按键。
@@ -438,7 +456,9 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-22 深夜（二）（原话「不错，测试都通过」）：底栏只有「另存为」一个保存按钮，选一张直接另存、选多张自动批量导出；「量另存为」裁切消失；重复悬停的「删除」popup 转入下一批（Debug PID 42884）。
 - [x] 主人验收 2026-10-22 深夜（三）除悬停提示外的全部（原话「其他的做的都达到目标，都做的很好」）：全选第一次全选、按钮变「取消全选」，再点退出多选；选择模式下点列表空白退出；多选复制/标注取最新一张，贴图全部贴出并按 24px 错开，删除全部均通过。
 - [x] 主人验收 2026-10-22 深夜（四/五）（原话「很好，今天就结束了」）：历史窗任意位置悬停不再出现「删除」；取景器无 Esc / Enter / Ctrl+S / Ctrl+C 键名提示；历史窗 Delete 删除、Ctrl+A 全选与 Esc 关闭仍生效；标题下「左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。」说明正常。当前批次转入 v1.0.1 发布。
-- [x] v1.0.1 发布（2026-10-22 深夜）：版本 1.0.1、README 按「仅最新功能、不写版本历史/开发过程」清理、构建 0 错误、发布目录 72.7 MB / zip 29.2 MB；提交 `8f8e6f5`、tag `v1.0.1` 已推送，Release workflow 成功，https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 为 Latest，资产 30,598,128 字节、sha256 `444fc52dc9d310f788d41a8b0030b0324277d86a24c1cdfc866ac783ef346746`；桌面已留 `IshWY-1.0.1-win-x64.zip`。
+- [x] 主人验收 2026-10-22 深夜（七）（原话「好，只是一个小插曲」）：窗口/常规模式已有选区都能用中键（滚轮键）或左键拖动移动；窗口整窗选区移动后提示「已移动整窗选区，改为常规截图」并按冻结画面裁切；窗口局部选区只在窗口矩形内移动、仍截窗口本体；空白处按滚轮键不再重新起框；HUD 有选区时显示「拖动选区 移动（中键/左键）」，整窗选区追加「滚轮 切窗」，无选区显示「滚轮 切换窗口」。（Debug PID 36444）
+- [x] v1.0.1 发布（2026-10-22 深夜）：版本 1.0.1、README 按「仅最新功能、不写版本历史/开发过程」清理、构建 0 错误、发布目录 72.7 MB / zip 29.2 MB；提交 `8f8e6f5`、tag `v1.0.1` 已推送，Release workflow 成功，https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 为 Latest，资产 30,598,128 字节、sha256 `444fc52dc9d310f788d41a8b0030b0324277d86a24c1cdfc866ac783ef346746`；桌面已留 `IshWY-1.0.1-win-x64.zip`。该首次发布资产已被 2026-10-22 深夜八的覆盖发布替换，最终资产见下条。
+- [x] v1.0.1 覆盖发布（2026-10-22 深夜八）：主人要求滚轮提示与选区移动不单独发版，仍登记 v1.0.1 并覆盖 Release；提交 `222665b`、tag `v1.0.1` 强制更新，workflow 39781688548 成功；资产 30,598,488 字节、sha256 `c8dbe4f189c1f5faa5c0ec8e33e06de5dd42a04424bb4d0cd544ad741a55532d`，下载回读一致；`C:\Users\asus\DeskBox\我的桌面\IshWY-1.0.1-win-x64.zip` 已替换为同一资产。
 - [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
 - [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
 - [x] GitHub Release：旧 `v0.1.0` Release 已删除；`v1.0.0` 已发布并上传 `IshWY-1.0.0-win-x64.zip`（30,588,110 字节，sha256 一致），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。
