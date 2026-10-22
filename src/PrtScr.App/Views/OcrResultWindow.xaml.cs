@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PrtScr.App.Services;
@@ -60,6 +61,7 @@ public sealed partial class OcrResultWindow : Window
         _ownerHwnd = ownerHwnd;
         InitializeComponent();
         Title = $"{PrtScr.App.AppInfo.Name} OCR 结果";
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
 
         var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
             AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;

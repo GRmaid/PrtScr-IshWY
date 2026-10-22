@@ -62,6 +62,11 @@ public sealed class CaptureHistoryService
 
     public static CaptureHistoryService Instance { get; } = new();
 
+    /// <summary>历史文件新增/修剪后触发；可能来自后台线程，订阅方自行切回 UI 线程。</summary>
+    public event Action? HistoryChanged;
+
+    private void NotifyHistoryChanged() => HistoryChanged?.Invoke();
+
     public static string StorageDirectory => Path.Combine(
         AppContext.BaseDirectory, "data", "history");
 
@@ -136,6 +141,7 @@ public sealed class CaptureHistoryService
                 PruneLocked(PerCategoryLimit);
 
             App.Log($"History: saved {name} ({pngBytes.Length / 1024}KB, {mode}, {processName ?? "-"})");
+            NotifyHistoryChanged();
             return path;
         }
         catch (Exception ex)
@@ -150,6 +156,7 @@ public sealed class CaptureHistoryService
     {
         lock (_sync)
             PruneLocked(perCategory ?? PerCategoryLimit);
+        NotifyHistoryChanged();
     }
 
     public async Task<byte[]?> ReadAsync(HistoryItem item)
@@ -165,30 +172,44 @@ public sealed class CaptureHistoryService
         }
     }
 
-    public bool Delete(HistoryItem item)
+    public bool Delete(HistoryItem item) => DeleteMany(new[] { item }) > 0;
+
+    /// <summary>
+    /// 批量删除并只触发一次 HistoryChanged。历史窗清空当前分类、批量删除多选时使用，
+    /// 避免逐个删除时设置页和已打开的历史窗反复重载。
+    /// </summary>
+    public int DeleteMany(IEnumerable<HistoryItem> items)
     {
+        var deleted = 0;
         lock (_sync)
         {
-            try
+            foreach (var item in items)
             {
-                if (!IsInsideStorage(item.FilePath) || !File.Exists(item.FilePath))
-                    return false;
+                try
+                {
+                    if (!IsInsideStorage(item.FilePath) || !File.Exists(item.FilePath))
+                        continue;
 
-                File.Delete(item.FilePath);
-                TryDeleteMetadata(item.FilePath);
-                App.Log($"History: deleted {item.FileName}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                App.Log($"History: 删除失败 {item.FileName} {ex.Message}");
-                return false;
+                    File.Delete(item.FilePath);
+                    TryDeleteMetadata(item.FilePath);
+                    App.Log($"History: deleted {item.FileName}");
+                    deleted++;
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"History: 删除失败 {item.FileName} {ex.Message}");
+                }
             }
         }
+
+        if (deleted > 0)
+            NotifyHistoryChanged();
+        return deleted;
     }
 
     public int Clear()
     {
+        var cleared = 0;
         lock (_sync)
         {
             try
@@ -210,14 +231,16 @@ public sealed class CaptureHistoryService
                 }
 
                 App.Log($"History: cleared {files.Length} files");
-                return files.Length;
+                cleared = files.Length;
             }
             catch (Exception ex)
             {
                 App.Log($"History: 清空失败 {ex.Message}");
-                return 0;
             }
         }
+
+        NotifyHistoryChanged();
+        return cleared;
     }
 
     private static void PruneLocked(int limit)

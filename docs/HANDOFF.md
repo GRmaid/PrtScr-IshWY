@@ -313,6 +313,68 @@ FullscreenBypass: 已归还原前台
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`--smoke` 退出 0。全新目录首次启动生成的 `data/config.json` 实测为 `hotkeyVk=65/mod=1`、`fullHotkeyVk=68/mod=1`、`defaultCaptureMode=normal`、`preferUmiOcr=false`，日志五个热键均 `register=0x1`。包内解压后再次 `--smoke` 同样退出 0；trim 后 WGC 2560×1600 帧与 Windows OCR 探针此前已通过。启动内存 `ws=150MB private=98MB`，仅作 smoke 记录，不代表主人性能验收。
 - 发布注意：`--smoke` 会像正常启动一样读取并写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY`，把启动路径改成当前测试副本的 exe。对复制/解压出来的包做 smoke 前先临时删除该 Run 值，测完恢复原路径；否则主人下次登录会启动到临时目录。本轮已按此恢复。
 
+### 取景选框移动、操作条、历史计数与命名（2026-10-22 下午）
+
+- 常规截图选区可移动：`CaptureOverlayWindow` 新增 `_movingSelection` / `_moveStartSelection`；只有 Normal 模式且按在已有选区内部才进入移动，`HandleMoved` 按总位移移动并把选框 clamp 在 Root 内，`HandleReleased` 保留选区；`ResetSessionState` 与 `ToggleCaptureMode` 都会清掉移动状态。窗口模式的选区仍代表窗口目标，不开放移动。
+- 选区操作条：`CaptureOverlayWindow.xaml` 由「截图 / 识别 / 保存」改为「✕ / ✓ / 文字识别 / 保存」，四个按钮带 tooltip；X 调 `Cancel()` 取消整次取景，✓ 截图并复制，O / Ctrl+S 与按钮等价；操作条宽度兜底从 176 调到 260。
+- 历史计数即时刷新：`CaptureHistoryService` 新增 `HistoryChanged` 事件，在 `AddAsync`、`PruneNow`、`Delete`、`Clear` 后触发；`MainWindow` 订阅后按 UI 线程调用 `RefreshHistoryStatus()`，不再等打开历史窗才更新。
+- 命名统一：主页历史摘要按钮、托盘菜单、`PinManagerWindow` 标题/页头与 README 统一为「截图/贴图管理」（2026-10-22 深夜按主人要求改为「屏幕贴图管理」）。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 38248 已启动。主人 2026-10-22 晚验收五项（含常规选区拖动、操作条、历史计数、命名与设置项）「做的好，你要我测的五个都很符合我的预期」。
+
+### OCR 窗口、历史实时刷新与清空分类（2026-10-22 晚）
+
+- OCR 结果窗补图标：`OcrResultWindow` 构造时调用 `AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"))`，与设置/历史/管理窗一致；标题栏左上角不再空白。
+- OCR 不再带起设置窗：设置页的剪贴板 OCR 与 OCR 热键改为 `OcrUiService.RecognizeAndShowAsync(bytes)`，不传 `ownerHwnd`；`OcrResultWindow` 仅在 owner 非 0 时设置 `GWLP_HWNDPARENT`，避免激活从属 OCR 窗时把 Settings 一并拉到前台。贴图触发的 OCR 仍传贴图 HWND，关闭后焦点回贴图；取景器触发仍不传 owner。
+- 历史窗实时刷新：`CaptureHistoryService.HistoryChanged` 继续覆盖添加/修剪/删除/清空；`MainWindow.OnHistoryChanged()` 在 UI 线程刷新设置计数，并调用 `RefreshOpenHistoryWindow()`（`_historyWindow?.RefreshAsync()`）。`HistoryWindow` 自己删除/清空时置 `_suppressExternalRefresh`，防止服务事件触发重复重载。
+- 删除与清空分类：`CaptureHistoryService.DeleteMany(IEnumerable<HistoryItem>)` 一次锁内删 PNG + sidecar，锁外只发一次 `HistoryChanged`；`Delete(HistoryItem)` 改为委托它。历史窗「清空」改为「清空分类」，只删 `FilterItems(_selectedCategoryKey)` 的当前分类（「全部」仍清全部），状态显示「已清空「分类」N 张」；设置页清空全部仍走 `CaptureHistoryService.Clear()`。
+- 历史底栏重排：从左到右为常用「复制（强调）/ 贴图 / 标注 / 另存为」、批量「批量另存为 / 删除 / 清空分类」、工具「全选 / 打开文件夹 / 关闭」，三组用 1×20 分隔线。当时每个按钮显式设置 `ToolTipService.ToolTip`；WinUI 3 仍会在分类悬停时残留「删除」提示，且默认 `MinWidth=120` 会溢出裁切。后续先把批量另存为并入「另存为」，再彻底移除悬浮提示，见下节。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0（五个热键 `register=0x1`、overlay 预创建、`Memory[startup]: ws=170MB private=101MB managed=2MB`）；Debug PID 39260 已启动，五项交互待主人实测。
+
+### 历史底栏提示、屏幕贴图管理与管理器刷新策略（2026-10-22 深夜）
+
+- 历史底栏第一次改为单行 `ActionHintText` + `Tag`/`PointerEntered` 切换说明，但主人仍看到分类处浮出的「删除」提示，且「批量另存为」被裁成「量另存为」；该方案已被 2026-10-22 深夜的「彻底移除悬浮提示 + 合并另存为」取代，见下节。
+- 命名：主页历史摘要按钮、托盘菜单、管理窗标题/页头与 README 从「截图/贴图管理」改为「屏幕贴图管理」。
+- 管理器刷新：`PinService.UpsertPin(record, notify=true)`，`NativePinWindow.PublishPinState(bool notify=true)`；拖动结束与缩放结算只更新注册表快照（`notify:false`），不再重建卡片；新建、关闭、左右切换图片、标注/裁剪完成、透明度、锁定/穿透/隐藏等状态变化仍通知。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 11004 已启动，三项交互待主人实测。
+
+### 历史另存为合并与悬浮提示彻底移除（2026-10-22 深夜）
+
+- 症状：主人悬停历史分类或任意底栏按钮时仍会浮出「删除」提示；底栏「批量另存为」只剩「量另存为」。改动前 XAML 中已无 `ToolTipService`，XBF 里也只有按钮的 `Tag` 字符串，判断为 WinUI 3 旧 tooltip/复用路径残留，不再保留任何悬停机制。
+- 另存为合并：`HistoryWindow.xaml` 删除独立「批量另存为」按钮，只留一个「另存为」。`SaveAs_Click` 先取 `SelectedViews()`：0 张提示先选图；1 张走 `FileSaveService.SavePngAsync` 单张 `FileSavePicker`；多张调用 `SaveManyAsync(selected)`，内部用 `FileSaveService.SaveManyAsync` + `FolderPicker` 一次导出，重名仍由 `GenerateUniqueName` 处理。
+- 悬浮提示：9 个底栏按钮去掉全部 `Tag`/`PointerEntered`/`PointerExited`；底栏上方保留固定说明「选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。」；构造时 `ClearBottomBarToolTips()` 遍历 `BottomBar` 的各 `StackPanel`，对每个 `Button` 显式 `ToolTipService.SetToolTip(button, null)`，防止模板/复用残留。
+- 状态栏同步：选中分类有图时显示「当前分类 N 张 · 单张另存为，多选批量另存为」。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 42884 已启动，待主人实测。
+
+### 全选开关、批量语义与「删除」提示源（2026-10-22 深夜三）
+
+- 症状：主人验收历史另存为批次后，又反馈三处：全选不能二次取消；多选下复制/贴图/标注/删除语义不明确；历史窗悬停仍浮出「删除」。
+- 全选：`HistoryWindow.xaml` 的「全选」按钮加 `x:Name="SelectAllButton"`；`SelectAll_Click`、`Ctrl+A` 与 `SelectAllAccelerator` 统一走 `ToggleSelectAll()`。未全选时进入多选并 `SelectAll()`；已全选时 `ExitSelectionMode()`，按钮文案由 `UpdateSelectionVisuals()` 在「全选 / 取消全选」间切换。
+- 空白退出：根 Grid 命名 `RootGrid`，构造时 `AddHandler(UIElement.PointerPressedEvent, ..., handledEventsToo:true)`；`RootGrid_PointerPressed` 在多选模式下排除 `GridViewItem`/`ListViewItem`/`ButtonBase`/`ScrollBar` 后退出多选，`FindAncestor<T>` 沿视觉树判断。
+- 批量语义：`SelectedViews()` 按 `CreatedAt` 倒序（最新在前）。复制取 `selected[0]`；标注取 `selected[0]`；贴图多选时逐张 `PinService.PastePngOffset(bytes, created*24, created*24)` 阶梯错开并统计成功/失败；删除仍作用于全部选中；另存为单张/批量不变。
+- 「删除」提示源（早期判断，已被下一节推翻）：全仓库仅剩 `MainWindow.xaml` 五个热键删除 ✕ 上的 `ToolTipService.ToolTip="删除这个快捷键"`。已全部删除；`HistoryWindow` 底栏仍显式 `ClearBottomBarToolTips()`，本轮不再新增任何 `Tag`/悬停事件。但历史窗悬停仍出现「删除」，说明真正来源不是按钮 tooltip。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 42180 已启动，待主人实测。
+
+### 历史窗「删除」浮层的真实根因：KeyboardAccelerator 键名提示（2026-10-22 深夜四）
+
+- 症状：删掉全仓库所有 `ToolTipService` 后，主人悬停历史窗仍看到「删除」；此时底栏已是普通按钮，`ClearBottomBarToolTips()` 也无效，提示不来自按钮。
+- 根因：`HistoryWindow.xaml` 根 Grid 上的 `KeyboardAccelerator Key="Delete"`。WinUI 3 的 `UIElement.KeyboardAcceleratorPlacementMode` 默认 `Auto`，会把关联加速键的组合显示为控件 tooltip；中文系统把 Delete 渲染成「删除」，所以悬停窗口任意位置都会浮出。
+- 修复：根 Grid 设 `KeyboardAcceleratorPlacementMode="Hidden"`，加速键本身仍可用；`CaptureOverlayWindow.xaml` 根 Grid 同样设置，避免 Esc/Enter/Ctrl+S/Ctrl+C 的键名提示。键盘路径不变（`HistoryWindow` 仍由根 `PreviewKeyDown` 处理 Esc/Delete/Ctrl+A）。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 38284，日志 20:04:57 五个热键 `register=0x1`、overlay pre-created；待主人悬停复测。
+
+### 历史窗左键/右键选择说明（2026-10-22 深夜五）
+
+- 需求：主人要求历史窗明确说明「左键选中、右键多选」。
+- 实现：`HistoryWindow.xaml` 标题区 `SubtitleText` 下新增固定说明「左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。」12px、0.62 透明度、可换行；选择逻辑、快捷键与底栏均未改。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 39784 已启动，待主人确认文案位置与可读性。
+
+### v1.0.1 发布与 README 约束（2026-10-22 深夜六）
+
+- 版本：`src/PrtScr.App/PrtScr.App.csproj` 的 `Version` 与 `src/PrtScr.App/app.manifest` 的 `assemblyIdentity version` 由 1.0.0 升到 1.0.1；配置键、默认值均未改。
+- 纳入本版的已验收改动：常规截图已有选区可拖动；选区操作条 ✕ / ✓ / 文字识别 / 保存；历史计数即时刷新；「屏幕贴图管理」统一命名；历史底栏固定提示 + 单「另存为」（单张另存、多选批量）；全选二次点击退出、点空白处退出多选、多选复制/标注取最新、贴图全部贴出；`KeyboardAcceleratorPlacementMode="Hidden"` 去掉历史/取景器键名提示；历史标题下新增左键/右键选择说明。
+- README 新约束（主人 2026-10-22 定）：只写最新版本的功能与信息，不写版本历史、开发过程、更新记录/开发日志；主人自己改过的段落不得改动。本次只做定向修改，保留「一点碎碎念」「唯一有效的一行」、致谢与 UmiOCR 备注等个人内容。
+- 发布验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`pwsh -NoProfile -File scripts/publish.ps1 -Version 1.0.1` 通过 PRI/XBF 校验与 `--smoke`；产物 `artifacts/IshWY-1.0.1-win-x64` 72.7 MB、`artifacts/IshWY-1.0.1-win-x64.zip` 29.2 MB；仅有预期 IL2026/IL2104 trim 警告。
+- 发布记录：提交、tag、GitHub Release 资产与 sha256 在发布完成后补入本节的下一行与 §6。
+
 ## 5. 踩坑与约定
 
 - **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。取景窗亮窗后可能既没前台也没 XAML 焦点，Tab/Ctrl+C/Esc 不能只靠焦点路径；现在由 `EscOverPinHook` 在取景激活期间直通，钩子失活时必须立刻放行，避免吞掉别的程序的按键。
@@ -320,7 +382,7 @@ FullscreenBypass: 已归还原前台
 - **另存为不是「只写文件」**：取景器的「保存」/Ctrl+S 与回车确认共用同一份 PNG；保存成功后必须同时写剪贴板与截图历史，否则主人会认为「保存了但粘贴不出来、历史也没有」。2026-10-20 已修。
 - **`unsafe` 类里不能写 async**：`NativePinWindow` 是 `unsafe partial class`，`async` 方法会报 CS4004「无法在不安全的上下文中等待」；另存为只能 fire-and-forget，把异常留在 `FileSaveService` 内部记录。
 - **FileSavePicker 必须绑定拥有者 HWND**：WinUI 3 直接 `new FileSavePicker()` 在桌面应用里会因没有窗口句柄失败；必须 `InitializeWithWindow.Initialize(picker, ownerHwnd)`。`HistoryWindow` 用自身 HWND，取景器/贴图用各自 HWND，不要用主窗句柄。
-- **历史窗不会自动刷新新截图**：`HistoryWindow` 仅在打开/重新加载时读目录；截图保存后如果历史窗正开着，需要关掉重开才能看到新条目（当前已知行为，未做实时监听）。
+- **历史窗现在会实时刷新**：`CaptureHistoryService.HistoryChanged` 在添加/修剪/删除/清空后触发；`MainWindow.OnHistoryChanged()` 刷新设置计数并调用已打开窗口的 `RefreshAsync()`。窗口自己删除/清空时用 `_suppressExternalRefresh` 防止服务事件重复重载；不要退回「只在打开时读目录」。
 - **贴图不要常驻全分辨率解码位图**：`_pngBytes` 是压缩 PNG，按需 `DecodeSource()` 即可；常驻 `_source` 会为每张贴图多占 16 MB 以上，且标注时再叠加 `_baseScaled`/临时全窗 Bitmap，峰值会到 220 MB。渲染要用 `CreateDestBitmap()` 复用 `_destBits`，不要每帧新建全窗 Bitmap。
 - **编辑模式平移不要抢左键**：左键是绘制；平移用中键或右键，先判断工具栏/取色面板区域，再 `SetCapture`。右键松开时只有 `_panMoved == false` 才弹菜单，否则用户拖完贴图会意外弹出菜单。
 - **分层窗口缩放别重复提交尺寸**：`UpdateLayeredWindow` 传 `psize` 就会调整窗口尺寸/位置，滚轮里再先 `MoveWindow` 是两次 DWM 表面更新，连续滚轮会堆中间尺寸 surface。只保留 `UpdateLayeredWindow`，并用 350ms 结算避免滚动中途反复高清重绘。
@@ -370,6 +432,13 @@ FullscreenBypass: 已归还原前台
 
 ## 6. 待办
 
+- [x] 主人验收 2026-10-22 下午四项反馈（原话「做的好，你要我测的五个都很符合我的预期」）：常规截图已有选区可拖动移动；操作条为 ✕ / ✓ / 文字识别 / 保存（✕ 取消整次取景，✓ 截图复制，O / Ctrl+S 仍可用）；设置页历史张数在截图、删除、清空后即时刷新；主页按钮、托盘菜单与管理窗统一显示「截图/贴图管理」（现已改名「屏幕贴图管理」）。
+- [x] 主人复测 2026-10-22 晚五项（部分通过）：OCR 结果窗标题栏图标、OCR 不再带起设置窗、清空分类只清当前分类、历史窗打开时新截图即时出现均通过；历史底栏 tooltip 与裁切未通过，已转入下一批修复。
+- [ ] 主人复测 2026-10-22 深夜三项（部分通过）：底栏不裁切、主页/托盘/管理窗统一「屏幕贴图管理」、管理窗拖动/缩放不刷新均通过；历史分类悬停的「删除」提示仍未消除，已转入下一批（Debug PID 11004）。
+- [x] 主人验收 2026-10-22 深夜（二）（原话「不错，测试都通过」）：底栏只有「另存为」一个保存按钮，选一张直接另存、选多张自动批量导出；「量另存为」裁切消失；重复悬停的「删除」popup 转入下一批（Debug PID 42884）。
+- [x] 主人验收 2026-10-22 深夜（三）除悬停提示外的全部（原话「其他的做的都达到目标，都做的很好」）：全选第一次全选、按钮变「取消全选」，再点退出多选；选择模式下点列表空白退出；多选复制/标注取最新一张，贴图全部贴出并按 24px 错开，删除全部均通过。
+- [x] 主人验收 2026-10-22 深夜（四/五）（原话「很好，今天就结束了」）：历史窗任意位置悬停不再出现「删除」；取景器无 Esc / Enter / Ctrl+S / Ctrl+C 键名提示；历史窗 Delete 删除、Ctrl+A 全选与 Esc 关闭仍生效；标题下「左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。」说明正常。当前批次转入 v1.0.1 发布。
+- [ ] v1.0.1 发布：版本 1.0.1、README 按「仅最新功能、不写版本历史/开发过程」重写、构建 0 错误、发布会话已生成 72.7 MB 目录与 29.2 MB zip；待提交/tag/推送与 GitHub Release 资产核验。
 - [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
 - [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
 - [x] GitHub Release：旧 `v0.1.0` Release 已删除；`v1.0.0` 已发布并上传 `IshWY-1.0.0-win-x64.zip`（30,588,110 字节，sha256 一致），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。

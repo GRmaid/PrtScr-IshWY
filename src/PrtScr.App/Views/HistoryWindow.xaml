@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:PrtScr.App.Views">
 
-    <Grid Padding="18" RowSpacing="12" PreviewKeyDown="RootGrid_PreviewKeyDown">
+    <Grid x:Name="RootGrid" Padding="18" RowSpacing="12" KeyboardAcceleratorPlacementMode="Hidden" PreviewKeyDown="RootGrid_PreviewKeyDown">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Delete" Invoked="DeleteAccelerator_Invoked" />
             <KeyboardAccelerator Key="A" Modifiers="Control" Invoked="SelectAllAccelerator_Invoked" />
@@ -29,6 +29,12 @@
                     Opacity="0.6"
                     TextWrapping="Wrap"
                     Text="仅保存在本机 data\history。" />
+                <TextBlock
+                    Margin="0,2,0,0"
+                    FontSize="12"
+                    Opacity="0.62"
+                    TextWrapping="Wrap"
+                    Text="左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。" />
             </StackPanel>
             <TextBlock
                 x:Name="StatusText"
@@ -180,17 +186,98 @@
             </Grid>
         </Grid>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
-            <Button Content="复制" Click="Copy_Click" Style="{StaticResource AccentButtonStyle}" />
-            <Button Content="贴图" Click="Pin_Click" />
-            <Button Content="标注" Click="Annotate_Click" />
-            <Button Content="另存为" Click="SaveAs_Click" />
-            <Button Content="批量另存为" Click="SaveMany_Click" />
-            <Button Content="删除" Click="Delete_Click" />
-            <Button Content="清空" Click="Clear_Click" />
-            <Button Content="全选" Click="SelectAll_Click" />
-            <Button Content="打开文件夹" Click="OpenFolder_Click" />
-            <Button Content="关闭" Click="Close_Click" />
-        </StackPanel>
+        <Grid Grid.Row="2" RowSpacing="6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock
+                x:Name="ActionHintText"
+                FontSize="12"
+                Opacity="0.62"
+                TextTrimming="CharacterEllipsis"
+                Text="选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。" />
+
+            <Grid x:Name="BottomBar" Grid.Row="1" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        Content="复制"
+                        Click="Copy_Click"
+                        Style="{StaticResource AccentButtonStyle}"
+                        MinWidth="0"
+                        Padding="10,6" />
+                    <Button
+                        Content="贴图"
+                        Click="Pin_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                    <Button
+                        Content="标注"
+                        Click="Annotate_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                    <Button
+                        Content="另存为"
+                        Click="SaveAs_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                </StackPanel>
+
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    HorizontalAlignment="Right">
+                    <Border
+                        Width="1"
+                        Height="20"
+                        Margin="4,0"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <Button
+                        Content="删除"
+                        Click="Delete_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                    <Button
+                        Content="清空分类"
+                        Click="Clear_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Border
+                        Width="1"
+                        Height="20"
+                        Margin="4,0"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <Button
+                        x:Name="SelectAllButton"
+                        Content="全选"
+                        Click="SelectAll_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                    <Button
+                        Content="打开文件夹"
+                        Click="OpenFolder_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                    <Button
+                        Content="关闭"
+                        Click="Close_Click"
+                        MinWidth="0"
+                        Padding="10,6" />
+                </StackPanel>
+            </Grid>
+        </Grid>
     </Grid>
 </Window>

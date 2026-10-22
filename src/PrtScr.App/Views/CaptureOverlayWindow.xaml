@@ -7,6 +7,7 @@
     <Grid
         x:Name="Root"
         Background="Black"
+        KeyboardAcceleratorPlacementMode="Hidden"
         PointerMoved="Layer_PointerMoved"
         PointerPressed="Layer_PointerPressed"
         PointerReleased="Layer_PointerReleased"
@@ -54,9 +55,9 @@
 
         </Canvas>
 
-        <!-- 选区操作层：截图/识别/保存操作条 + 底部常驻 HUD，不遮挡取景交互 -->
+        <!-- 选区操作层：取消/确认/文字识别/保存操作条 + 底部常驻 HUD，不遮挡取景交互 -->
         <Canvas x:Name="ActionLayer" Background="{x:Null}">
-            <!-- 选区操作条：截图 / 识别 / 保存，优先浮在选区下方外侧 -->
+            <!-- 选区操作条：X 取消取景，✓ 截图并复制，文字识别，保存；优先浮在选区下方外侧 -->
             <Border
                 x:Name="SelectionActions"
                 Background="#E6202020"
@@ -65,19 +66,39 @@
                 Visibility="Collapsed">
                 <StackPanel Orientation="Horizontal" Spacing="4">
                     <Button
-                        x:Name="CaptureButton"
-                        Content="截图"
-                        Padding="12,4"
-                        FontSize="12"
+                        x:Name="CancelSelectionButton"
+                        Content="✕"
+                        Width="28"
+                        Height="28"
                         MinWidth="0"
+                        Padding="0"
+                        FontSize="12"
+                        CornerRadius="4"
+                        IsTabStop="False"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Foreground="White"
+                        AutomationProperties.Name="取消截图"
+                        ToolTipService.ToolTip="取消截图（Esc）"
+                        Click="CancelCapture_Click" />
+                    <Button
+                        x:Name="CaptureButton"
+                        Content="✓"
+                        Width="30"
+                        Height="28"
+                        MinWidth="0"
+                        Padding="0"
+                        FontSize="15"
                         CornerRadius="4"
                         IsTabStop="False"
                         Style="{StaticResource AccentButtonStyle}"
+                        AutomationProperties.Name="截图并复制"
+                        ToolTipService.ToolTip="截图并复制（Enter）"
                         Click="Capture_Click" />
                     <Button
                         x:Name="OcrButton"
-                        Content="识别"
-                        Padding="12,4"
+                        Content="文字识别"
+                        Padding="10,4"
                         FontSize="12"
                         MinWidth="0"
                         CornerRadius="4"
@@ -85,6 +106,8 @@
                         Background="#33FFFFFF"
                         BorderBrush="#33FFFFFF"
                         Foreground="White"
+                        AutomationProperties.Name="识别选区文字"
+                        ToolTipService.ToolTip="识别选区文字（O）"
                         Click="Ocr_Click" />
                     <Button
                         x:Name="SaveButton"
@@ -97,6 +120,8 @@
                         Background="#33FFFFFF"
                         BorderBrush="#33FFFFFF"
                         Foreground="White"
+                        AutomationProperties.Name="另存为"
+                        ToolTipService.ToolTip="另存为（Ctrl+S）"
                         Click="Save_Click" />
                 </StackPanel>
             </Border>

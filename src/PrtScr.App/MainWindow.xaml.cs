@@ -72,6 +72,7 @@ public sealed partial class MainWindow : Window
         InitPinOcrHotkeys();
         InitModeHotkey();
         SyncHotkeyTexts();
+        CaptureHistoryService.Instance.HistoryChanged += OnHistoryChanged;
         PinService.HistoryRequested = ShowHistoryAbovePins;
         AboutText.Text = $"{AppInfo.Name} v{typeof(App).Assembly.GetName().Version} · {AppInfo.Tagline} · 分窗口截屏截图工具";
     }
@@ -179,6 +180,30 @@ public sealed partial class MainWindow : Window
             ? "贴图裁剪结果会写入截图历史的「贴图裁剪」分类。"
             : "贴图裁剪结果不再写入截图历史。");
         App.Log($"History: pinCrop = {HistoryPinCropToggle.IsOn}");
+    }
+
+    private void OnHistoryChanged()
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            RefreshHistoryStatus();
+            RefreshOpenHistoryWindow();
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                RefreshHistoryStatus();
+                RefreshOpenHistoryWindow();
+            });
+        }
+    }
+
+    /// <summary>历史窗口开着时，截图新增/删除/清空也立即刷新列表，不必重新打开窗口。</summary>
+    private void RefreshOpenHistoryWindow()
+    {
+        if (_historyWindow is not null)
+            _ = _historyWindow.RefreshAsync();
     }
 
     private void RefreshHistoryStatus()
@@ -674,8 +699,9 @@ public sealed partial class MainWindow : Window
                 SetStatus("剪贴板里没有图片可供识别");
                 return;
             }
-            await Services.OcrUiService.RecognizeAndShowAsync(bytes,
-                WinRT.Interop.WindowNative.GetWindowHandle(this));
+            // 不把设置窗设为 OCR 的 owner：从后台/托盘触发 OCR 时，
+            // 设置窗会被从属窗口的激活链一并拉起。让结果窗独立置顶即可。
+            await Services.OcrUiService.RecognizeAndShowAsync(bytes);
         }
         catch (Exception ex)
         {
@@ -730,8 +756,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            await Services.OcrUiService.RecognizeAndShowAsync(bytes,
-                WinRT.Interop.WindowNative.GetWindowHandle(this));
+            // 同上：全局 OCR 热键不应把设置窗带到前台。
+            await Services.OcrUiService.RecognizeAndShowAsync(bytes);
         }
         catch (Exception ex)
         {

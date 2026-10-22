@@ -7,6 +7,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -37,11 +38,14 @@ public sealed partial class HistoryWindow : Window
     private bool _closed;
     private bool _selectionMode;
     private bool _suppressSelectionSync;
+    private bool _suppressExternalRefresh;
     private long _lastEscapeTick;
 
     public HistoryWindow()
     {
         InitializeComponent();
+        ClearBottomBarToolTips();
+        RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(RootGrid_PointerPressed), true);
         Title = $"{AppInfo.Name} 截图历史";
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
 
@@ -110,9 +114,7 @@ public sealed partial class HistoryWindow : Window
         if (e.Key == Windows.System.VirtualKey.A && IsControlDown())
         {
             e.Handled = true;
-            EnterSelectionMode(null);
-            HistoryGrid.SelectAll();
-            UpdateSelectionVisuals();
+            ToggleSelectAll();
         }
     }
 
@@ -186,11 +188,48 @@ public sealed partial class HistoryWindow : Window
         UpdateSelectionVisuals();
     }
 
+    /// <summary>多选模式下点窗口空白处退出选择；点卡片、分类项、按钮或滚动条时交给控件处理。</summary>
+    private void RootGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_selectionMode || _closed)
+            return;
+
+        var source = e.OriginalSource as DependencyObject;
+        if (source is null)
+            return;
+
+        if (FindAncestor<GridViewItem>(source) is not null ||
+            FindAncestor<ListViewItem>(source) is not null ||
+            FindAncestor<ButtonBase>(source) is not null ||
+            FindAncestor<ScrollBar>(source) is not null)
+            return;
+
+        ExitSelectionMode();
+        StatusText.Text = "已退出多选";
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T match)
+                return match;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
+    }
+
     private void UpdateSelectionVisuals()
     {
         var selected = HistoryGrid.SelectedItems.OfType<HistoryItemView>().ToHashSet();
         foreach (var view in _items)
             view.IsSelected = selected.Contains(view);
+
+        if (SelectAllButton is not null)
+        {
+            var allSelected = _selectionMode && _items.Count > 0 && selected.Count == _items.Count;
+            SelectAllButton.Content = allSelected ? "取消全选" : "全选";
+        }
 
         if (_selectionMode)
         {
@@ -237,9 +276,7 @@ public sealed partial class HistoryWindow : Window
     private void SelectAllAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        EnterSelectionMode(null);
-        HistoryGrid.SelectAll();
-        UpdateSelectionVisuals();
+        ToggleSelectAll();
     }
 
     /// <summary>历史被删除/清空后通知外部刷新统计。</summary>
@@ -248,7 +285,8 @@ public sealed partial class HistoryWindow : Window
     /// <summary>窗口已经打开时刷新列表。</summary>
     public async Task RefreshAsync()
     {
-        if (!_closed)
+        // 本窗口自己删除/清空时会主动重载；服务事件触发的这次刷新直接跳过，避免重复加载缩略图。
+        if (!_closed && !_suppressExternalRefresh)
             await ReloadAsync();
     }
 
@@ -416,7 +454,7 @@ public sealed partial class HistoryWindow : Window
         else if (filteredCount > shown)
             StatusText.Text = $"当前分类共 {filteredCount} 张，先显示最新 {shown} 张";
         else
-            StatusText.Text = $"当前分类 {shown} 张 · 可多选后批量另存为";
+            StatusText.Text = $"当前分类 {shown} 张 · 单张另存为，多选批量另存为";
     }
 
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -505,27 +543,24 @@ public sealed partial class HistoryWindow : Window
         await PinViewAsync(view);
     }
 
-    private HistoryItemView? RequireSelection()
-    {
-        var view = HistoryGrid.SelectedItems.OfType<HistoryItemView>().FirstOrDefault();
-        if (view is not null)
-            return view;
-
-        StatusText.Text = "先在列表里选一张截图";
-        return null;
-    }
-
+    /// <summary>选中项按截图时间从新到旧排序；复制/标注取第一张，删除/另存为/贴图使用全部。</summary>
     private List<HistoryItemView> SelectedViews() =>
-        HistoryGrid.SelectedItems.OfType<HistoryItemView>().ToList();
+        HistoryGrid.SelectedItems.OfType<HistoryItemView>()
+            .OrderByDescending(v => v.Item.CreatedAt)
+            .ToList();
 
     private async void Copy_Click(object sender, RoutedEventArgs e) => await CopySelectedAsync();
 
     private async Task CopySelectedAsync()
     {
-        var view = RequireSelection();
-        if (view is null)
+        var selected = SelectedViews();
+        if (selected.Count == 0)
+        {
+            StatusText.Text = "先在列表里选一张截图";
             return;
+        }
 
+        var view = selected[0];
         var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
         if (bytes is null)
         {
@@ -534,19 +569,49 @@ public sealed partial class HistoryWindow : Window
         }
 
         var ok = await ClipboardService.SetImageAsync(bytes);
-        var selected = SelectedViews().Count;
         StatusText.Text = ok
-            ? (selected > 1 ? $"已复制第一张（共选中 {selected} 张）" : "已复制到剪贴板")
+            ? (selected.Count > 1 ? $"已复制最新一张（共选中 {selected.Count} 张）" : "已复制到剪贴板")
             : "复制失败（剪贴板被占用）";
     }
 
-    private async void Pin_Click(object sender, RoutedEventArgs e)
-    {
-        var view = RequireSelection();
-        if (view is null)
-            return;
+    private async void Pin_Click(object sender, RoutedEventArgs e) => await PinSelectedAsync();
 
-        await PinViewAsync(view);
+    private async Task PinSelectedAsync()
+    {
+        var selected = SelectedViews();
+        if (selected.Count == 0)
+        {
+            StatusText.Text = "先在列表里选中要贴图的截图";
+            return;
+        }
+
+        if (selected.Count == 1)
+        {
+            await PinViewAsync(selected[0]);
+            return;
+        }
+
+        var created = 0;
+        var failed = 0;
+        foreach (var view in selected)
+        {
+            var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
+            if (bytes is null)
+            {
+                failed++;
+                continue;
+            }
+
+            // 多张同时贴出时按 24px 阶梯错开，避免全部叠在指针同一点。
+            if (PinService.PastePngOffset(bytes, created * 24, created * 24))
+                created++;
+            else
+                failed++;
+        }
+
+        StatusText.Text = failed == 0
+            ? $"已贴出 {created} 张"
+            : $"已贴出 {created} 张，{failed} 张失败";
     }
 
     private async Task PinViewAsync(HistoryItemView view)
@@ -569,10 +634,14 @@ public sealed partial class HistoryWindow : Window
 
     private async void Annotate_Click(object sender, RoutedEventArgs e)
     {
-        var view = RequireSelection();
-        if (view is null)
+        var selected = SelectedViews();
+        if (selected.Count == 0)
+        {
+            StatusText.Text = "先在列表里选一张截图";
             return;
+        }
 
+        var view = selected[0];
         var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
         if (bytes is null)
         {
@@ -581,16 +650,29 @@ public sealed partial class HistoryWindow : Window
         }
 
         var created = PinService.PastePngAndEdit(bytes);
-        StatusText.Text = created ? "已贴到桌面并进入标注" : "贴图失败";
+        StatusText.Text = created
+            ? (selected.Count > 1
+                ? $"已贴出最新一张并进入标注（共选中 {selected.Count} 张）"
+                : "已贴到桌面并进入标注")
+            : "贴图失败";
     }
 
     private async void SaveAs_Click(object sender, RoutedEventArgs e)
     {
-        var view = RequireSelection();
-        if (view is null)
+        var selected = SelectedViews();
+        if (selected.Count == 0)
+        {
+            StatusText.Text = "先选中一张或多张截图（Ctrl / Shift 多选）";
             return;
+        }
 
-        var bytes = await CaptureHistoryService.Instance.ReadAsync(view.Item);
+        if (selected.Count > 1)
+        {
+            await SaveManyAsync(selected);
+            return;
+        }
+
+        var bytes = await CaptureHistoryService.Instance.ReadAsync(selected[0].Item);
         if (bytes is null)
         {
             StatusText.Text = "读取文件失败（可能已被删除）";
@@ -604,15 +686,8 @@ public sealed partial class HistoryWindow : Window
         StatusText.Text = path is null ? "已取消另存为" : $"已保存：{path}";
     }
 
-    private async void SaveMany_Click(object sender, RoutedEventArgs e)
+    private async Task SaveManyAsync(List<HistoryItemView> selected)
     {
-        var selected = SelectedViews();
-        if (selected.Count == 0)
-        {
-            StatusText.Text = "先选中一张或多张截图（Ctrl / Shift 多选）";
-            return;
-        }
-
         var payload = new List<(byte[] Bytes, string SuggestedName)>();
         foreach (var view in selected)
         {
@@ -638,6 +713,22 @@ public sealed partial class HistoryWindow : Window
             : $"已批量保存 {saved} 张到：{folder}";
     }
 
+    private void ClearBottomBarToolTips()
+    {
+        // 底栏只用左侧静态提示，不再使用悬浮 tooltip；显式清空，避免旧模板或复用路径残留。
+        foreach (var child in BottomBar.Children)
+        {
+            if (child is not StackPanel panel)
+                continue;
+
+            foreach (var item in panel.Children)
+            {
+                if (item is Button button)
+                    ToolTipService.SetToolTip(button, null);
+            }
+        }
+    }
+
     private async void Delete_Click(object sender, RoutedEventArgs e) => await DeleteSelectedAsync();
 
     private async Task DeleteSelectedAsync()
@@ -649,28 +740,56 @@ public sealed partial class HistoryWindow : Window
             return;
         }
 
-        var deleted = 0;
-        foreach (var view in selected)
+        _suppressExternalRefresh = true;
+        try
         {
-            if (CaptureHistoryService.Instance.Delete(view.Item))
-                deleted++;
+            var deleted = CaptureHistoryService.Instance.DeleteMany(selected.Select(v => v.Item));
+            await ReloadAsync();
+            StatusText.Text = $"已删除 {deleted} 张";
         }
-
-        await ReloadAsync();
-        StatusText.Text = $"已删除 {deleted} 张";
+        finally
+        {
+            _suppressExternalRefresh = false;
+        }
         HistoryChanged?.Invoke();
     }
 
     private async void Clear_Click(object sender, RoutedEventArgs e)
     {
-        var count = CaptureHistoryService.Instance.Clear();
-        await ReloadAsync();
-        StatusText.Text = $"已清空 {count} 张历史";
+        var categoryTitle = _categories.FirstOrDefault(c => c.Key == _selectedCategoryKey)?.Title ?? "当前分类";
+        var targets = FilterItems(_selectedCategoryKey).ToList();
+        if (targets.Count == 0)
+        {
+            StatusText.Text = $"「{categoryTitle}」已经是空的";
+            return;
+        }
+
+        _suppressExternalRefresh = true;
+        try
+        {
+            var count = CaptureHistoryService.Instance.DeleteMany(targets);
+            await ReloadAsync();
+            StatusText.Text = $"已清空「{categoryTitle}」{count} 张";
+        }
+        finally
+        {
+            _suppressExternalRefresh = false;
+        }
         HistoryChanged?.Invoke();
     }
 
-    private void SelectAll_Click(object sender, RoutedEventArgs e)
+    private void SelectAll_Click(object sender, RoutedEventArgs e) => ToggleSelectAll();
+
+    /// <summary>全选的两级语义：未全选则全选；已全选时再点一次退出多选。</summary>
+    private void ToggleSelectAll()
     {
+        if (_selectionMode && _items.Count > 0 && HistoryGrid.SelectedItems.Count == _items.Count)
+        {
+            ExitSelectionMode();
+            StatusText.Text = "已退出多选";
+            return;
+        }
+
         EnterSelectionMode(null);
         HistoryGrid.SelectAll();
         UpdateSelectionVisuals();

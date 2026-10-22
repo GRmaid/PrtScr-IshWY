@@ -18,7 +18,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Spacing="2">
-                <TextBlock Text="贴图管理" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="屏幕贴图管理" FontSize="22" FontWeight="SemiBold" />
                 <TextBlock
                     x:Name="SubtitleText"
                     FontSize="12"

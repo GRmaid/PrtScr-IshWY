@@ -332,7 +332,8 @@ public sealed unsafe partial class NativePinWindow
     }
 
     /// <summary>把当前状态发布给管理器；只传不可变快照，管理器不直接碰贴图字段。</summary>
-    private void PublishPinState()
+    /// <param name="notify">移动/缩放结束只更新注册表快照，不重建管理器卡片。</param>
+    private void PublishPinState(bool notify = true)
     {
         if (_hwnd.IsNull)
             return;
@@ -352,7 +353,7 @@ public sealed unsafe partial class NativePinWindow
             _sourceScope,
             _navigation?.Index ?? 0,
             _navigation?.Files.Count ?? 0,
-            _createdAt));
+            _createdAt), notify);
     }
 
     /// <summary>新贴图/切换历史图片时的初始缩放：用户设定的原图百分比，再受工作区上限约束。</summary>
@@ -719,7 +720,7 @@ public sealed unsafe partial class NativePinWindow
                         var direction = up.x < self._winX + self._winW / 2 ? -1 : 1;
                         self.Navigate(direction);
                     }
-                    self.PublishPinState();
+                    self.PublishPinState(notify: false);
                     return default;
 
                 case WM_RBUTTONUP:
@@ -740,7 +741,7 @@ public sealed unsafe partial class NativePinWindow
                     // 缩小后把曾经为最大尺寸分配的 DIB 换回当前尺寸，避免峰值内存长期驻留。
                     self.MaybeShrinkDestDib();
                     self.RenderAndPresent(highQuality: true);
-                    self.PublishPinState();
+                    self.PublishPinState(notify: false);
                     return default;
 
                 case WM_APP_CLEAR_NAV_HINT:

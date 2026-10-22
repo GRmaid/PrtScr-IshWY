@@ -47,7 +47,7 @@ public static class PinService
 {
     private static readonly ConcurrentDictionary<nint, PinRecord> Registry = new();
 
-    /// <summary>贴图出现、移动、缩放、切换图片或状态变化时触发；可能来自任意线程。</summary>
+    /// <summary>贴图出现、关闭、切换图片、编辑完成或状态变化时触发；移动/缩放不触发；可能来自任意线程。</summary>
     public static event Action? PinsChanged;
 
     /// <summary>贴图右键菜单请求打开截图历史；由主窗口接管，先让贴图退居次层。</summary>
@@ -56,10 +56,11 @@ public static class PinService
     public static IReadOnlyList<PinRecord> SnapshotPins()
         => Registry.Values.OrderBy(p => p.CreatedAt).ThenBy(p => p.Hwnd).ToList();
 
-    public static void UpsertPin(PinRecord record)
+    public static void UpsertPin(PinRecord record, bool notify = true)
     {
         Registry[record.Hwnd] = record;
-        NotifyPinsChanged();
+        if (notify)
+            NotifyPinsChanged();
     }
 
     public static void RemovePin(nint hwnd)
