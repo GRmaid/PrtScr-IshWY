@@ -373,7 +373,7 @@ FullscreenBypass: 已归还原前台
 - 纳入本版的已验收改动：常规截图已有选区可拖动；选区操作条 ✕ / ✓ / 文字识别 / 保存；历史计数即时刷新；「屏幕贴图管理」统一命名；历史底栏固定提示 + 单「另存为」（单张另存、多选批量）；全选二次点击退出、点空白处退出多选、多选复制/标注取最新、贴图全部贴出；`KeyboardAcceleratorPlacementMode="Hidden"` 去掉历史/取景器键名提示；历史标题下新增左键/右键选择说明。
 - README 新约束（主人 2026-10-22 定）：只写最新版本的功能与信息，不写版本历史、开发过程、更新记录/开发日志；主人自己改过的段落不得改动。本次只做定向修改，保留「一点碎碎念」「唯一有效的一行」、致谢与 UmiOCR 备注等个人内容。
 - 发布验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`pwsh -NoProfile -File scripts/publish.ps1 -Version 1.0.1` 通过 PRI/XBF 校验与 `--smoke`；产物 `artifacts/IshWY-1.0.1-win-x64` 72.7 MB、`artifacts/IshWY-1.0.1-win-x64.zip` 29.2 MB；仅有预期 IL2026/IL2104 trim 警告。
-- 发布记录：提交、tag、GitHub Release 资产与 sha256 在发布完成后补入本节的下一行与 §6。
+- 发布记录：提交 `8f8e6f5`「Release v1.0.1」，tag `v1.0.1`，main 与 tag 已推送；Release workflow 39777624267 成功（2m43s）。GitHub Release https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 为 Latest，资产 `IshWY-1.0.1-win-x64.zip` 30,598,128 字节，sha256 `444fc52dc9d310f788d41a8b0030b0324277d86a24c1cdfc866ac783ef346746`。本地发布 zip 与 CI 产物的哈希不同（zip 压缩非确定性），发布以 GitHub 资产为准；下载回读后已复制到桌面。
 
 ## 5. 踩坑与约定
 
@@ -438,7 +438,7 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-22 深夜（二）（原话「不错，测试都通过」）：底栏只有「另存为」一个保存按钮，选一张直接另存、选多张自动批量导出；「量另存为」裁切消失；重复悬停的「删除」popup 转入下一批（Debug PID 42884）。
 - [x] 主人验收 2026-10-22 深夜（三）除悬停提示外的全部（原话「其他的做的都达到目标，都做的很好」）：全选第一次全选、按钮变「取消全选」，再点退出多选；选择模式下点列表空白退出；多选复制/标注取最新一张，贴图全部贴出并按 24px 错开，删除全部均通过。
 - [x] 主人验收 2026-10-22 深夜（四/五）（原话「很好，今天就结束了」）：历史窗任意位置悬停不再出现「删除」；取景器无 Esc / Enter / Ctrl+S / Ctrl+C 键名提示；历史窗 Delete 删除、Ctrl+A 全选与 Esc 关闭仍生效；标题下「左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。」说明正常。当前批次转入 v1.0.1 发布。
-- [ ] v1.0.1 发布：版本 1.0.1、README 按「仅最新功能、不写版本历史/开发过程」重写、构建 0 错误、发布会话已生成 72.7 MB 目录与 29.2 MB zip；待提交/tag/推送与 GitHub Release 资产核验。
+- [x] v1.0.1 发布（2026-10-22 深夜）：版本 1.0.1、README 按「仅最新功能、不写版本历史/开发过程」清理、构建 0 错误、发布目录 72.7 MB / zip 29.2 MB；提交 `8f8e6f5`、tag `v1.0.1` 已推送，Release workflow 成功，https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 为 Latest，资产 30,598,128 字节、sha256 `444fc52dc9d310f788d41a8b0030b0324277d86a24c1cdfc866ac783ef346746`；桌面已留 `IshWY-1.0.1-win-x64.zip`。
 - [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
 - [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
 - [x] GitHub Release：旧 `v0.1.0` Release 已删除；`v1.0.0` 已发布并上传 `IshWY-1.0.0-win-x64.zip`（30,588,110 字节，sha256 一致），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。
