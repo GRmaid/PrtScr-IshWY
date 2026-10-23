@@ -101,6 +101,88 @@ public sealed class AppConfig
     /// <summary>贴图裁剪后是否写入截图历史（分类「贴图裁剪」）。</summary>
     [JsonPropertyName("historyPinCrop")]
     public bool HistoryPinCrop { get; set; } = true;
+
+    /// <summary>取景器内「上一个窗口」按键：默认 [；0 = 未设置。</summary>
+    [JsonPropertyName("windowPrevKeyVk")]
+    public int WindowPrevKeyVk { get; set; } = 0xDB;
+
+    [JsonPropertyName("windowPrevKeyModifiers")]
+    public int WindowPrevKeyModifiers { get; set; } = 0;
+
+    /// <summary>取景器内「下一个窗口」按键：默认 ]；0 = 未设置。</summary>
+    [JsonPropertyName("windowNextKeyVk")]
+    public int WindowNextKeyVk { get; set; } = 0xDD;
+
+    [JsonPropertyName("windowNextKeyModifiers")]
+    public int WindowNextKeyModifiers { get; set; } = 0;
+
+    /// <summary>选区边框与缩放手柄是否跟随系统主题色；关闭后才使用 SelectionBorderColor。</summary>
+    [JsonPropertyName("selectionBorderFollowTheme")]
+    public bool SelectionBorderFollowTheme { get; set; } = true;
+
+    /// <summary>选区边框与缩放手柄颜色（#RRGGBB）。深色画面可改成亮色，浅色画面可改成深色。</summary>
+    [JsonPropertyName("selectionBorderColor")]
+    public string SelectionBorderColor { get; set; } = "#FFFFFF";
+
+    /// <summary>纯文字提示的字号（DIP，11–32）。</summary>
+    [JsonPropertyName("toastFontSize")]
+    public int ToastFontSize { get; set; } = 14;
+
+    /// <summary>提示背景材质：solid / acrylic / mica / liquid。</summary>
+    [JsonPropertyName("toastMaterial")]
+    public string ToastMaterial { get; set; } = "acrylic";
+
+    /// <summary>提示背景不透明度（0.35–1.0）。</summary>
+    [JsonPropertyName("toastOpacity")]
+    public double ToastOpacity { get; set; } = 0.9;
+
+    /// <summary>提示淡入时长（毫秒，0–1000）。</summary>
+    [JsonPropertyName("toastFadeInMs")]
+    public int ToastFadeInMs { get; set; } = 60;
+
+    /// <summary>提示完全显示后的停留时长（毫秒，500–10000）。</summary>
+    [JsonPropertyName("toastVisibleMs")]
+    public int ToastVisibleMs { get; set; } = 3200;
+
+    /// <summary>提示淡出时长（毫秒，0–2000）。</summary>
+    [JsonPropertyName("toastFadeOutMs")]
+    public int ToastFadeOutMs { get; set; } = 350;
+
+    /// <summary>提示在屏幕工作区中的九宫格位置；custom = 使用下面的自定义矩形。</summary>
+    [JsonPropertyName("toastPosition")]
+    public string ToastPosition { get; set; } = "bottom-center";
+
+    /// <summary>自定义提示位置（相对主显示器工作区的 DIP 坐标）。</summary>
+    [JsonPropertyName("toastCustomX")]
+    public double ToastCustomX { get; set; }
+
+    [JsonPropertyName("toastCustomY")]
+    public double ToastCustomY { get; set; }
+
+    [JsonPropertyName("toastCustomWidth")]
+    public double ToastCustomWidth { get; set; } = 360;
+
+    [JsonPropertyName("toastCustomHeight")]
+    public double ToastCustomHeight { get; set; } = 72;
+
+    [JsonPropertyName("toastSuccessEnabled")]
+    public bool ToastSuccessEnabled { get; set; } = true;
+
+    [JsonPropertyName("toastSuccessText")]
+    public string ToastSuccessText { get; set; } = "截图已复制到剪贴板";
+
+    [JsonPropertyName("toastFailureEnabled")]
+    public bool ToastFailureEnabled { get; set; } = true;
+
+    [JsonPropertyName("toastFailureText")]
+    public string ToastFailureText { get; set; } = "截图失败，请查看日志";
+
+    [JsonPropertyName("toastProfileEnabled")]
+    public bool ToastProfileEnabled { get; set; } = true;
+
+    /// <summary>切换截图档位时的提示文本；{mode} 会替换成「常规取景」或「快捷全屏」。</summary>
+    [JsonPropertyName("toastProfileText")]
+    public string ToastProfileText { get; set; } = "已切换为「{mode}」";
 }
 
 public sealed class ConfigService

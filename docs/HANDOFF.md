@@ -393,6 +393,80 @@ FullscreenBypass: 已归还原前台
 - 交付：GitHub 资产下载回读后复制到 `C:\Users\asus\DeskBox\我的桌面\IshWY-1.0.1-win-x64.zip`，大小与哈希一致。
 - 验证：Debug `dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`pwsh -NoProfile -File scripts/publish.ps1 -Version 1.0.1` 通过 PRI/XBF 校验与 `--smoke`；CI 发布与资产下载通过。
 
+### 选区缩放、滚轮减速、切窗按键、设置窗尺寸与失焦 Esc（2026-10-23 晚）
+
+- 需求：常规/窗口模式已有选区要能拖边缩放；滚轮切窗太快；取景器内可自定义上一个/下一个窗口键（默认 `[`、`]`）；设置窗默认太小；Alt+A 后移动别的窗口，Esc 有时失效要点一下鼠标。
+- 选区缩放：新增 `ResizeEdge`、`_resizingSelection`、`_resizeStartSelection`、`_resizeStartPoint` 与 8 个手柄（`ResizeHandles`，`IsHitTestVisible=False`）。`HandlePressed` 左键优先 `TryHitResizeEdge`（10 DIP 容差、角优先），再进入移动/框选。手柄 12×12 白底深色描边，选区白边 2.5 DIP；当轮的 5 DIP 半透明黑垫边已按主人 2026-10-23 反馈移除，改为可配置边框颜色（见深夜九）。缩放以对边/对角为锚点：拖过锚点会翻转选框并继续调整，不再被对面边挡住；松开时 `NormalizeResizedSelection` 把不足 12 DIP 的一边补到 12 DIP。常规模式夹在根画布 0..实际宽高；窗口模式先把 `_subregionWindow` 设为 `_clickedWindow` 并夹在 `DipRect(frame)` 内，缩放后仍截窗口本体。
+- 滚轮减速：`Layer_PointerWheelChanged` 改为累计 `delta`，间隔超过 400 ms 清零，累计绝对值达到 240（两格）才切一窗并清空累计；一次输入最多切一个。
+- 切窗按键：新增配置 `windowPrevKeyVk/windowPrevKeyModifiers`（默认 `0xDB`/`[`）与 `windowNextKeyVk/windowNextKeyModifiers`（默认 `0xDD`/`]`）。设置页热键表扩到 7 行，「上一个窗口 / 下一个窗口」只在取景器内生效，可录无修饰单键；拒绝 Alt/Win，且不能占用取景器固定语义（Esc/Tab/回车/O、Ctrl+C、Ctrl+S）。`HotkeyService.Describe` 补齐 OEM 键帽显示。钩子用哨兵 `0x1F0/0x1F1` 派发，`CycleHover(-1/+1)` 复用滚轮路径；滚轮永远作为兜底。
+- 失焦 Esc：取景窗 `Deactivated` 不再完全关闭键盘直通，而是 `EscOverPinHook.SetOverlayKeysEscOnly(true)`（内部 0 关 / 1 全量 / 2 仅 Esc 与切窗键）；重新激活恢复全量；`HideForCapture` 与另存为文件选择器期间显式全关并在关闭后恢复。取景初始化和激活时调用新增的 `EscOverPinHook.EnsureOverlayHook()` 静默重装可能已死亡的 `WH_KEYBOARD_LL`；另外取景窗每 30 ms 轮询 `GetAsyncKeyState(VK_ESCAPE)`，检测到按下就 `Cancel()` 并记录 `Overlay: Esc polled (hook/focus bypass)`，作为钩子与焦点同时失效时的兜底，Esc 不再需要先点鼠标。`HotkeyService` 注册 Esc 兜底热键时会先注销再注册并记录失败码。
+- 设置窗：默认尺寸 780×900 提高到 860×990；内容仍 `MaxWidth=760`，热键表增加两行后不再挤压说明；表下提示注明最后两行只在取景器内生效、可录 `[`/`]` 这类无修饰单键。
+- 滚轮切窗一致性：`CycleHover` 在已有整窗选区时切换目标窗口，会把 `_subregionWindow/_subregionCandidate` 清空，选区重置为新窗口整窗矩形，避免缩放后把新窗口矩形映射到旧窗口位图。
+- 主人首轮复测（2026-10-23 晚，PID 39320）：②滚轮速度、③`[`/`]` 改键删键即时生效、④设置窗默认尺寸均通过；①缩放逻辑可用但手柄/边框偏小，且拖过对角会被挡住；⑤按 Esc 仍不能直接退出。随后把边框加粗到 2.5 DIP、手柄放大到 12×12 并加深色垫边，缩放改为锚点翻转，加入 `EnsureOverlayHook()` 与 30 ms Esc 轮询。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 51976 已启动（2026-10-23 20:09），日志五个热键 `register=0x1`、`Hotkey: 取景切窗 [ / ]`、overlay pre-created，待主人复测①⑤。
+
+### 选区颜色、热键/档位恢复默认与可配置纯文字提示（2026-10-23 深夜九）
+
+- 主人复测结论：①缩放逻辑与手柄可用，但 5 DIP 半透明黑垫边不好看，要求移除并把选区边框颜色做成可配置；②③④通过；⑤Esc 仍不能首次直接退出，主人明确「算了，不折腾这个了」——停止 Esc 方向投入，保留现有钩子/轮询兜底。
+- 选区颜色：删除 `SelectionBorderShadow`。新增配置 `selectionBorderColor`（默认 `#FFFFFF`），取景器 `Prepare` 时 `ApplySelectionColor()` 同时设置 `SelectionBorder.Stroke` 与 8 个手柄的 `Fill`；手柄描边按亮度自动取白或深色，浅色/深色画面都能看清。设置 → 截图行为新增颜色输入框（#RRGGBB 校验）与 7 个预设色块，改动即时保存、下次取景生效。
+- 恢复默认：热键表每行新增 ↻ 单键恢复默认，表下新增「恢复默认快捷键」一键恢复全部 7 项；截图/全屏仍写显式 vk + 修饰键，切窗键回到 `[`/`]`。全局热键与取景切窗键现在共用一套冲突检查，跨表重复会当场拒绝。截图档位旁新增「恢复默认」，把 `captureProfile` 与 `defaultCaptureMode` 都恢复成 `normal`（常规取景 + 常规截图），不动延时/光标/历史。
+- 提示系统：新增 `ToastService` 与 `ToastWindow`。提示是无边框置顶、`NOACTIVATE` + `TRANSPARENT` 的纯文字窗，深色圆角面板、蓝色细边、自动 2.6 秒消失，不抢焦点、不挡鼠标；`MakeClientAreaFullWindow` 去掉 1px 非客户区白边，亚克力背景不可用时静默回退。字号、九宫格位置、三类提示的开关与文字都在设置 → 提示里配置；切换截图档位不再用系统托盘气泡。截图成功、截图失败/异常、切换档位分别读各自配置，文字留空即不显示。取景器确认、快速全屏、另存为成功/失败都已接入；取消另存为不提示。
+- 设置页：热键表下方新增「按键一览」2×3 卡片（窗口截图/全屏截图/贴图/文字识别/上一个窗口/下一个窗口 + 切换截图模式），与表格共用同一份「未设置」文案。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 47920 已启动，日志 20:39:10 五个热键 `register=0x1`、取景切窗 `[ / ]`、overlay pre-created；待主人复测。
+
+### 设置布局、主题色选区、提示位置编辑器与 Tab 保留选区（2026-10-23 深夜十）
+
+- 需求：把「恢复默认快捷键」移到「快捷键」标题右侧；截图档位的「恢复默认」移到「截图行为」标题右侧并删掉多余的「截图热键行为」行；选区边框颜色增加「跟随主题色」并设为默认；提示位置不再只用九宫格，改为可拖拽/缩放的「编辑位置」；常规截图已有选区时按 Tab 要保留位置与大小，并尽量适配到能完整包住它的窗口。
+- 布局：「快捷键」与「截图行为」都改成 `* / Auto` 两列 Grid，右侧放紧凑的恢复默认按钮；原「截图热键行为」标签行删除，档位下拉与提示直接跟在「截图行为」下。热键表仍是 7 行，每行 ↻ 单项恢复保留。
+- 主题色：新增 `selectionBorderFollowTheme`（默认 `true`）。勾选时取景器用 `ThemeColorService.Accent`（读取系统 UISettings Accent，强制不透明；读取失败回退 `#00C8FF`）作为边框与 8 个手柄颜色；取消勾选才启用颜色输入框与预设色。设置页预览块、提示文字与状态栏同步更新，改动立即保存，下次取景生效。
+- 提示位置编辑器：新增 `ToastPlacementWindow`，在主显示器工作区上铺一层半透明遮罩，把与真实提示同款的深色圆角面板摆进去。拖面板主体移动，拖右下角 16×16 小方块改大小（最小 160×48 DIP），位置夹在工作区内；「保存位置」写 `toastPosition=custom` 与 `toastCustomX/Y/Width/Height`（按主工作区绝对 DIP 记录）并立即按新位置预览，「取消」或 Esc 不保存。设置页「提示位置」下拉保留九宫格并追加「自定义（编辑位置）」，右侧另有「编辑位置…」按钮。
+- 提示窗按 `toastPosition=custom` 读取自定义矩形，直接 `AppWindow.MoveAndResize`，不再走九宫格锚点；面板内文字居中、可换行，超长自动在 `MaxWidth=720` 内折行。
+- Tab 保留选区：`ToggleCaptureMode` 先记住当前选区。切到常规模式时保留选区、清掉窗口引用，toast「已切换到常规截图，选区保留」；切到窗口模式时用 `FindContainingWindow` 从可截窗口里选面积最小且完整包含选区的一个（跳过自身、cloaked、全屏穿透层），选区与整窗矩形相差 2 DIP 内按整窗截取，否则作为该窗口的局部裁剪；找不到包含窗口就回退常规模式并 toast「没有窗口能完整包住选区，保持常规截图」。移动/缩放/回车确认沿用同一份选区。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×1 警告行）；`IshWY.exe --smoke` 退出 0；Debug PID 57068 已启动（2026-10-23 21:15），日志五个热键 `register=0x1`、`Hotkey: 取景切窗 [ / ]`、overlay pre-created，待主人复测。
+
+### 提示外观、时长与主题色显示修正（2026-10-23 深夜十一）
+
+- 主人复测深夜十后提出：①勾选「跟随主题色」时右侧 HEX 框不跟着变成强调色（功能生效、显示不动）；②跟随主题色的说明文字在勾选/取消时反了；③切换常规取景/快捷截图时屏幕会闪一下黑窗；④提示要更快出现、更慢消失，显示/淡入/淡出时长要可调且有范围；⑤「编辑位置」里还要能选提示背景材质（液态玻璃/亚克力/云母等）、不透明度与字号。
+- 主题色显示：`LoadSelectionColorSettings` 与 `SelectionColorFollowTheme_Toggled` 统一先算 `displayColor = follow ? AccentHex : 手动色`，HEX 框、预览块与提示文字都用它；跟随时预设色索引置 -1、输入框与预设禁用。`UpdateSelectionColorHint(bool follow, string color)` 改为用入参判断，不再读还没写入的配置，勾选/取消文案不会再反。
+- 提示黑闪：`ToastWindow` 先在 (-32000,-32000) 以 1×1 离屏创建并 `ShowWindow(SW_SHOWNOACTIVATE)`，等 `Loaded` 后才量尺寸、移到目标位置，再在 `DispatcherQueuePriority.Low` 回调里淡入并启动计时；面板初始 `Opacity=0`，避免 WinUI 首帧在屏幕中央闪黑底。当时背景材质仍在 `Loaded` 里挂载，深夜十二已改为构造时挂载。
+- 时长：新增 `toastVisibleMs`（默认 3200，500–10000）、`toastFadeInMs`（默认 60，0–1000）、`toastFadeOutMs`（默认 350，0–2000）；设置 → 提示增加三个 Inline NumberBox，NaN 自动回读配置，越界夹取并即时保存。淡入/淡出用 `Storyboard` 动画 `_panel.Opacity`，可见时长计时器到点后淡出再关窗。
+- 外观：新增 `ToastAppearance`，材质 `solid/acrylic/mica/liquid`（默认 acrylic），不透明度 0.35–1.0；`solid` 关闭系统背景，`mica` 用 `MicaBackdrop`，其余用 `DesktopAcrylicBackdrop`；面板底色由同一套取值生成（液态玻璃为深色到蓝色高光渐变），编辑器预览与真实提示共用。`ToastPlacementWindow` 顶栏新增字号（11–32）、背景材质下拉与不透明度（35–100%），改字号实时改预览文字，改材质/不透明度实时改预览面板；「保存位置」一并写入 `toastFontSize/toastMaterial/toastOpacity`，取消或 Esc 不落盘。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 6916 已启动（2026-10-23 22:0x），日志五个热键 `register=0x1`、`Hotkey: 取景切窗 [ / ]`、overlay pre-created，待主人复测。README 未动（未发布批次，仍只写 v1.0.1 最新功能）。
+
+### 提示亚克力、原生通知统一与快捷档位延时（2026-10-23 深夜十二）
+
+- 主人复测深夜十一五项通过（原话「你要我测的五个做的都达到了我的预期，都做的很好，继续保持」），同时提出：①亚克力材质看不出模糊，只是一块深色圆角面板；②还有一处系统原生通知没统一；③延时截图在快捷档位下不生效。
+- 亚克力根因：WinUI 3 的 `DesktopAcrylicBackdrop` 在带 `WS_EX_NOACTIVATE` 的不可激活窗口上不会出模糊（microsoft/microsoft-ui-xaml#10570）。`ToastWindow` 去掉该扩展样式，只保留 `WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT`；不抢焦点仍由 `ShowWindow(SW_SHOWNOACTIVATE)` 与 `SetWindowPos(SWP_NOACTIVATE)` 保证。背景材质改到构造函数里、`ApplyDwmChrome()` 之后立即挂载，不再等 `Loaded`（显示后再设 `SystemBackdrop` 可能不生效）；并记录 `Toast: 材质 … backdrop=…`。面板 acrylic 渐层 alpha 下调为 0.56/0.30/0.50（液态玻璃 0.42/0.20/0.54、云母 0.66/0.44/0.64），让背后的模糊能透出来。该方案在主人复测中仍无可见模糊，见深夜十三，已改为软件合成背景。
+- 原生通知统一：`ToastService.ShowInfo` 不受「成功/失败/档位」三类开关限制，直接按当前外观显示；MainWindow 中贴图热键剪贴板无图、OCR 热键剪贴板无图、延时开始三处 `TrayIcon.ShowNotification` 全部改成 `ShowInfo`。托盘只保留倒计时 `ToolTipText`。
+- 快捷档位延时：`OnHotkeyPressed` 先读延时再分档，延时大于 0 时不再直接走 `OnFullScreenPressed`；`StartDelayedCaptureAsync` 到点按 `IsQuickProfile()` 分流，快捷档位调用 `OnFullScreenPressed()` 并提示「延时结束，正在截取整屏…」，常规档位仍 `StartCaptureAsync()` 并提示「延时结束，正在冻结画面…」。取消仍只靠 `_delayCts`。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 36388 已启动（2026-10-23 21:52:04），日志五个热键 `register=0x1`、`Hotkey: 取景切窗 [ / ]`、overlay pre-created，待主人复测。README 未动（未发布批次，仍只写 v1.0.1 最新功能）。
+
+### 提示窗软件合成背景（2026-10-23 深夜十三）
+
+- 主人复测深夜十二：通知统一、快捷档位延时等通过；提示材质仍失败——「透明度调了和没调一样；云母，亚克力的效果和纯色没区别，液态玻璃有一点但不多，而且上述效果都不会随背景的改变而改变」。说明 `SystemBackdrop`（含去掉 `WS_EX_NOACTIVATE`、构造时挂载）在本机这个离屏/不激活提示窗上并未真正合成模糊。
+- 改为软件合成：新增 `ToastBackdrop`，按提示框绝对矩形 `Graphics.CopyFromScreen` 抓屏，透明通道强制不透明；裁剪后按材质做可分离盒式模糊（云母半径 34、亚克力 26、液态玻璃 18，随不透明度 0.6–1.0 缩放）、4 倍降采样再双线性放大，叠深色对角渐变（液态玻璃额外叠蓝色高光），转成 `WriteableBitmap`/`ImageBrush` 作为面板背景。模糊强度与不透明度都会改变透出的背景，材质之间明显不同，背景内容来自提示框所在位置。
+- `ToastWindow.OnLoaded` 先算目标矩形，再在 `Task.Run` 里抓屏+合成，完成后设面板背景、移动尺寸、淡入；这样不会阻塞 UI，也不会先闪一块纯色。`ToastAppearance.ApplyBackdrop` 已删除，`CreatePanelBrush` 只作为纯色模式与抓屏失败时的兜底；纯色模式 alpha 改为直接使用不透明度，滑块不再无效。
+- 编辑器：`ToastPlacementWindow.Open` 在显示前抓主显示器工作区，预览框按 `CanvasOrigin + _rect` 与 DPI 比例裁剪同一张截图合成；拖动/缩放松手、改材质、改不透明度都会重算预览。保存时连同字号、材质、不透明度与自定义矩形一起落盘，取消/Esc 不保存。
+- 限制：提示显示期间背景是抓屏瞬间的冻结快照，不会随下方内容实时变化；RDP/锁屏等抓屏失败时回退纯色渐变。
+- 线程边界：`ToastBackdrop` 只把抓屏、模糊、染色后的 BGRA 字节数组交回 UI 线程；`WriteableBitmap` 与 `ImageBrush` 有线程亲和性，必须在 UI 线程创建和写入（后台线程只算像素），否则材质会静默回退成纯色。
+- 验证：构建 0 错误（仅既有 CS0067×2），`--smoke` 退出 0，Debug PID 47000（2026-10-23 22:2x），待主人复测。README 未动（未发布批次）。
+
+### 提示边框移除与淡出不发黑（2026-10-23 深夜十四）
+
+- 主人验收深夜十三（原话「也行，正常生效了，那这个限制我接受」，接受提示显示期间背景是冻结快照的限制），同时提出两点：提示背景还有一圈蓝框，删掉；淡出时不要变黑，要维持当前背景效果（亚克力/云母/液态玻璃/纯色）。
+- 蓝框：真实提示 `ToastWindow` 的面板与编辑器 `ToastPlacementWindow` 的预览面板都去掉 `BorderBrush/BorderThickness`，只剩背景、圆角 6 与内边距，两处外观一致。
+- 淡出不发黑：提示窗改为根 `Grid _root` 铺底、面板叠在上面。`ToastBackdrop.CreatePixelsWithRaw` 一次抓屏同时返回原始像素与按材质模糊染色后的像素；原始像素做成 `ImageBrush` 铺 `_root.Background`，模糊像素只给 `_panel.Background`。淡入/淡出只动 `_panel.Opacity`，露出的是「提示框背后那块桌面的冻结截图」，因此不会透出窗口黑底；纯色模式也铺原始像素，alpha 淡出同样自然。
+- 若抓屏失败（RDP/锁屏等）没有原始像素，则不淡入淡出、直接显示与关闭，避免又出现黑底。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0；Debug PID 49596 已启动（2026-10-23 22:2x），待主人复测。README 未动（未发布批次，仍只写 v1.0.1 最新功能）。
+
+### v1.1.0 发布准备（2026-10-23 深夜十五）
+
+- 主人验收深夜十四（原话「很好！都没问题！收工！」），要求写入 README、保留压缩包，并以 v1.1.0 推送 GitHub。
+- README 按主人约束只描述当前最新版本功能：补充选区缩放/移动与边框颜色、七个热键与单项/全部恢复、`[` `]` 切窗、延时在快捷档位生效、Tab 保留选区、提示与通知整节、九宫格/自定义提示位置，以及新增配置字段；版本号与下载文件名改为 v1.1.0；未保留任何版本历史、更新记录或开发过程，主人自己写的碎碎念/致谢段落未改动。
+- 版本：`PrtScr.App.csproj` `<Version>1.1.0</Version>`，`app.manifest` `1.1.0.0`。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`scripts/publish.ps1 -Version 1.1.0` 通过 PRI/XBF 检查与 `--smoke`，发布目录 72.9 MB、zip 29.2 MB。
+- 待办：提交并打 tag `v1.1.0`、推送触发 Release workflow、核对 Latest 与资产、下载回读后放一份到 `C:\Users\asus\DeskBox\我的桌面`。
+
 ## 5. 踩坑与约定
 
 - **WinUI 3 焦点不可靠**：取景窗/贴图等没有普通 XAML 焦点的窗口用 Win32 消息层拦截（`KeyInterceptor` / `WH_KEYBOARD_LL`）；但带 XAML 焦点控件的普通窗口（如 `HistoryWindow`）键盘焦点实际落在 `InputSiteWindowClass` 子窗，top-level `WndProc` 收不到 `WM_KEYDOWN`，应改用根元素 `PreviewKeyDown`。不要依赖 XAML `KeyboardAccelerator` 的隐式焦点。取景窗亮窗后可能既没前台也没 XAML 焦点，Tab/Ctrl+C/Esc 不能只靠焦点路径；现在由 `EscOverPinHook` 在取景激活期间直通，钩子失活时必须立刻放行，避免吞掉别的程序的按键。
@@ -433,7 +507,7 @@ FullscreenBypass: 已归还原前台
 - **HistoryWindow 没有 `Loaded` 事件**：`Microsoft.UI.Xaml.Window` 本身不暴露 `Loaded`；要在构造函数里用 `((FrameworkElement)Content).Loaded += ...`，否则 `CS0103: 当前上下文中不存在名称 Loaded`。
 - **HistoryWindow 的 Esc 不能在 top-level WndProc 拦截**：WinUI 3 的键盘焦点在 `InputSiteWindowClass` 子窗（`GetGUIThreadInfo` 可确认，焦点 HWND 不是 `WinUIDesktopWin32WindowClass` 顶层窗），所以顶层 `KeyInterceptor` 收不到 Esc；用根 `Grid` 的 `PreviewKeyDown` 才能在 XAML 路由里关闭窗口，并在 `Loaded`/`Activated` 时把焦点放到 `HistoryGrid`（空列表也能聚焦），否则窗口刚打开、焦点尚未进入 XAML 树时 Esc 仍可能丢失。`KeyInterceptor` 保留作兜底。
 - **历史保存必须 best-effort**：`CaptureHistoryService` 的任何异常都只能记日志并返回 null，不能让截图/剪贴板失败；关闭 `saveHistory` 只停止新写入，不删除已有文件。
-- **延时截图只有一个倒计时源**：`_delayCts` 必须在 UI 线程上判断/赋值，重复按热键先取消而不是开第二个计时器；到点采集前不要清空 cts，否则取消逻辑会失效。全屏快速截图不要接入延时，否则会破坏「按下即得」的预期。
+- **延时截图只有一个倒计时源**：`_delayCts` 必须在 UI 线程上判断/赋值，重复按热键先取消而不是开第二个计时器；到点采集前不要清空 cts，否则取消逻辑会失效。到点后按当前档位分流：常规档位冻结画面进取景器，快捷档位直接整屏截图并复制；不要再把快捷档位排除在延时之外（2026-10-23 主人要求）。
 - **模式闸门必须放在 `CaptureSelectionAsync()` 最前面**：常规模式一旦先走 `_subregionWindow`/`_clickedWindow`，就会重新调用 `WindowCapture.CaptureAsync` 重建窗口，菜单、悬停提示、下拉框、指针全都截不到；这正是主人报的「能看到但抓不到」。新增取图来源时先判断模式，再碰窗口分支。
 - **取色器不要逐像素 `GetPixel`**：19×19 用 `LockBits` 一次拷进复用缓冲；`WriteableBitmap.PixelBuffer.AsStream()` 每次写前 `Position=0`，否则第二次开始写偏。`_loupePixels/_loupeSample` 与 `WriteableBitmap` 都常驻复用，不要跟随鼠标每帧 new。
 - **多尺寸 ICO 的基底必须够大**：Pillow 的 `save(format='ICO', sizes=[...])` 只会从当前图缩出不超过基底尺寸的档位；用 16×16 当基底再传 10 个 sizes，最终只得到 16×16。先裁方图并 resize 到 256×256，再生成全部尺寸。
@@ -459,6 +533,15 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-22 深夜（七）（原话「好，只是一个小插曲」）：窗口/常规模式已有选区都能用中键（滚轮键）或左键拖动移动；窗口整窗选区移动后提示「已移动整窗选区，改为常规截图」并按冻结画面裁切；窗口局部选区只在窗口矩形内移动、仍截窗口本体；空白处按滚轮键不再重新起框；HUD 有选区时显示「拖动选区 移动（中键/左键）」，整窗选区追加「滚轮 切窗」，无选区显示「滚轮 切换窗口」。（Debug PID 36444）
 - [x] v1.0.1 发布（2026-10-22 深夜）：版本 1.0.1、README 按「仅最新功能、不写版本历史/开发过程」清理、构建 0 错误、发布目录 72.7 MB / zip 29.2 MB；提交 `8f8e6f5`、tag `v1.0.1` 已推送，Release workflow 成功，https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.1 为 Latest，资产 30,598,128 字节、sha256 `444fc52dc9d310f788d41a8b0030b0324277d86a24c1cdfc866ac783ef346746`；桌面已留 `IshWY-1.0.1-win-x64.zip`。该首次发布资产已被 2026-10-22 深夜八的覆盖发布替换，最终资产见下条。
 - [x] v1.0.1 覆盖发布（2026-10-22 深夜八）：主人要求滚轮提示与选区移动不单独发版，仍登记 v1.0.1 并覆盖 Release；提交 `222665b`、tag `v1.0.1` 强制更新，workflow 39781688548 成功；资产 30,598,488 字节、sha256 `c8dbe4f189c1f5faa5c0ec8e33e06de5dd42a04424bb4d0cd544ad741a55532d`，下载回读一致；`C:\Users\asus\DeskBox\我的桌面\IshWY-1.0.1-win-x64.zip` 已替换为同一资产。
+- [x] 主人复测 2026-10-23 晚五项中的②③④（Debug PID 39320）：滚轮约两格才切一窗；`[`/`]` 可切上/下一个窗口，改键删键立刻生效；设置窗默认 860×990 足够。
+- [x] 主人复测 2026-10-23 晚①⑤修订（Debug PID 51976，部分通过）：①缩放逻辑与边框/手柄方向通过，但黑色垫边被要求移除并改为可配置边框颜色；②③④通过；⑤Esc 仍不能首次直接退出，主人决定不再折腾，停止该方向投入。
+- [x] 主人验收 2026-10-23 深夜九（Debug PID 47920，待测项并入深夜十一，原话「你要我测的五个做的都达到了我的预期」）：①选区边框/8 个手柄用设置里的颜色，白色/亮青/亮黄等预设与 #RRGGBB 输入都生效，浅色与深色画面都看得清；②热键每行 ↻ 只恢复该项，表下按钮恢复全部 7 项；③「截图行为 → 恢复默认」回到常规取景 + 常规截图；④设置 → 提示里字号、九宫格位置、开关与三类文字可改，「预览提示」即时生效；⑤切换截图档位、截图成功、截图失败/异常分别弹出纯文字提示，不抢焦点、不挡鼠标；⑥取景器热键与切窗键跨表重复会被拒绝。
+- [x] 主人验收 2026-10-23 深夜十（Debug PID 57068，待测项并入深夜十一）：①「快捷键」标题右侧有「恢复默认快捷键」，每行 ↻ 仍只恢复该项；②「截图行为」标题右侧有「恢复默认」，原「截图热键行为」行已消失，恢复后为常规取景 + 常规截图；③选区颜色默认勾选「跟随主题色」，取景器边框与 8 个手柄显示系统强调色；取消勾选后可输入 #RRGGBB 或选预设色；④「提示 → 提示位置」选「自定义（编辑位置）」或点「编辑位置…」会打开铺满主屏幕的编辑器，拖动面板移动、拖右下角小方块缩放，保存后提示按同一位置预览；取消/Esc 不保存；九宫格各位置仍可用；⑤字号 11–32、三类开关与文字、预览提示、恢复默认提示均正常；⑥常规截图先框选再按 Tab：选区位置大小不变，能完整包住它的窗口存在时切到窗口截图，否则保持常规截图并提示；移动/缩放/回车确认仍按该选区工作。
+- [x] 主人验收 2026-10-23 深夜十二除提示材质外的全部（Debug PID 36388，原话「你要我测的都没问题，除了提示窗口材质显示」；材质由深夜十三/十四解决）：①提示背景材质选亚克力/液态玻璃时有真实模糊与透明层次，纯色/云母也正常；②贴图热键剪贴板无图、OCR 热键无图、延时开始都弹同款纯文字提示，不再出现系统通知；③延时设为 3/5 秒并与快捷档位组合，按下截图热键先倒计时再整屏截图，期间再按可取消；④常规档位延时仍先倒计时再冻结画面。
+- [x] 主人验收 2026-10-23 深夜十三（Debug PID 47000，原话「也行，正常生效了，那这个限制我接受」，冻结快照限制已接受）：①提示材质切亚克力/云母/液态玻璃，外观明显不同，且能看到提示框背后当前屏幕内容（与纯色对比）；②不透明度 35–100% 改变透出程度；③把提示移到不同背景（浅色/深色窗口）上，透出的内容随之变化；④「编辑位置」里的预览与真实提示一致，拖动/缩放后预览跟着更新；⑤保存后真实提示在保存位置出现，取消/Esc 不改原位置与外观；⑥纯色模式下调不透明度也生效；⑦提示仍不抢焦点、不挡鼠标。
+- [x] 主人验收 2026-10-23 深夜十四（Debug PID 49596，原话「很好！都没问题！收工！」）：①提示框不再有蓝框（真实提示与编辑预览都没有）；②淡出时不再出现黑色矩形，而是维持/透出当前桌面画面，亚克力/云母/液态玻璃/纯色都试；③淡入也不黑；④显示时长与淡入/淡出毫秒设置仍生效；⑤提示仍不抢焦点、不挡鼠标。
+- [x] 主人验收 2026-10-23 深夜十一（原话「你要我测的五个做的都达到了我的预期，都做的很好，继续保持」）：跟随主题色时 HEX 框与说明正确；切换档位不再闪黑窗；显示/淡入/淡出时长可调；编辑器字号、材质、不透明度可预览并随保存落盘，取消不保存；九宫格/自定义位置与预览仍正常。验收后转入深夜十二的亚克力、通知统一与快捷档位延时。
+
 - [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
 - [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
 - [x] GitHub Release：旧 `v0.1.0` Release 已删除；`v1.0.0` 已发布并上传 `IshWY-1.0.0-win-x64.zip`（30,588,110 字节，sha256 一致），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。

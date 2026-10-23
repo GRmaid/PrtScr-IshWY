@@ -28,6 +28,8 @@ public sealed partial class MainWindow : Window
     private bool _suppressPinInitialScale;
     private bool _suppressCaptureOptions;
     private bool _suppressProfile;
+    private bool _suppressSelectionColor;
+    private bool _suppressToastSettings;
     private bool _suppressPinCropToggle;
     private string? _runtimeCaptureProfile;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _memoryTimer;
@@ -54,7 +56,7 @@ public sealed partial class MainWindow : Window
             if (vk == 0x1B && Environment.TickCount64 - Services.OcrUiService.LastWindowClosedTick > 2500)
                 AppWindow.Hide();
         };
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(780, 900));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(860, 990));
 
         // 托盘常驻：点关闭 = 隐藏到托盘，真正退出走托盘菜单
         AppWindow.Closing += (sender, e) =>
@@ -71,6 +73,7 @@ public sealed partial class MainWindow : Window
         InitFullHotkey();
         InitPinOcrHotkeys();
         InitModeHotkey();
+        InitWindowSwitchHotkeys();
         SyncHotkeyTexts();
         CaptureHistoryService.Instance.HistoryChanged += OnHistoryChanged;
         PinService.HistoryRequested = ShowHistoryAbovePins;
@@ -117,6 +120,8 @@ public sealed partial class MainWindow : Window
         CaptureProfileCombo.SelectedIndex = IsQuickProfile() ? 1 : 0;
         _suppressProfile = false;
         UpdateCaptureOptions();
+        LoadSelectionColorSettings();
+        LoadToastSettings();
 
         // 预热：成像（UI 线程）+ 抓屏/枚举/PrintWindow（后台），让第一次 F1 就是全热状态
         try
@@ -306,6 +311,329 @@ public sealed partial class MainWindow : Window
     private bool IsQuickProfile() =>
         string.Equals(CurrentCaptureProfile, "quick", StringComparison.OrdinalIgnoreCase);
 
+    private void ResetModeDefaults_Click(object sender, RoutedEventArgs e)
+    {
+        var config = App.Config.Current;
+        config.CaptureProfile = "normal";
+        config.DefaultCaptureMode = "normal";
+        App.Config.Save();
+
+        _runtimeCaptureProfile = null;
+        _suppressProfile = true;
+        CaptureProfileCombo.SelectedIndex = 0;
+        _suppressProfile = false;
+        _suppressCaptureOptions = true;
+        DefaultModeCombo.SelectedIndex = 1;
+        _suppressCaptureOptions = false;
+        UpdateCaptureOptions();
+        SetStatus("截图档位与取景起始模式已恢复默认：常规取景 + 常规截图。");
+        App.Log("CaptureOptions: 恢复默认模式");
+    }
+
+    private void LoadSelectionColorSettings()
+    {
+        var config = App.Config.Current;
+        var color = NormalizeHexColor(config.SelectionBorderColor) ?? "#FFFFFF";
+        var follow = config.SelectionBorderFollowTheme;
+        var displayColor = follow ? Services.ThemeColorService.AccentHex : color;
+        _suppressSelectionColor = true;
+        SelectionColorFollowThemeCheckBox.IsChecked = follow;
+        SelectionColorBox.Text = displayColor;
+        SelectionColorBox.IsEnabled = !follow;
+        SelectionColorPresetCombo.IsEnabled = !follow;
+        ApplySelectionColorPreview(displayColor);
+        SelectionColorPresetCombo.SelectedIndex = follow ? -1 : PresetIndex(color);
+        _suppressSelectionColor = false;
+        UpdateSelectionColorHint(follow, displayColor);
+    }
+
+    private void SelectionColorFollowTheme_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSelectionColor || SelectionColorFollowThemeCheckBox is null)
+            return;
+
+        var follow = SelectionColorFollowThemeCheckBox.IsChecked == true;
+        var config = App.Config.Current;
+        SelectionColorBox.IsEnabled = !follow;
+        SelectionColorPresetCombo.IsEnabled = !follow;
+        var color = NormalizeHexColor(config.SelectionBorderColor) ?? "#FFFFFF";
+        var displayColor = follow ? Services.ThemeColorService.AccentHex : color;
+        _suppressSelectionColor = true;
+        SelectionColorBox.Text = displayColor;
+        SelectionColorPresetCombo.SelectedIndex = follow ? -1 : PresetIndex(color);
+        _suppressSelectionColor = false;
+        ApplySelectionColorPreview(displayColor);
+        UpdateSelectionColorHint(follow, displayColor);
+        if (config.SelectionBorderFollowTheme == follow)
+            return;
+
+        config.SelectionBorderFollowTheme = follow;
+        App.Config.Save();
+        SetStatus(follow ? "选区边框颜色已改为跟随系统主题色。" : $"选区边框颜色改为手动颜色 {color}。");
+        App.Log($"Overlay: selectionFollowTheme={follow}");
+    }
+
+    private void SelectionColorBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressSelectionColor || SelectionColorBox is null ||
+            SelectionColorFollowThemeCheckBox?.IsChecked == true)
+            return;
+
+        var normalized = NormalizeHexColor(SelectionColorBox.Text);
+        if (normalized is null)
+        {
+            SelectionColorHintText.Text = "颜色格式应为 #RRGGBB（例如 #FFFFFF）；格式不对不会保存。";
+            return;
+        }
+
+        ApplySelectionColorPreview(normalized);
+        if (string.Equals(App.Config.Current.SelectionBorderColor, normalized, StringComparison.OrdinalIgnoreCase))
+        {
+            UpdateSelectionColorHint(false, normalized);
+            return;
+        }
+
+        App.Config.Current.SelectionBorderColor = normalized;
+        App.Config.Save();
+        _suppressSelectionColor = true;
+        SelectionColorPresetCombo.SelectedIndex = PresetIndex(normalized);
+        _suppressSelectionColor = false;
+        UpdateSelectionColorHint(false, normalized);
+        SetStatus($"选区边框颜色已改为 {normalized}。");
+        App.Log($"Overlay: selectionColor={normalized}");
+    }
+
+    private void SelectionColorPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionColor || SelectionColorPresetCombo?.SelectedItem is not ComboBoxItem { Tag: string tag })
+            return;
+        SelectionColorBox.Text = tag;
+    }
+
+    private void ApplySelectionColorPreview(string color)
+    {
+        var parsed = ParseHexColor(color);
+        SelectionColorPreview.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+            parsed ?? Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF));
+    }
+
+    private void UpdateSelectionColorHint(bool follow, string color)
+    {
+        SelectionColorHintText.Text = follow
+            ? $"当前跟随系统主题色（{Services.ThemeColorService.AccentHex}）。关闭「跟随主题色」后可手动选色；边框和八个缩放手柄会一起变色。"
+            : $"当前 {color}。浅色画面可改深灰，深色画面可改亮色；边框和八个缩放手柄会一起变色。";
+    }
+
+    private static int PresetIndex(string color)
+    {
+        var presets = new[] { "#FFFFFF", "#00C8FF", "#3EF08A", "#FFD54A", "#FF8A3D", "#FF5FD2", "#202020" };
+        var index = Array.FindIndex(presets, p => string.Equals(p, color, StringComparison.OrdinalIgnoreCase));
+        return index;
+    }
+
+    private static string? NormalizeHexColor(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        var value = text.Trim();
+        if (!value.StartsWith('#'))
+            value = "#" + value;
+        if (value.Length != 7 || !uint.TryParse(value[1..],
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out _))
+            return null;
+        return value.ToUpperInvariant();
+    }
+
+    private static Windows.UI.Color? ParseHexColor(string? text)
+    {
+        var normalized = NormalizeHexColor(text);
+        if (normalized is null)
+            return null;
+        var rgb = uint.Parse(normalized[1..], System.Globalization.NumberStyles.HexNumber,
+            System.Globalization.CultureInfo.InvariantCulture);
+        return Windows.UI.Color.FromArgb(0xFF, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+    }
+
+    private void LoadToastSettings()
+    {
+        var config = App.Config.Current;
+        _suppressToastSettings = true;
+        ToastFontSizeBox.Value = Math.Clamp(config.ToastFontSize, 11, 32);
+        ToastVisibleMsBox.Value = Math.Clamp(config.ToastVisibleMs, 500, 10000);
+        ToastFadeInMsBox.Value = Math.Clamp(config.ToastFadeInMs, 0, 1000);
+        ToastFadeOutMsBox.Value = Math.Clamp(config.ToastFadeOutMs, 0, 2000);
+        ToastPositionCombo.SelectedIndex = ToastPositionIndex(config.ToastPosition);
+        ToastProfileToggle.IsOn = config.ToastProfileEnabled;
+        ToastProfileTextBox.Text = config.ToastProfileText;
+        ToastSuccessToggle.IsOn = config.ToastSuccessEnabled;
+        ToastSuccessTextBox.Text = config.ToastSuccessText;
+        ToastFailureToggle.IsOn = config.ToastFailureEnabled;
+        ToastFailureTextBox.Text = config.ToastFailureText;
+        _suppressToastSettings = false;
+        UpdateToastSettingsHint();
+    }
+
+    private static int ToastPositionIndex(string? position)
+    {
+        var positions = new[] { "top-left", "top-center", "top-right", "middle-left", "center", "middle-right", "bottom-left", "bottom-center", "bottom-right", "custom" };
+        var index = Array.IndexOf(positions, position ?? "");
+        return index < 0 ? 7 : index;
+    }
+
+    private void ToastFontSize_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_suppressToastSettings || ToastFontSizeBox is null)
+            return;
+        if (double.IsNaN(args.NewValue))
+        {
+            _suppressToastSettings = true;
+            ToastFontSizeBox.Value = App.Config.Current.ToastFontSize;
+            _suppressToastSettings = false;
+            return;
+        }
+
+        var size = Math.Clamp((int)Math.Round(args.NewValue), 11, 32);
+        App.Config.Current.ToastFontSize = size;
+        App.Config.Save();
+        UpdateToastSettingsHint();
+        App.Log($"Toast: fontSize={size}");
+    }
+
+    private void ToastTiming_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_suppressToastSettings || ToastVisibleMsBox is null || ToastFadeInMsBox is null || ToastFadeOutMsBox is null)
+            return;
+        if (double.IsNaN(args.NewValue))
+        {
+            LoadToastSettings();
+            return;
+        }
+
+        var config = App.Config.Current;
+        config.ToastVisibleMs = ClampToastNumber(ToastVisibleMsBox.Value, 500, 10000, config.ToastVisibleMs);
+        config.ToastFadeInMs = ClampToastNumber(ToastFadeInMsBox.Value, 0, 1000, config.ToastFadeInMs);
+        config.ToastFadeOutMs = ClampToastNumber(ToastFadeOutMsBox.Value, 0, 2000, config.ToastFadeOutMs);
+        App.Config.Save();
+        UpdateToastSettingsHint();
+        App.Log($"Toast: timing visible={config.ToastVisibleMs} fadeIn={config.ToastFadeInMs} fadeOut={config.ToastFadeOutMs}");
+    }
+
+    private static int ClampToastNumber(double value, int min, int max, int fallback) =>
+        double.IsNaN(value) ? fallback : Math.Clamp((int)Math.Round(value), min, max);
+
+    private void ToastPosition_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressToastSettings || ToastPositionCombo?.SelectedItem is not ComboBoxItem { Tag: string tag })
+            return;
+        if (string.Equals(tag, "custom", StringComparison.Ordinal))
+        {
+            // 自定义位置要等编辑器保存后才写入配置；取消时重新载入原位置，不留下半截状态。
+            OpenToastPlacementEditor();
+            return;
+        }
+        if (string.Equals(App.Config.Current.ToastPosition, tag, StringComparison.Ordinal))
+            return;
+        App.Config.Current.ToastPosition = tag;
+        App.Config.Save();
+        UpdateToastSettingsHint();
+        App.Log($"Toast: position={tag}");
+    }
+
+    private void ToastProfileToggle_Toggled(object sender, RoutedEventArgs e) =>
+        SaveToastToggle(ref _suppressToastSettings);
+
+    private void ToastSuccessToggle_Toggled(object sender, RoutedEventArgs e) =>
+        SaveToastToggle(ref _suppressToastSettings);
+
+    private void ToastFailureToggle_Toggled(object sender, RoutedEventArgs e) =>
+        SaveToastToggle(ref _suppressToastSettings);
+
+    private void SaveToastToggle(ref bool suppress)
+    {
+        if (suppress || ToastProfileToggle is null)
+            return;
+        var config = App.Config.Current;
+        config.ToastProfileEnabled = ToastProfileToggle.IsOn;
+        config.ToastSuccessEnabled = ToastSuccessToggle.IsOn;
+        config.ToastFailureEnabled = ToastFailureToggle.IsOn;
+        App.Config.Save();
+        UpdateToastSettingsHint();
+    }
+
+    private void ToastProfileText_TextChanged(object sender, TextChangedEventArgs e) =>
+        SaveToastText();
+
+    private void ToastSuccessText_TextChanged(object sender, TextChangedEventArgs e) =>
+        SaveToastText();
+
+    private void ToastFailureText_TextChanged(object sender, TextChangedEventArgs e) =>
+        SaveToastText();
+
+    private void SaveToastText()
+    {
+        if (_suppressToastSettings || ToastProfileTextBox is null)
+            return;
+        var config = App.Config.Current;
+        config.ToastProfileText = ToastProfileTextBox.Text;
+        config.ToastSuccessText = ToastSuccessTextBox.Text;
+        config.ToastFailureText = ToastFailureTextBox.Text;
+        App.Config.Save();
+        UpdateToastSettingsHint();
+    }
+
+    private void UpdateToastSettingsHint()
+    {
+        var config = App.Config.Current;
+        var position = string.Equals(config.ToastPosition, "custom", StringComparison.Ordinal)
+            ? $"自定义（{config.ToastCustomX:0},{config.ToastCustomY:0} · {config.ToastCustomWidth:0}×{config.ToastCustomHeight:0}）"
+            : "九宫格位置";
+        var material = Services.ToastAppearance.MaterialLabel(config.ToastMaterial);
+        var opacity = Math.Round(Services.ToastAppearance.ClampOpacity(config.ToastOpacity) * 100);
+        ToastSettingsHintText.Text =
+            $"提示立即生效；文字为空或该时机关闭时就不显示。当前位置：{position}；材质 {material} · 不透明度 {opacity}%；显示 {Math.Clamp(config.ToastVisibleMs, 500, 10000)}ms（淡入 {Math.Clamp(config.ToastFadeInMs, 0, 1000)}ms / 淡出 {Math.Clamp(config.ToastFadeOutMs, 0, 2000)}ms）；档位切换 {(config.ToastProfileEnabled ? "开" : "关")}、截图成功 {(config.ToastSuccessEnabled ? "开" : "关")}、截图失败 {(config.ToastFailureEnabled ? "开" : "关")}。";
+    }
+
+    private void EditToastPlacement_Click(object sender, RoutedEventArgs e) => OpenToastPlacementEditor();
+
+    private void OpenToastPlacementEditor()
+    {
+        Views.ToastPlacementWindow.Open(
+            () =>
+            {
+                LoadToastSettings();
+                ToastService.Preview("这是一条截图提示预览");
+                SetStatus("提示位置已保存，并已按新位置预览。");
+            },
+            LoadToastSettings);
+    }
+
+    private void PreviewToast_Click(object sender, RoutedEventArgs e)
+    {
+        ToastService.Preview("这是一条截图提示预览");
+    }
+
+    private void ResetToastDefaults_Click(object sender, RoutedEventArgs e)
+    {
+        var config = App.Config.Current;
+        config.ToastFontSize = 14;
+        config.ToastPosition = "bottom-center";
+        config.ToastMaterial = "acrylic";
+        config.ToastOpacity = 0.9;
+        config.ToastFadeInMs = 60;
+        config.ToastVisibleMs = 3200;
+        config.ToastFadeOutMs = 350;
+        config.ToastProfileEnabled = true;
+        config.ToastProfileText = "已切换为「{mode}」";
+        config.ToastSuccessEnabled = true;
+        config.ToastSuccessText = "截图已复制到剪贴板";
+        config.ToastFailureEnabled = true;
+        config.ToastFailureText = "截图失败，请查看日志";
+        App.Config.Save();
+        LoadToastSettings();
+        SetStatus("提示设置已恢复默认。");
+    }
+
     private void CaptureProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressProfile || CaptureProfileCombo is null)
@@ -335,7 +663,7 @@ public sealed partial class MainWindow : Window
 
         var label = string.Equals(next, "quick", StringComparison.OrdinalIgnoreCase) ? "快捷全屏" : "常规取景";
         SetStatus($"截图模式已切换为「{label}」，下一次截图立即生效");
-        TrayIcon.ShowNotification($"{AppInfo.Name} 截图模式", $"已切换为「{label}」，下一次截图立即生效。");
+        ToastService.ShowProfile(label);
         App.Log($"CaptureProfile: toggled to {next} (runtime, next launch={App.Config.Current.CaptureProfile})");
     }
 
@@ -724,7 +1052,7 @@ public sealed partial class MainWindow : Window
             {
                 var message = "剪贴板里没有图片可贴（先截一张图或复制一张图片）";
                 SetStatus(message);
-                TrayIcon.ShowNotification($"{AppInfo.Name} 贴图", message);
+                Services.ToastService.ShowInfo(message);
             }
         }
         catch (Exception ex)
@@ -752,7 +1080,7 @@ public sealed partial class MainWindow : Window
             {
                 var message = "剪贴板里没有图片可供识别";
                 SetStatus(message);
-                TrayIcon.ShowNotification($"{AppInfo.Name} OCR", message);
+                Services.ToastService.ShowInfo(message);
                 return;
             }
 
@@ -892,6 +1220,24 @@ public sealed partial class MainWindow : Window
         App.Log($"Hotkey: 贴图配置 {PinHotkeyText.Text} / OCR 配置 {OcrHotkeyText.Text}");
     }
 
+    /// <summary>取景器内的上一个/下一个窗口：只走低级键盘钩子，不注册全局热键。</summary>
+    private void InitWindowSwitchHotkeys()
+    {
+        var config = App.Config.Current;
+        PushWindowSwitchKeys();
+        WindowPrevHotkeyText.Text = HotkeyService.Describe(config.WindowPrevKeyVk, config.WindowPrevKeyModifiers);
+        WindowNextHotkeyText.Text = HotkeyService.Describe(config.WindowNextKeyVk, config.WindowNextKeyModifiers);
+        App.Log($"Hotkey: 取景切窗 {WindowPrevHotkeyText.Text} / {WindowNextHotkeyText.Text}");
+    }
+
+    private static void PushWindowSwitchKeys()
+    {
+        var config = App.Config.Current;
+        Services.EscOverPinHook.SetWindowSwitchKeys(
+            config.WindowPrevKeyVk, config.WindowPrevKeyModifiers,
+            config.WindowNextKeyVk, config.WindowNextKeyModifiers);
+    }
+
     /// <summary>截图键的旧配置回退；-1 是「用户已删除」的哨兵，不能回退到 hotkeyKey。</summary>
     private static int ResolveScreenshotVk(AppConfig config) =>
         config.HotkeyVk < 0 ? 0 :
@@ -933,6 +1279,7 @@ public sealed partial class MainWindow : Window
             {
                 SetStatus("全屏截图失败");
                 App.Log($"QuickCapture: 失败，无图像 (bypass={bypass.Activated})");
+                ToastService.ShowCaptureFailure();
                 return;
             }
 
@@ -940,8 +1287,7 @@ public sealed partial class MainWindow : Window
             {
                 SetStatus("当前画面像是独占全屏游戏，Windows 无法截取");
                 App.Log($"QuickCapture: 两次都是黑屏 (bypass={bypass.Activated})");
-                TrayIcon.ShowNotification($"{AppInfo.Name} 全屏截图",
-                    "当前画面疑似独占全屏（游戏绕过了系统合成器），无法截屏。请把游戏改为“无边框窗口”模式再试。");
+                ToastService.ShowCaptureFailure();
                 return;
             }
 
@@ -952,6 +1298,10 @@ public sealed partial class MainWindow : Window
 
             var ok = copyTask.Result;
             SetStatus(ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）");
+            if (ok)
+                ToastService.ShowCaptureSuccess();
+            else
+                ToastService.ShowCaptureFailure();
             App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={bypass.Activated} history={historyTask.Result is not null}");
             if (historyTask.Result is { } savedPath)
                 App.Log($"QuickCapture: history saved {savedPath}");
@@ -959,6 +1309,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             App.Log($"全屏截图异常: {ex}");
+            ToastService.ShowCaptureFailure();
         }
         finally
         {
@@ -1030,15 +1381,29 @@ public sealed partial class MainWindow : Window
         if (IsDown(0x10)) mods |= 4;
         if (IsDown(0x5B) || IsDown(0x5C)) mods |= 8;
 
-        // 裸字母/数字会抢走正常输入，只允许裸 F1–F12；其余必须带修饰键
+        // 取景器内的切窗键只在取景时生效，可以录成 [ / ] 这类无修饰键单键；
+        // 其余全局热键仍要求修饰键（F1–F12 例外），避免裸键抢走正常输入。
+        var overlayOnly = _recordingAction is "windowprev" or "windownext";
         var isFunctionKey = vk is >= 0x70 and <= 0x7B;
-        if (mods == 0 && !isFunctionKey)
+        if (mods == 0 && !isFunctionKey && !overlayOnly)
         {
             SetStatus("请按住 Ctrl / Alt / Shift / Win 之一（F1–F12 可单独使用）");
             return;
         }
 
-        if (TryFindHotkeyConflict(_recordingAction, vk, mods, out var other))
+        if (overlayOnly && (mods & (1 | 8)) != 0)
+        {
+            SetStatus("取景器切窗键不支持 Alt / Win 修饰（Alt 会和取景操作冲突）");
+            return;
+        }
+
+        if (overlayOnly && IsReservedOverlayKey(vk, mods, out var reserved))
+        {
+            SetStatus($"「{reserved}」是取景器固定按键，换一个");
+            return;
+        }
+
+        if (TryFindAnyHotkeyConflict(_recordingAction, vk, mods, out var other))
         {
             SetStatus($"这个组合键已经给了「{other}」，换一个");
             ResetHotkeyRecording(button);
@@ -1064,6 +1429,8 @@ public sealed partial class MainWindow : Window
         "pin" => "贴图",
         "ocr" => "文字识别",
         "mode" => "切换截图模式",
+        "windowprev" => "上一个窗口",
+        "windownext" => "下一个窗口",
         _ => action,
     };
 
@@ -1082,6 +1449,8 @@ public sealed partial class MainWindow : Window
             case "pin": PinHotkeyText.Text = text; break;
             case "ocr": OcrHotkeyText.Text = text; break;
             case "mode": ModeHotkeyText.Text = text; break;
+            case "windowprev": WindowPrevHotkeyText.Text = text; break;
+            case "windownext": WindowNextHotkeyText.Text = text; break;
         }
     }
 
@@ -1132,13 +1501,29 @@ public sealed partial class MainWindow : Window
                 _hotkey.SetModeKey(0, 0);
                 break;
 
+            case "windowprev":
+                config.WindowPrevKeyVk = 0;
+                config.WindowPrevKeyModifiers = 0;
+                App.Config.Save();
+                PushWindowSwitchKeys();
+                break;
+
+            case "windownext":
+                config.WindowNextKeyVk = 0;
+                config.WindowNextKeyModifiers = 0;
+                App.Config.Save();
+                PushWindowSwitchKeys();
+                break;
+
             default:
                 return;
         }
 
         SetHotkeyText(action, "未设置");
         SyncHotkeyTexts();
-        SetStatus($"已删除「{HotkeyLabel(action)}」快捷键；仍可用首页按钮或托盘菜单，点「修改」可重新录制。");
+        SetStatus(action is "windowprev" or "windownext"
+            ? $"已删除「{HotkeyLabel(action)}」按键；取景器内仍可用滚轮切窗，点「修改」可重新录制。"
+            : $"已删除「{HotkeyLabel(action)}」快捷键；仍可用首页按钮或托盘菜单，点「修改」可重新录制。");
         App.Log($"Hotkey: 删除 {action}");
     }
 
@@ -1149,7 +1534,34 @@ public sealed partial class MainWindow : Window
         FullCardHotkey.Text = FullHotkeyText.Text;
         PinCardHotkey.Text = PinHotkeyText.Text;
         OcrCardHotkey.Text = OcrHotkeyText.Text;
+        SyncSimpleHotkeyTexts();
         UpdateHotkeyClearButtons();
+    }
+
+    /// <summary>把一个全局热键的文案同步到「设置 → 热键」卡片；未设置时显示 未设置。</summary>
+    private void SetSimpleHotkeyText(string action, string text)
+    {
+        switch (action)
+        {
+            case "screenshot": SettingsScreenshotHotkeyText.Text = text; break;
+            case "fullscreen": SettingsFullHotkeyText.Text = text; break;
+            case "pin": SettingsPinHotkeyText.Text = text; break;
+            case "ocr": SettingsOcrHotkeyText.Text = text; break;
+            case "mode": SettingsModeHotkeyText.Text = text; break;
+            case "windowprev": SettingsWindowPrevHotkeyText.Text = text; break;
+            case "windownext": SettingsWindowNextHotkeyText.Text = text; break;
+        }
+    }
+
+    private void SyncSimpleHotkeyTexts()
+    {
+        SetSimpleHotkeyText("screenshot", ScreenshotHotkeyText.Text);
+        SetSimpleHotkeyText("fullscreen", FullHotkeyText.Text);
+        SetSimpleHotkeyText("pin", PinHotkeyText.Text);
+        SetSimpleHotkeyText("ocr", OcrHotkeyText.Text);
+        SetSimpleHotkeyText("mode", ModeHotkeyText.Text);
+        SetSimpleHotkeyText("windowprev", WindowPrevHotkeyText.Text);
+        SetSimpleHotkeyText("windownext", WindowNextHotkeyText.Text);
     }
 
     private void UpdateHotkeyClearButtons()
@@ -1159,10 +1571,147 @@ public sealed partial class MainWindow : Window
         PinClearButton.IsEnabled = PinHotkeyText.Text != "未设置";
         OcrClearButton.IsEnabled = OcrHotkeyText.Text != "未设置";
         ModeClearButton.IsEnabled = ModeHotkeyText.Text != "未设置";
+        WindowPrevClearButton.IsEnabled = WindowPrevHotkeyText.Text != "未设置";
+        WindowNextClearButton.IsEnabled = WindowNextHotkeyText.Text != "未设置";
+    }
+
+    // 默认热键：与 ConfigService 的出厂值保持一致；单键重置与全部重置共用。
+    private const int DefaultScreenshotVk = 0x41, DefaultScreenshotMods = 1;
+    private const int DefaultFullVk = 0x44, DefaultFullMods = 1;
+    private const int DefaultPinVk = 0x53, DefaultPinMods = 1;
+    private const int DefaultOcrVk = 0x51, DefaultOcrMods = 1;
+    private const int DefaultModeVk = 0x43, DefaultModeMods = 5;
+    private const int DefaultWindowPrevVk = 0xDB, DefaultWindowNextVk = 0xDD;
+
+    private static (int Vk, int Mods) DefaultHotkey(string action) => action switch
+    {
+        "screenshot" => (DefaultScreenshotVk, DefaultScreenshotMods),
+        "fullscreen" => (DefaultFullVk, DefaultFullMods),
+        "pin" => (DefaultPinVk, DefaultPinMods),
+        "ocr" => (DefaultOcrVk, DefaultOcrMods),
+        "mode" => (DefaultModeVk, DefaultModeMods),
+        "windowprev" => (DefaultWindowPrevVk, 0),
+        "windownext" => (DefaultWindowNextVk, 0),
+        _ => (0, 0),
+    };
+
+    /// <summary>所有热键（含取景器切窗键）的当前有效组合；空键跳过。</summary>
+    private static (string Action, string Label, int Vk, int Mods)[] ActiveHotkeys()
+    {
+        var c = App.Config.Current;
+        var screenshotVk = ResolveScreenshotVk(c);
+        var fullVk = ResolveFullscreenVk(c);
+        return new[]
+        {
+            ("screenshot", "窗口截图", screenshotVk, screenshotVk == 0 ? 0 : (int)c.HotkeyModifiers),
+            ("fullscreen", "全屏截图", fullVk, fullVk == 0 ? 0 : c.FullHotkeyModifiers),
+            ("pin", "贴图", c.PinHotkeyVk, c.PinHotkeyModifiers),
+            ("ocr", "文字识别", c.OcrHotkeyVk, c.OcrHotkeyModifiers),
+            ("mode", "切换截图模式", c.ModeHotkeyVk, c.ModeHotkeyModifiers),
+            ("windowprev", "上一个窗口", c.WindowPrevKeyVk, c.WindowPrevKeyModifiers),
+            ("windownext", "下一个窗口", c.WindowNextKeyVk, c.WindowNextKeyModifiers),
+        };
+    }
+
+    /// <summary>全局热键与取景器切窗键共用一套按键空间；重复会有一方静默失效，所以跨表也要拦。</summary>
+    private static bool TryFindAnyHotkeyConflict(string action, int vk, int mods, out string other)
+    {
+        other = "";
+        if (vk == 0)
+            return false;
+
+        foreach (var entry in ActiveHotkeys())
+        {
+            if (entry.Action == action || entry.Vk == 0)
+                continue;
+            if (entry.Vk == vk && entry.Mods == mods)
+            {
+                other = entry.Label;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void HotkeyReset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string action } || action.Length == 0)
+            return;
+
+        if (_recordingButton is not null)
+            ResetHotkeyRecording(_recordingButton);
+
+        var (vk, mods) = DefaultHotkey(action);
+        if (vk == 0)
+            return;
+
+        if (TryFindAnyHotkeyConflict(action, vk, mods, out var other))
+        {
+            SetStatus($"「{HotkeyLabel(action)}」的默认键被「{other}」占用，先调整那一项再恢复默认。");
+            HotkeyStatusText.Text = $"「{HotkeyLabel(action)}」默认键 {HotkeyService.Describe(vk, mods)} 与「{other}」冲突，未恢复。";
+            return;
+        }
+
+        ApplyHotkey(action, vk, mods);
+        SetStatus($"已把「{HotkeyLabel(action)}」恢复默认 {HotkeyService.Describe(vk, mods)}。");
+        HotkeyStatusText.Text = $"「{HotkeyLabel(action)}」已恢复默认。";
+        App.Log($"Hotkey: 恢复默认 {action}");
+    }
+
+    private void ResetAllHotkeys_Click(object sender, RoutedEventArgs e)
+    {
+        if (_recordingButton is not null)
+            ResetHotkeyRecording(_recordingButton);
+
+        var config = App.Config.Current;
+        config.HotkeyVk = DefaultScreenshotVk;
+        config.HotkeyModifiers = DefaultScreenshotMods;
+        config.FullHotkeyVk = DefaultFullVk;
+        config.FullHotkeyModifiers = DefaultFullMods;
+        config.PinHotkeyVk = DefaultPinVk;
+        config.PinHotkeyModifiers = DefaultPinMods;
+        config.OcrHotkeyVk = DefaultOcrVk;
+        config.OcrHotkeyModifiers = DefaultOcrMods;
+        config.ModeHotkeyVk = DefaultModeVk;
+        config.ModeHotkeyModifiers = DefaultModeMods;
+        config.WindowPrevKeyVk = DefaultWindowPrevVk;
+        config.WindowPrevKeyModifiers = 0;
+        config.WindowNextKeyVk = DefaultWindowNextVk;
+        config.WindowNextKeyModifiers = 0;
+        App.Config.Save();
+
+        Services.EscOverPinHook.SetScreenshotKey(DefaultScreenshotVk, DefaultScreenshotMods);
+        _hotkey.Restart(DefaultScreenshotVk, DefaultScreenshotMods);
+        Services.EscOverPinHook.SetFullScreenKey(DefaultFullVk, DefaultFullMods);
+        _hotkey.SetFullscreenKey(DefaultFullVk, DefaultFullMods);
+        _hotkey.SetPinKey(DefaultPinVk, DefaultPinMods);
+        _hotkey.SetOcrKey(DefaultOcrVk, DefaultOcrMods);
+        Services.EscOverPinHook.SetModeSwitchKey(DefaultModeVk, DefaultModeMods);
+        _hotkey.SetModeKey(DefaultModeVk, DefaultModeMods);
+        PushWindowSwitchKeys();
+
+        foreach (var action in new[] { "screenshot", "fullscreen", "pin", "ocr", "mode", "windowprev", "windownext" })
+        {
+            var (vk, mods) = DefaultHotkey(action);
+            SetHotkeyText(action, HotkeyService.Describe(vk, mods));
+        }
+
+        SyncHotkeyTexts();
+        SetStatus("所有快捷键已恢复默认。");
+        HotkeyStatusText.Text = "所有快捷键已恢复默认。";
+        App.Log("Hotkey: 全部恢复默认");
     }
 
     private void ApplyHotkey(string action, int vk, int mods)
     {
+        if (vk != 0 && TryFindAnyHotkeyConflict(action, vk, mods, out var occupied))
+        {
+            SetStatus($"这个组合键已经给了「{occupied}」，换一个");
+            HotkeyStatusText.Text = $"「{HotkeyService.Describe(vk, mods)}」与「{occupied}」冲突，未保存。";
+            return;
+        }
+
         var config = App.Config.Current;
         var text = HotkeyService.Describe(vk, mods);
 
@@ -1215,6 +1764,24 @@ public sealed partial class MainWindow : Window
                 ModeHotkeyText.Text = text;
                 SetStatus($"切换截图模式热键已设为 {text}");
                 break;
+
+            case "windowprev":
+                config.WindowPrevKeyVk = vk;
+                config.WindowPrevKeyModifiers = mods;
+                App.Config.Save();
+                PushWindowSwitchKeys();
+                WindowPrevHotkeyText.Text = text;
+                SetStatus($"取景器「上一个窗口」已设为 {text}");
+                break;
+
+            case "windownext":
+                config.WindowNextKeyVk = vk;
+                config.WindowNextKeyModifiers = mods;
+                App.Config.Save();
+                PushWindowSwitchKeys();
+                WindowNextHotkeyText.Text = text;
+                SetStatus($"取景器「下一个窗口」已设为 {text}");
+                break;
         }
 
         SyncHotkeyTexts();
@@ -1257,7 +1824,40 @@ public sealed partial class MainWindow : Window
             other = "切换截图模式";
             return true;
         }
+        if (c.WindowPrevKeyVk != 0 && action != "windowprev" && vk == c.WindowPrevKeyVk && mods == c.WindowPrevKeyModifiers)
+        {
+            other = "上一个窗口";
+            return true;
+        }
+        if (c.WindowNextKeyVk != 0 && action != "windownext" && vk == c.WindowNextKeyVk && mods == c.WindowNextKeyModifiers)
+        {
+            other = "下一个窗口";
+            return true;
+        }
 
+        if (action is "windowprev" or "windownext" && IsReservedOverlayKey(vk, mods, out var reserved))
+        {
+            other = reserved;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>取景器内已固定语义的按键，不能被切窗键占用。</summary>
+    private static bool IsReservedOverlayKey(int vk, int mods, out string name)
+    {
+        name = "";
+        if (mods == 0 && vk is 0x1B or 0x09 or 0x0D or 0x4F)
+        {
+            name = vk switch { 0x1B => "Esc", 0x09 => "Tab", 0x0D => "回车", _ => "O" };
+            return true;
+        }
+        if (mods == 2 && vk is 0x43 or 0x53)
+        {
+            name = vk == 0x43 ? "Ctrl+C" : "Ctrl+S";
+            return true;
+        }
         return false;
     }
 
@@ -1288,6 +1888,13 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
+            var delay = NormalizeDelay(App.Config.Current.CaptureDelaySeconds);
+            if (delay > 0)
+            {
+                await StartDelayedCaptureAsync(delay);
+                return;
+            }
+
             if (IsQuickProfile())
             {
                 App.Log("CaptureProfile: quick mode, capture fullscreen immediately");
@@ -1295,11 +1902,7 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            var delay = NormalizeDelay(App.Config.Current.CaptureDelaySeconds);
-            if (delay > 0)
-                await StartDelayedCaptureAsync(delay);
-            else
-                await Services.CaptureService.Instance.StartCaptureAsync();
+            await Services.CaptureService.Instance.StartCaptureAsync();
         }
         catch (Exception ex)
         {
@@ -1322,9 +1925,8 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            App.Log($"Delay: start {seconds}s");
-            TrayIcon.ShowNotification($"{AppInfo.Name} 延时截图",
-                $"{seconds} 秒后冻结画面，期间可正常操作。再按一次截图热键可取消。");
+            App.Log($"Delay: start {seconds}s quick={IsQuickProfile()}");
+            Services.ToastService.ShowInfo($"{seconds} 秒后截图，期间可正常操作；再按一次截图热键可取消。");
 
             for (var remaining = seconds; remaining > 0; remaining--)
             {
@@ -1333,9 +1935,17 @@ public sealed partial class MainWindow : Window
                 await Task.Delay(1000, cts.Token);
             }
 
-            App.Log("Delay: capture now");
-            SetStatus("延时结束，正在冻结画面…");
-            await Services.CaptureService.Instance.StartCaptureAsync();
+            App.Log($"Delay: capture now quick={IsQuickProfile()}");
+            if (IsQuickProfile())
+            {
+                SetStatus("延时结束，正在截取整屏…");
+                OnFullScreenPressed();
+            }
+            else
+            {
+                SetStatus("延时结束，正在冻结画面…");
+                await Services.CaptureService.Instance.StartCaptureAsync();
+            }
         }
         catch (OperationCanceledException)
         {

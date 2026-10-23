@@ -32,7 +32,20 @@
             <Rectangle
                 x:Name="SelectionBorder"
                 Stroke="#FFFFFFFF"
-                StrokeThickness="1.5" />
+                StrokeThickness="2.5" />
+            <Canvas
+                x:Name="ResizeHandles"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+                <Rectangle x:Name="HandleNW" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleN" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleNE" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleW" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleE" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleSW" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleS" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+                <Rectangle x:Name="HandleSE" Width="12" Height="12" Fill="White" Stroke="#E6000000" StrokeThickness="1.5" RadiusX="2" RadiusY="2" />
+            </Canvas>
             <Border
                 x:Name="SizeTip"
                 Background="#E6202020"

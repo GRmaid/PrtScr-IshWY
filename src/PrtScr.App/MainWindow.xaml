@@ -224,7 +224,22 @@
 
                 <Expander Header="截图与热键" IsExpanded="True" HorizontalAlignment="Stretch">
                     <StackPanel Spacing="12" Margin="0,4">
-                        <TextBlock Text="快捷键" Style="{StaticResource SectionTitleStyle}" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="快捷键" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                            <Button
+                                x:Name="HotkeyResetAllButton"
+                                Grid.Column="1"
+                                Content="恢复默认快捷键"
+                                Padding="10,3"
+                                MinWidth="0"
+                                FontSize="12"
+                                VerticalAlignment="Center"
+                                Click="ResetAllHotkeys_Click" />
+                        </Grid>
                         <Border
                             Padding="12"
                             CornerRadius="10"
@@ -237,8 +252,11 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
@@ -251,6 +269,7 @@
                                 <TextBlock Grid.Column="1" Text="当前组合键" FontSize="12" Opacity="0.55" />
                                 <TextBlock Grid.Column="2" Text="修改" FontSize="12" Opacity="0.55" />
                                 <TextBlock Grid.Column="3" Text="删除" FontSize="12" Opacity="0.55" />
+                                <TextBlock Grid.Column="4" Text="重置" FontSize="12" Opacity="0.55" />
 
                                 <TextBlock Grid.Row="1" Text="窗口截图" VerticalAlignment="Center" />
                                 <TextBlock
@@ -285,6 +304,23 @@
                                     CornerRadius="6"
                                     Tag="screenshot"
                                     Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="ScreenshotResetButton"
+                                    Grid.Row="1"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="screenshot"
+                                    Click="HotkeyReset_Click" />
 
                                 <TextBlock Grid.Row="2" Text="全屏截图" VerticalAlignment="Center" />
                                 <TextBlock
@@ -319,6 +355,23 @@
                                     CornerRadius="6"
                                     Tag="fullscreen"
                                     Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="FullHotkeyResetButton"
+                                    Grid.Row="2"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="fullscreen"
+                                    Click="HotkeyReset_Click" />
 
                                 <TextBlock Grid.Row="3" Text="贴图" VerticalAlignment="Center" />
                                 <TextBlock
@@ -353,6 +406,23 @@
                                     CornerRadius="6"
                                     Tag="pin"
                                     Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="PinResetButton"
+                                    Grid.Row="3"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="pin"
+                                    Click="HotkeyReset_Click" />
 
                                 <TextBlock Grid.Row="4" Text="文字识别" VerticalAlignment="Center" />
                                 <TextBlock
@@ -387,6 +457,23 @@
                                     CornerRadius="6"
                                     Tag="ocr"
                                     Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="OcrResetButton"
+                                    Grid.Row="4"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="ocr"
+                                    Click="HotkeyReset_Click" />
 
                                 <TextBlock Grid.Row="5" Text="切换截图模式" VerticalAlignment="Center" />
                                 <TextBlock
@@ -421,15 +508,231 @@
                                     CornerRadius="6"
                                     Tag="mode"
                                     Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="ModeResetButton"
+                                    Grid.Row="5"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="mode"
+                                    Click="HotkeyReset_Click" />
+
+                                <TextBlock Grid.Row="6" Text="上一个窗口" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="WindowPrevHotkeyText"
+                                    Grid.Row="6"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="WindowPrevHotkeyRecordButton"
+                                    Grid.Row="6"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="windowprev"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
+                                <Button
+                                    x:Name="WindowPrevClearButton"
+                                    Grid.Row="6"
+                                    Grid.Column="3"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="✕"
+                                    FontSize="12"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="windowprev"
+                                    Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="WindowPrevResetButton"
+                                    Grid.Row="6"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="windowprev"
+                                    Click="HotkeyReset_Click" />
+
+                                <TextBlock Grid.Row="7" Text="下一个窗口" VerticalAlignment="Center" />
+                                <TextBlock
+                                    x:Name="WindowNextHotkeyText"
+                                    Grid.Row="7"
+                                    Grid.Column="1"
+                                    FontFamily="Consolas"
+                                    VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="WindowNextHotkeyRecordButton"
+                                    Grid.Row="7"
+                                    Grid.Column="2"
+                                    MinWidth="72"
+                                    Content="修改"
+                                    Tag="windownext"
+                                    Click="HotkeyRecord_Click"
+                                    KeyDown="HotkeyRecord_KeyDown" />
+                                <Button
+                                    x:Name="WindowNextClearButton"
+                                    Grid.Row="7"
+                                    Grid.Column="3"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="✕"
+                                    FontSize="12"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="windownext"
+                                    Click="HotkeyClear_Click" />
+                                <Button
+                                    x:Name="WindowNextResetButton"
+                                    Grid.Row="7"
+                                    Grid.Column="4"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="0"
+                                    Padding="0"
+                                    Content="↻"
+                                    FontSize="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    CornerRadius="6"
+                                    Tag="windownext"
+                                    Click="HotkeyReset_Click" />
                             </Grid>
                         </Border>
+                        <TextBlock Text="按键一览" Style="{StaticResource SectionTitleStyle}" />
+                        <Grid ColumnSpacing="10" RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Grid.Column="0" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="窗口截图" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsScreenshotHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="冻结屏幕后框选，或点选窗口抓本体。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="0" Grid.Column="1" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="全屏截图" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsFullHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="整屏直接进剪贴板，不打开取景器。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="1" Grid.Column="0" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="贴图" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsPinHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="把剪贴板里的图片钉在桌面上。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="1" Grid.Column="1" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="文字识别" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsOcrHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="识别剪贴板或取景选区里的文字。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="2" Grid.Column="0" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="上一个窗口" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsWindowPrevHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="取景中切到前一个窗口候选。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="2" Grid.Column="1" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="下一个窗口" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsWindowNextHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="取景中切到后一个窗口候选。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="3" Grid.Column="0" Padding="12" CornerRadius="10"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <StackPanel Spacing="2">
+                                    <Grid>
+                                        <TextBlock Text="切换截图模式" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SettingsModeHotkeyText" HorizontalAlignment="Right"
+                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                    </Grid>
+                                    <TextBlock Text="在常规取景与快速全屏之间切换。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
                         <TextBlock
                             x:Name="HotkeyStatusText"
                             Style="{StaticResource HintTextStyle}" />
                         <TextBlock
-                            Text="小叉叉删除当前快捷键；删除后仍可用首页按钮或托盘菜单，也可随时点「修改」重新录制。"
+                            Text="小叉叉删除当前快捷键；旋转箭头只把这一项恢复默认。删除后仍可用首页按钮或托盘菜单，也可随时点「修改」重新录制。最后两行只在取景器打开时生效，可录成 [ 和 ] 这类无修饰键单键。"
                             Style="{StaticResource HintTextStyle}" />
-
                         <TextBlock Text="完整快捷键目录" Style="{StaticResource SectionTitleStyle}" />
                         <Border
                             Padding="12"
@@ -495,9 +798,22 @@
                             Text="全局组合键可在上表修改；取景器与贴图内的按键是固定语义，Esc 与鼠标右键始终作为兜底退出。"
                             Style="{StaticResource HintTextStyle}" />
 
-                        <TextBlock Text="截图行为" Style="{StaticResource SectionTitleStyle}" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="截图行为" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                            <Button
+                                Grid.Column="1"
+                                Content="恢复默认"
+                                Padding="8,2"
+                                MinWidth="0"
+                                FontSize="12"
+                                VerticalAlignment="Center"
+                                Click="ResetModeDefaults_Click" />
+                        </Grid>
                         <StackPanel Spacing="4">
-                            <TextBlock Text="截图热键行为" />
                             <ComboBox
                                 x:Name="CaptureProfileCombo"
                                 Width="390"
@@ -535,6 +851,46 @@
                             x:Name="CaptureCursorToggle"
                             Header="截图包含鼠标指针（截图取景和全屏截图都生效）"
                             Toggled="CaptureCursorToggle_Toggled" />
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="选区边框颜色" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <CheckBox
+                                    x:Name="SelectionColorFollowThemeCheckBox"
+                                    Content="跟随主题色"
+                                    MinWidth="0"
+                                    VerticalAlignment="Center"
+                                    Checked="SelectionColorFollowTheme_Toggled"
+                                    Unchecked="SelectionColorFollowTheme_Toggled" />
+                                <Border
+                                    x:Name="SelectionColorPreview"
+                                    Width="28"
+                                    Height="28"
+                                    CornerRadius="4"
+                                    Background="#FFFFFF"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1" />
+                                <TextBox
+                                    x:Name="SelectionColorBox"
+                                    Width="110"
+                                    MaxLength="7"
+                                    PlaceholderText="#FFFFFF"
+                                    TextChanged="SelectionColorBox_TextChanged" />
+                                <ComboBox
+                                    x:Name="SelectionColorPresetCombo"
+                                    Width="150"
+                                    PlaceholderText="预设颜色"
+                                    SelectionChanged="SelectionColorPreset_SelectionChanged">
+                                    <ComboBoxItem Content="白色" Tag="#FFFFFF" />
+                                    <ComboBoxItem Content="亮青色" Tag="#00C8FF" />
+                                    <ComboBoxItem Content="亮绿色" Tag="#3EF08A" />
+                                    <ComboBoxItem Content="亮黄色" Tag="#FFD54A" />
+                                    <ComboBoxItem Content="橙色" Tag="#FF8A3D" />
+                                    <ComboBoxItem Content="品红色" Tag="#FF5FD2" />
+                                    <ComboBoxItem Content="深灰色" Tag="#202020" />
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock x:Name="SelectionColorHintText" Style="{StaticResource HintTextStyle}" />
+                        </StackPanel>
                         <TextBlock x:Name="CaptureModeHintText" Style="{StaticResource HintTextStyle}" />
                         <TextBlock x:Name="CaptureOptionsText" Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
@@ -555,6 +911,113 @@
                             SpinButtonPlacementMode="Inline"
                             ValueChanged="PinInitialScale_ValueChanged" />
                         <TextBlock x:Name="PinInitialScaleHintText" Style="{StaticResource HintTextStyle}" />
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="提示" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="10" Margin="0,4">
+                        <TextBlock
+                            Text="截图成功、截图失败或切换截图档位时，弹出与取景器风格一致的纯文字提示；提示不抢焦点、不挡鼠标。材质、不透明度与字号也可在「编辑位置…」里调整。"
+                            TextWrapping="Wrap"
+                            Style="{StaticResource HintTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="24">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="提示字号" />
+                                <NumberBox
+                                    x:Name="ToastFontSizeBox"
+                                    Width="140"
+                                    Minimum="11"
+                                    Maximum="32"
+                                    SmallChange="1"
+                                    SpinButtonPlacementMode="Inline"
+                                    ValueChanged="ToastFontSize_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="提示位置" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <ComboBox
+                                        x:Name="ToastPositionCombo"
+                                        Width="190"
+                                        SelectionChanged="ToastPosition_SelectionChanged">
+                                        <ComboBoxItem Content="左上" Tag="top-left" />
+                                        <ComboBoxItem Content="上中" Tag="top-center" />
+                                        <ComboBoxItem Content="右上" Tag="top-right" />
+                                        <ComboBoxItem Content="左中" Tag="middle-left" />
+                                        <ComboBoxItem Content="正中" Tag="center" />
+                                        <ComboBoxItem Content="右中" Tag="middle-right" />
+                                        <ComboBoxItem Content="左下" Tag="bottom-left" />
+                                        <ComboBoxItem Content="下中" Tag="bottom-center" />
+                                        <ComboBoxItem Content="右下" Tag="bottom-right" />
+                                        <ComboBoxItem Content="自定义（编辑位置）" Tag="custom" />
+                                    </ComboBox>
+                                    <Button Content="编辑位置…" Click="EditToastPlacement_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="18">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="显示时长（毫秒）" />
+                                <NumberBox
+                                    x:Name="ToastVisibleMsBox"
+                                    Width="140"
+                                    Minimum="500"
+                                    Maximum="10000"
+                                    SmallChange="100"
+                                    SpinButtonPlacementMode="Inline"
+                                    ValueChanged="ToastTiming_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="淡入（毫秒）" />
+                                <NumberBox
+                                    x:Name="ToastFadeInMsBox"
+                                    Width="120"
+                                    Minimum="0"
+                                    Maximum="1000"
+                                    SmallChange="10"
+                                    SpinButtonPlacementMode="Inline"
+                                    ValueChanged="ToastTiming_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="淡出（毫秒）" />
+                                <NumberBox
+                                    x:Name="ToastFadeOutMsBox"
+                                    Width="120"
+                                    Minimum="0"
+                                    Maximum="2000"
+                                    SmallChange="50"
+                                    SpinButtonPlacementMode="Inline"
+                                    ValueChanged="ToastTiming_ValueChanged" />
+                            </StackPanel>
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="ToastProfileToggle"
+                            Header="切换截图档位时提示"
+                            Toggled="ToastProfileToggle_Toggled" />
+                        <TextBox
+                            x:Name="ToastProfileTextBox"
+                            Header="档位提示文字（{mode} 会替换为当前档位）"
+                            TextChanged="ToastProfileText_TextChanged" />
+                        <ToggleSwitch
+                            x:Name="ToastSuccessToggle"
+                            Header="截图成功时提示"
+                            Toggled="ToastSuccessToggle_Toggled" />
+                        <TextBox
+                            x:Name="ToastSuccessTextBox"
+                            Header="成功提示文字"
+                            TextChanged="ToastSuccessText_TextChanged" />
+                        <ToggleSwitch
+                            x:Name="ToastFailureToggle"
+                            Header="截图失败或异常时提示"
+                            Toggled="ToastFailureToggle_Toggled" />
+                        <TextBox
+                            x:Name="ToastFailureTextBox"
+                            Header="失败提示文字"
+                            TextChanged="ToastFailureText_TextChanged" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button Content="预览提示" Click="PreviewToast_Click" />
+                            <Button Content="恢复默认提示" Click="ResetToastDefaults_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="ToastSettingsHintText" Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
                 </Expander>
 

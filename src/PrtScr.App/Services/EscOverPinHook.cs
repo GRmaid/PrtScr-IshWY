@@ -53,7 +53,11 @@ internal static unsafe class EscOverPinHook
     // 取景窗可见期间的键盘直通：窗口不一定拿得到前台焦点，靠消息层拦截会偶发漏键。
     // 钩子回调只把按键交给 UI 线程（TryEnqueue），不在这里做任何 UI/写盘工作。
     private static Action<int, bool>? _overlayKeyHandler;
-    private static int _overlayKeysActive;
+    private static int _overlayKeysActive; // 0=关闭，1=取景器完整按键，2=只保留 Esc
+    private static int _windowPrevVk = 0xDB; // [
+    private static int _windowPrevMods;
+    private static int _windowNextVk = 0xDD; // ]
+    private static int _windowNextMods;
 
     // 钩子回调里只入队，写盘交给专用线程：回调必须在 LowLevelHooksTimeout 内返回。
     private static readonly ConcurrentQueue<string> PendingLogs = new();
@@ -99,6 +103,22 @@ internal static unsafe class EscOverPinHook
         => Volatile.Write(ref _overlayKeysActive, active ? 1 : 0);
 
     /// <summary>
+    /// 取景窗失焦（例如鼠标点了别的窗口）时只保留 Esc：仍可一键退出取景，
+    /// 其余 Tab/Ctrl+C 等必须交还前台程序；取景窗重新激活后恢复完整按键。
+    /// </summary>
+    public static void SetOverlayKeysEscOnly(bool escOnly)
+        => Volatile.Write(ref _overlayKeysActive, escOnly ? 2 : 0);
+
+    /// <summary>取景器内上一个/下一个窗口的可配置按键（默认 [ 和 ]）。</summary>
+    public static void SetWindowSwitchKeys(int prevVk, int prevMods, int nextVk, int nextMods)
+    {
+        _windowPrevVk = prevVk;
+        _windowPrevMods = prevMods;
+        _windowNextVk = nextVk;
+        _windowNextMods = nextMods;
+    }
+
+    /// <summary>
     /// 全屏热键去抖/去重：钩子路径与 RegisterHotKey 兜底路径共用，
     /// 同一物理按键只允许触发一次（300ms 内视为同一次）。
     /// </summary>
@@ -142,6 +162,23 @@ internal static unsafe class EscOverPinHook
 
         if (PostThreadMessage(tid, WM_APP_REINSTALL_HOOK, 0, 0))
             HookLog("Hook: 兜底通道先命中，请求重装键盘钩子");
+    }
+
+    /// <summary>
+    /// 取景窗每次亮起时重建一次低级键盘钩子：钩子可能被系统静默跳过/摘除，
+    /// 不重建的话 Esc 只能等 XAML 焦点或 RegisterHotKey 兜底。重建是安静操作。
+    /// </summary>
+    public static void EnsureOverlayHook()
+    {
+        if (_hookThread is not { IsAlive: true })
+        {
+            Install();
+            return;
+        }
+
+        var tid = _hookThreadId;
+        if (tid != 0)
+            _ = PostThreadMessage(tid, WM_APP_REINSTALL_HOOK, 1, 0);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -249,7 +286,8 @@ internal static unsafe class EscOverPinHook
         {
             if (msg.hwnd.IsNull && msg.message == WM_APP_REINSTALL_HOOK)
             {
-                ReinstallHook();
+                // wParam=1：安静重装（取景器每次亮起的自愈），不刷日志
+                ReinstallHook(verbose: msg.wParam == 0);
                 continue;
             }
 
@@ -264,7 +302,7 @@ internal static unsafe class EscOverPinHook
         PInvoke.GetModuleHandle(default).DangerousGetHandle(),
         0);
 
-    private static void ReinstallHook()
+    private static void ReinstallHook(bool verbose = true)
     {
         if (_hook != 0)
         {
@@ -275,7 +313,8 @@ internal static unsafe class EscOverPinHook
         _hook = InstallHookRaw();
 
         // 钩子线程可能已经被系统判超时；重装后继续泵消息
-        HookLog($"Hook: 重装 esc-over-pin = {_hook != 0}");
+        if (verbose || _hook == 0)
+            HookLog($"Hook: 重装 esc-over-pin = {_hook != 0}");
     }
 
     private static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
@@ -326,7 +365,8 @@ internal static unsafe class EscOverPinHook
     private static bool TryHandleOverlayKey(int vk)
     {
         var handler = Volatile.Read(ref _overlayKeyHandler);
-        if (handler is null || Volatile.Read(ref _overlayKeysActive) == 0)
+        var mode = Volatile.Read(ref _overlayKeysActive);
+        if (handler is null || mode == 0)
             return false;
 
         var ctrl = _ctrlDown || Down(0x11);
@@ -337,6 +377,25 @@ internal static unsafe class EscOverPinHook
         // Alt+Tab / Win+Tab / Ctrl+Tab 等系统组合键必须放行，否则取景时会切不走窗口。
         if (alt || win)
             return false;
+
+        // 失焦兜底：吞 Esc 与主人自选的切窗键，其余按键原样交给当前前台程序。
+        // 取景窗全屏常驻，即使被别的窗口抢了前台，切窗键也应该继续生效。
+        if (mode == 2)
+        {
+            if (MatchesSwitchKey(_windowPrevVk, _windowPrevMods, vk, ctrl, shift))
+                return DispatchOverlayKey(handler, 0x1F0, false);
+            if (MatchesSwitchKey(_windowNextVk, _windowNextMods, vk, ctrl, shift))
+                return DispatchOverlayKey(handler, 0x1F1, false);
+            if (vk != 0x1B || ctrl || shift)
+                return false;
+            return DispatchOverlayKey(handler, vk, false);
+        }
+
+        // 取景器内可配置的“上一个/下一个窗口”优先于固定白名单。
+        if (MatchesSwitchKey(_windowPrevVk, _windowPrevMods, vk, ctrl, shift))
+            return DispatchOverlayKey(handler, 0x1F0, false);
+        if (MatchesSwitchKey(_windowNextVk, _windowNextMods, vk, ctrl, shift))
+            return DispatchOverlayKey(handler, 0x1F1, false);
 
         switch (vk)
         {
@@ -359,6 +418,11 @@ internal static unsafe class EscOverPinHook
                 return false;
         }
 
+        return DispatchOverlayKey(handler, vk, ctrl);
+    }
+
+    private static bool DispatchOverlayKey(Action<int, bool> handler, int vk, bool ctrl)
+    {
         try
         {
             handler(vk, ctrl);
@@ -370,6 +434,16 @@ internal static unsafe class EscOverPinHook
             // 钩子回调绝不能把异常抛回系统；消费掉这次按键也比让底层应用误收安全。
             return true;
         }
+    }
+
+    private static bool MatchesSwitchKey(int wantedVk, int mods, int vk, bool ctrl, bool shift)
+    {
+        if (wantedVk == 0 || vk != wantedVk)
+            return false;
+        // 取景器切窗键只允许 Ctrl/Shift 组合；Alt/Win 保留给系统。
+        if ((mods & 1) != 0 || (mods & 8) != 0)
+            return false;
+        return ctrl == ((mods & 2) != 0) && shift == ((mods & 4) != 0);
     }
 
     private static void EvaluateScreenshotHotkey()

@@ -363,7 +363,13 @@ public sealed unsafe class HotkeyService : IDisposable
                 return default;
 
             case WM_APP_REGISTER_CANCEL:
-                _ = PInvoke.RegisterHotKey(hwnd, CancelHotkeyId, (HOT_KEY_MODIFIERS)MOD_NOREPEAT, VK_ESCAPE);
+                // 先清掉上次会话可能残留的注册，否则重复注册会以 1409 失败且旧注册已失效。
+                _ = PInvoke.UnregisterHotKey(hwnd, CancelHotkeyId);
+                var escOk = PInvoke.RegisterHotKey(hwnd, CancelHotkeyId, (HOT_KEY_MODIFIERS)MOD_NOREPEAT, VK_ESCAPE);
+                if (escOk)
+                    App.Log("Hotkey: Esc 兜底注册成功");
+                else
+                    App.Log($"Hotkey: Esc 兜底注册失败 win32={Marshal.GetLastWin32Error()}");
                 return default;
 
             case WM_APP_UNREGISTER_CANCEL:
@@ -436,7 +442,25 @@ public sealed unsafe class HotkeyService : IDisposable
         if ((modifiers & 4) != 0) parts.Add("Shift");
         if ((modifiers & 8) != 0) parts.Add("Win");
         if (vk != 0)
-            parts.Add(((Windows.System.VirtualKey)vk).ToString());
+        {
+            // OEM 键（[ ] ; = , - . / \ `）的 VirtualKey 名称在中文系统上不可读，
+            // 取景器的默认切窗键正好是 [ ]，这里统一映射成键帽字符。
+            var name = vk switch
+            {
+                0xDB => "[",
+                0xDD => "]",
+                0xBA => ";",
+                0xBB => "=",
+                0xBC => ",",
+                0xBD => "-",
+                0xBE => ".",
+                0xBF => "/",
+                0xC0 => "`",
+                0xDC => "\\",
+                _ => ((Windows.System.VirtualKey)vk).ToString(),
+            };
+            parts.Add(name);
+        }
         return string.Join(" + ", parts);
     }
 }
