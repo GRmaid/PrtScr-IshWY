@@ -465,7 +465,7 @@ FullscreenBypass: 已归还原前台
 - README 按主人约束只描述当前最新版本功能：补充选区缩放/移动与边框颜色、七个热键与单项/全部恢复、`[` `]` 切窗、延时在快捷档位生效、Tab 保留选区、提示与通知整节、九宫格/自定义提示位置，以及新增配置字段；版本号与下载文件名改为 v1.1.0；未保留任何版本历史、更新记录或开发过程，主人自己写的碎碎念/致谢段落未改动。
 - 版本：`PrtScr.App.csproj` `<Version>1.1.0</Version>`，`app.manifest` `1.1.0.0`。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`scripts/publish.ps1 -Version 1.1.0` 通过 PRI/XBF 检查与 `--smoke`，发布目录 72.9 MB、zip 29.2 MB。
-- 待办：提交并打 tag `v1.1.0`、推送触发 Release workflow、核对 Latest 与资产、下载回读后放一份到 `C:\Users\asus\DeskBox\我的桌面`。
+- 发布：提交 `7adc311`、tag `v1.1.0` 已推送；Release workflow 39971152298 成功；https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.1.0 为 Latest（非 draft/prerelease），资产 `IshWY-1.1.0-win-x64.zip` 30,645,339 字节、sha256 `619069083d41bd6e03e7f40f30207fbbd314d74777f672af9ecf2693e810d55c`；下载回读一致，已复制到 `C:\Users\asus\DeskBox\我的桌面\IshWY-1.1.0-win-x64.zip`。本地发布 zip 与 CI 资产因压缩非确定性哈希不同，以 Release 资产为准。
 
 ## 5. 踩坑与约定
 
@@ -542,6 +542,7 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-23 深夜十四（Debug PID 49596，原话「很好！都没问题！收工！」）：①提示框不再有蓝框（真实提示与编辑预览都没有）；②淡出时不再出现黑色矩形，而是维持/透出当前桌面画面，亚克力/云母/液态玻璃/纯色都试；③淡入也不黑；④显示时长与淡入/淡出毫秒设置仍生效；⑤提示仍不抢焦点、不挡鼠标。
 - [x] 主人验收 2026-10-23 深夜十一（原话「你要我测的五个做的都达到了我的预期，都做的很好，继续保持」）：跟随主题色时 HEX 框与说明正确；切换档位不再闪黑窗；显示/淡入/淡出时长可调；编辑器字号、材质、不透明度可预览并随保存落盘，取消不保存；九宫格/自定义位置与预览仍正常。验收后转入深夜十二的亚克力、通知统一与快捷档位延时。
 
+- [x] v1.1.0 发布（2026-10-23 深夜十五）：版本 1.1.0；README 按主人约束只写最新功能（选区缩放/移动与主题色边框、七热键单项/全部恢复、`[`/`]` 切窗、快捷档位延时、Tab 保留选区、提示与通知整节与新增配置字段），未写版本历史/开发过程、未改主人段落；提交 `7adc311`、tag `v1.1.0`；workflow 39971152298 成功；Release 为 Latest，资产 30,645,339 字节、sha256 `619069083d41bd6e03e7f40f30207fbbd314d74777f672af9ecf2693e810d55c`，DeskBox 已有校验副本。
 - [x] v1.0.0 初始状态：全新配置 Alt+A / Alt+D、「常规截图」、Windows OCR、开机自启动关闭、关闭驻留托盘；全新目录 `--smoke` 与 `data/config.json` 已核对，旧配置不迁移。
 - [x] v1.0.0 瘦身包：partial trim + 删除 57 个可选组件 / 37 个 `.winmd` / 82 个语言目录，目录 72.7 MB、zip 30,588,110 字节（29.2 MB），sha256 `ad1e6568f61860f8c40d94e2c307702a9577272b7fdf3331d66466c90235fd50`；Debug 构建 0 错误，Debug 与解压包 `--smoke` 均退出 0。
 - [x] GitHub Release：旧 `v0.1.0` Release 已删除；`v1.0.0` 已发布并上传 `IshWY-1.0.0-win-x64.zip`（30,588,110 字节，sha256 一致），https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。
