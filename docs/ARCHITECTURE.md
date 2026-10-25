@@ -28,8 +28,8 @@
 ## 3. 关键模块
 
 - `src/PrtScr.App/MainWindow.xaml.cs` + `MainWindow.*.cs`：主文件只留字段、构造、OnLoaded、导航、内存计时与状态；PinSettings / CaptureSettings / ToastSettings / Windows / Ocr / Hotkeys / Capture / Appearance 八个 partial 分别承载设置页事件、截图协调与入口。
-- `src/PrtScr.App/Views/CaptureOverlayWindow.xaml.cs`：取景器输入、候选窗口、选区几何、HUD、放大取色器、确认流程。
-- `src/PrtScr.App/Views/NativePinWindow.cs` 与 `NativePinWindow.Edit.cs`：分层贴图窗口、拖动/缩放、标注、裁剪、历史导航。
+- `src/PrtScr.App/Views/CaptureOverlayWindow.xaml.cs` + `CaptureOverlayWindow.Selection/Mode/Capture/Loupe/Hud.cs`：主文件留字段、构造与冻结帧；Selection 负责指针、移动缩放、悬停与滚轮切窗，Mode 负责取景模式与窗口包含，Capture 负责键盘、确认、裁剪与保存，Loupe 负责取色器，Hud 负责提示、可视状态与几何辅助。
+- `src/PrtScr.App/Views/NativePinWindow.cs` + `NativePinWindow.Window/Interaction/Commands/Render.cs` 与 `NativePinWindow.Edit.cs` + `NativePinWindow.EditInput/EditApply/EditRender/EditPaint.cs`：Window 负责创建、消息循环与任务栏，Interaction 负责滚轮、吸附、菜单、裁剪与另存，Commands 负责命令、穿透与导航，Render 负责分层窗口与 GDI；EditInput 负责指针绘制，EditApply 负责应用与文字编辑，EditRender 负责合成/形状/工具栏，EditPaint 负责图标、调色盘与马赛克。
 - `src/PrtScr.App/Views/HistoryWindow.xaml.cs` + `HistoryWindow.Selection.cs` + `HistoryWindow.Actions.cs`：主文件留分类、缩略图、摘要与刷新；Selection 负责选择/右键/拖出/键盘，Actions 负责复制/贴图/标注/另存为/删除/清空/打开文件夹。
 - `src/PrtScr.Core/`：不依赖 WinUI 的纯规则与模型；`ConfigService` 的基准目录与日志可注入，`PinBehaviorRules` / `HotkeyText` / `ColorRules` / `CaptureDelayRules` / `HistoryItem` 可脱离窗口单测。
 - `src/PrtScr.App/Services/`：热键注册、采集历史、贴图服务、Esc 仲裁、文件保存、提示背景、启动项等依赖 WinRT/Windows 的服务；可复用规则委托给 Core，不在 App 里复制第二份。
