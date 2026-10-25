@@ -51,6 +51,8 @@
 
 | ★ | 代码优化 Phase 2：取景器与贴图窗口拆分（2026-10-25 深夜） | ✅ 主人 2026-10-25 23:44 验收通过（原话「很好，完全没问题！」；Debug PID 50612 回归项未逐条记录）：`CaptureOverlayWindow.xaml.cs` 2260→464 行，新增 Selection 616 / Mode 152 / Capture 495 / Loupe 230 / Hud 439；`NativePinWindow.cs` 1583→514 行，新增 Window 404 / Interaction 280 / Commands 146 / Render 323；`NativePinWindow.Edit.cs` 1548→380 行，新增 EditInput 232 / EditApply 254 / EditRender 507 / EditPaint 234。全部按原文件行段切分，不改方法体；第一次切分把 `RenderAndPresent` 截断导致 17 个语法错误，已从 HEAD 原文重新切分修复。构建 0 错误 0 警告（14.54s）、测试 77/77（88ms）、smoke 退出 0、五个热键 register=0x1；只改结构，待主人回归取景器/贴图/热键/设置/历史/OCR |
 
+| ★ | v1.3.0 打包启动修复（2026-10-26 凌晨） | ✅ 主人 2026-10-26 00:25 确认修复包能正常打开（原话「好,能打开,继续吧」），随 v1.3.0 发布：v1.3.0 裁剪包启动报 `COMException (0x8007007E)`，调用栈落在 `NavigationView.set_SelectedItem` → `MainWindow..ctor`；根因是 `publish.ps1` 删掉了 `Microsoft.UI.Xaml.Phone.dll`，而 NavigationView 在选中首项时会动态加载它。旧 `--smoke` 因后台线程无条件 `ExitProcess(0)` 假通过。已保留 Phone.dll，并让 smoke 在 `InitializeComponent`/`OnLaunched` 异常时返回 1。重构后构建 0 错误 0 警告（16.41s），重打包 56 个可选组件/37 winmd/82 语言目录被移除，zip 31,144,289 字节、sha256 `50020596…b7f083b5a`，zip 内含 Phone.dll 且无 data；解压启动 PID 20632 正常，五个热键 `register=0x1`。修复随 v1.3.0 提交、打 tag 并发布 |
+
 | ★ | v1.0.0 发布与二次瘦身（2026-10-22 凌晨） | ✅ 已发布：https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.0.0 。首次启动默认 Alt+A / Alt+D、常规截图、Windows OCR、开机自启关闭；`PublishTrimmed=true` + `TrimMode=partial`，删除 57 个 App SDK 可选组件/37 个 `.winmd`/82 个语言目录；发布目录 72.7 MB、zip 30,588,110 字节（sha256 `ad1e6568…35fd50`）；全新配置、包内 `--smoke`、Release 资产 SHA256 均已核对 |
 
 | ★ | 滚轮切窗提示与窗口模式选区移动（2026-10-22 深夜七） | ✅ 已纳入 v1.0.1 覆盖发布（主人按小插曲处理）：窗口/常规模式选区都可用中键或左键拖动；整窗选区移动后转常规截图并从冻结画面裁切并 toast；窗口局部选区限制在原窗口矩形内、仍截窗口本体；空白处按滚轮不再起框；HUD 有选区显示「拖动选区 移动（中键/左键）」、整窗追加「滚轮 切窗」，无选区显示「滚轮 切换窗口」；构建 0 错误、smoke 通过 |

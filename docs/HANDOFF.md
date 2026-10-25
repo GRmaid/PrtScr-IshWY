@@ -400,6 +400,16 @@ FullscreenBypass: 已归还原前台
 - 验证：`dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore` 退出 0；`dotnet build PrtScr.sln -c Debug --nologo` 0 错误 0 警告（14.54s）；`dotnet test PrtScr.sln -c Debug --no-build --nologo` 77/77（88ms）；`IshWY.exe --smoke` 退出 0，五个热键 `register=0x1`、取景器预创建、`Memory[startup] ws=176MB private=106MB managed=4MB`。主人 2026-10-25 23:44 回归「很好，完全没问题！」通过（回归项未逐条记录），本批提交推送。
 - 边界：只改文件归属与格式，不改取景器输入语义、贴图 GDI 绘制、采集引擎、提示合成或配置字段；交互仍需主人按 §6 回归。
 
+### v1.3.0 打包与包内启动修复（2026-10-26 凌晨）
+
+- 触发：v1.3.0 本地包刚构建完，主人反馈「IshWY又报错了」。Debug 构建启动正常，只有裁剪后的便携包失败；系统事件与 WER 没有对应崩溃记录，包内也没有 `data\logs`（从未正常启动）。
+- 复现：直接运行包内 `IshWY.exe --smoke` 得到 `OnLaunched 异常: System.Runtime.InteropServices.COMException (0x8007007E)`，调用栈为 `ABI.Microsoft.UI.Xaml.Controls.INavigationViewMethods.set_SelectedItem` → `Microsoft.UI.Xaml.Controls.NavigationView.set_SelectedItem` → `PrtScr.App.MainWindow..ctor` → `PrtScr.App.App.OnLaunched`。缺少的是 `Microsoft.UI.Xaml.Phone.dll`：`NavigationView` 在 `SettingsNav.SelectedItem = HomeNavItem`（`MainWindow.xaml.cs:80`）时会动态加载它。
+- 旧 smoke 为什么假通过：后台冒烟线程 3 秒后无条件 `PInvoke.ExitProcess(0)`，即使 `OnLaunched` 已经异常并弹出错误框也会被强行按 0 退出；publish 的「冒烟通过」因此不能证明窗口真的创建成功。
+- 修复：`scripts/publish.ps1` 不再从 `$trimPatterns` 删除 `Microsoft.UI.Xaml.Phone.dll`，并写明 NavigationView 依赖；`App.xaml.cs` 增加 `IsSmokeRequested()`，`InitializeComponent` 与 `OnLaunched` 的 catch 在 smoke 模式下调用 `PInvoke.ExitProcess(1)`，正常模式仍弹错误框；冒烟线程复用同一判断。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 退出 0、0 错误、0 警告（16.41s）；重新执行 `pwsh scripts/publish.ps1 -Version 1.3.0` 退出 0，移除 56 个可选组件（约 64 MB）/37 个 winmd/82 个语言目录，包目录 74.2 MB；新 zip 31,144,289 字节、sha256 `50020596d6781e8224267ad0be93466ec40a9d05e8cbba09dbcc920b7f083b5a`，zip 内含 `Microsoft.UI.Xaml.Phone.dll` 且无 `data`。
+- 实机包验证：把 zip 解压到 `artifacts/IshWY-1.3.0-verify` 后正常启动，PID 20632，标题「实践小梅IshWY 设置」，日志有 `OnLaunched: window created` / `window activated`、五个热键 `register=0x1`、`Memory[startup] ws=154MB private=101MB managed=2MB`，无 `OnLaunched 异常`。
+- 状态：主人 2026-10-26 00:25 确认修复包能正常打开（原话「好,能打开,继续吧」）。本修复与 v1.3.0 版本号、README、发布脚本在同一提交中提交并发布，发布结果见本节下方。
+
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
 - 主人确认的首次启动状态：窗口截图 `Alt+A`、全屏快速截图 `Alt+D`、默认「常规截图」、默认 Windows OCR（Umi 默认关闭）、开机自启动默认关闭、关闭主窗口驻留托盘。只影响全新配置；旧配置不迁移、不覆盖。
@@ -681,3 +691,4 @@ FullscreenBypass: 已归还原前台
 - [x] 主人 2026-10-25 22:50 接受 Phase 0 与大类拆分并继续（原话「没问题，继续吧」；Debug PID 35724 未逐项回归）：十页导航/主页四卡/历史摘要、七个热键录制删除恢复、设置读写、历史选择与拖出、贴图/OCR/全屏游戏快照均按结构拆分保持原行为；`dotnet build` 0 错误 0 警告、`dotnet format whitespace ... --verify-no-changes` 通过。
 - [x] 主人验收 2026-10-25 23:17 代码优化 Phase 1（Debug PID 46388，原话「很好，继续吧」；回归项未逐条记录）：① 十页导航、主页四卡与历史摘要；② 七个热键录制/删除/恢复、取景器键盘与托盘；③ 截图行为/贴图来源/文字背景/提示/外观设置可读写并落盘；④ 历史窗选择/右键多选/单张与整批拖出/删除确认/清空分类；⑤ 贴图、OCR、全屏游戏快照不回归；⑥ `dotnet test PrtScr.sln -c Debug --no-build` 77/77 通过。
 - [x] 主人验收 2026-10-25 23:44 代码优化 Phase 2（Debug PID 50612，原话「很好，完全没问题！」；回归项未逐条记录）：① 十页导航/主页四卡/历史摘要；② 七个热键录制删除恢复、取景器 Tab/Esc/Enter/O/Ctrl+S 与托盘；③ 取景器两种模式框选/选窗/移动/缩放/HUD/放大镜/取消与确认；④ 贴图拖动/滚轮缩放/右键菜单/标注撤销清空完成另存/裁剪/OCR/左右切图；⑤ 截图行为/贴图来源/文字背景/提示/外观设置读写落盘，历史选择与整批拖出、删除确认；⑥ `dotnet build` 0 警告、`dotnet test` 77/77、format verify 0。
+- [x] 主人 2026-10-26 00:25 确认 v1.3.0 便携包启动修复（已解压运行 PID 20632，标题「实践小梅IshWY 设置」，原话「好,能打开,继续吧」；托盘/热键/十页导航未逐项复述）：直接打开包内 `IshWY.exe` 不再报「应用无法启动或已意外停止」；关闭再开与桌面副本按同包验证。修复随 v1.3.0 发布。

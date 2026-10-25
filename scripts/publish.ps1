@@ -90,10 +90,12 @@ $trimPatterns = @(
     'Microsoft.Windows.Widgets*.winmd',
     'Microsoft.DiaSymReader.Native.amd64.dll',
     # 以下组件本应用从未加载：调试支持、WebView2、AI 推理周边、通知代理、工作负载管理。
+    # 注意：Microsoft.UI.Xaml.Phone.dll 不能删。NavigationView 在设置页初始化选中项时会
+    # 动态加载它，删掉后正常启动会抛 COMException 0x8007007E（模块找不到），而 --smoke
+    # 因定时强退曾掩盖该错误。
     'mscordaccore*.dll',
     'mscordbi.dll',
     'createdump.exe',
-    'Microsoft.UI.Xaml.Phone.dll',
     'Microsoft.UI.Designer.dll',
     'Microsoft.Web.WebView2.Core.dll',
     'WebView2Loader.dll',

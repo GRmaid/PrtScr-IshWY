@@ -37,6 +37,8 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"App: InitializeComponent 失败 {ex}");
+            if (IsSmokeRequested())
+                PInvoke.ExitProcess(1);
             ShowFatal($"初始化界面失败，请确认 IshWY.pri 与 XBF 资源完整。\n\n{ex}");
             throw;
         }
@@ -112,7 +114,7 @@ public partial class App : Application
             // 冒烟测试：--smoke 启动 3 秒后自动退出，供 CI / 脚本验证启动链路。
             // 用独立线程而非 DispatcherTimer：不依赖 UI 消息泵，哪怕界面卡死也能退出。
             // 注：LaunchActivatedEventArgs.Arguments 对命令行启动不可靠，直接读进程命令行
-            if (Environment.GetCommandLineArgs().Any(a => a.Equals("--smoke", StringComparison.OrdinalIgnoreCase)))
+            if (IsSmokeRequested())
             {
                 new Thread(() =>
                 {
@@ -139,6 +141,10 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"OnLaunched 异常: {ex}");
+            // 冒烟测试必须真实反映启动失败：此前定时线程会无条件 ExitProcess(0)，
+            // 导致包内缺少 NavigationView 依赖时仍显示“冒烟通过”。
+            if (IsSmokeRequested())
+                PInvoke.ExitProcess(1);
             ShowFatal(ex.ToString());
             Exit();
         }
@@ -203,6 +209,10 @@ public partial class App : Application
         };
         thread.Start();
     }
+
+    /// <summary>命令行是否带 --smoke；冒烟失败必须返回非 0，供 CI/打包脚本拦截。</summary>
+    private static bool IsSmokeRequested()
+        => Environment.GetCommandLineArgs().Any(a => a.Equals("--smoke", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>M0 诊断：致命异常直接弹窗（日志在部分启动环境下不可用）。</summary>
     private static void ShowFatal(string text)
