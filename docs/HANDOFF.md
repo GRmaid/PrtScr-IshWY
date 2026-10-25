@@ -344,9 +344,9 @@ FullscreenBypass: 已归还原前台
 
 - 版本：`PrtScr.App.csproj` `<Version>` 1.1.0 → 1.2.0；README「当前最新版本」与下载文件名同步为 v1.2.0 / `IshWY-1.2.0-win-x64.zip`，未写版本历史或开发过程，主人个人段落未改。
 - 内容：贴图来源四档与文字贴图（`pinBehavior`/`pinTextBackground`）、Aevrilen 社区 UI 合并（NavigationView 十页、历史确认与真实张数、OCR 复制状态）、第二轮 UI 美化（主题标题栏与根背景、危险色、快捷键 InfoBar、外观预览、OCR 分级/转圈、关于页操作、裁剪 HUD 去重），主页侧条按主人意见全部撤回。
-- 发布构建：`pwsh scripts/publish.ps1 -Version 1.2.0` 退出 0；`IshWY.pri` + 9 个 `.xbf`；移除 57 个可选组件、37 个 winmd、82 个语言目录；发布目录 73 MB；zip 30,696,742 字节，sha256 `269e2ddc920bc54bd22572258ba4f9e3ceae0272aab0645b46d89261b18cbabf`；包内 `--smoke` 通过。仅本地构建证据，CI 资产与 Release 状态待回读。
+- 发布构建：`pwsh scripts/publish.ps1 -Version 1.2.0` 退出 0；`IshWY.pri` + 9 个 `.xbf`；移除 57 个可选组件、37 个 winmd、82 个语言目录；发布目录 73 MB；本地 zip 30,696,742 字节，sha256 `269e2ddc920bc54bd22572258ba4f9e3ceae0272aab0645b46d89261b18cbabf`；包内 `--smoke` 通过。
+- 发布：提交 `ea25570`、tag `v1.2.0`、Release workflow 40181482458 成功；https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.2.0 为 Latest（非 draft/pre），GitHub 资产 30,696,712 字节、sha256 `112e6d8d06d7fe69d1762c3df63c4de799b5da8a18061e437ef1f6ace69118ae`，下载回读一致；`C:\Users\asus\DeskBox\我的桌面\IshWY-1.2.0-win-x64.zip` 同哈希。
 - 发布注意：`--smoke` 会把 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY` 指向测试副本；本轮已恢复为 Debug 路径。全新配置/旧配置迁移未在本轮重测。
-- 待办：提交版本号与本文档 → 推送 main → tag `v1.2.0` → 等 Release workflow → 回读 Latest 与资产 sha256 → 桌面校验副本 → 补发布链接。
 
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
