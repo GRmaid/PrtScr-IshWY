@@ -6,7 +6,9 @@
 
 | 项目 | 职责 | 允许依赖 |
 | --- | --- | --- |
-| `PrtScr.App` | WinUI 3 应用、设置窗、取景器、贴图、历史、提示、托盘 | Capture、Ocr、Interop |
+| `PrtScr.App` | WinUI 3 应用、设置窗、取景器、贴图、历史、提示、托盘 | Core、Capture、Ocr、Interop |
+| `PrtScr.Core` | 纯规则层：配置读写、贴图来源、热键文本、颜色解析、延时档位、历史项模型 | 无 |
+| `PrtScr.Core.Tests` | Core 的 xUnit 单元测试 | Core |
 | `PrtScr.Capture` | WGC、DXGI Desktop Duplication、BitBlt、光标绘制 | Interop |
 | `PrtScr.Ocr` | Windows OCR 与 Umi-OCR 客户端 | 无 |
 | `PrtScr.Interop` | CsWin32 生成的 Win32 绑定与少量共享原生声明 | 无 |
@@ -29,7 +31,8 @@
 - `src/PrtScr.App/Views/CaptureOverlayWindow.xaml.cs`：取景器输入、候选窗口、选区几何、HUD、放大取色器、确认流程。
 - `src/PrtScr.App/Views/NativePinWindow.cs` 与 `NativePinWindow.Edit.cs`：分层贴图窗口、拖动/缩放、标注、裁剪、历史导航。
 - `src/PrtScr.App/Views/HistoryWindow.xaml.cs` + `HistoryWindow.Selection.cs` + `HistoryWindow.Actions.cs`：主文件留分类、缩略图、摘要与刷新；Selection 负责选择/右键/拖出/键盘，Actions 负责复制/贴图/标注/另存为/删除/清空/打开文件夹。
-- `src/PrtScr.App/Services/`：配置、热键、采集历史、贴图服务、Esc 仲裁、文件保存、提示背景、启动项等。
+- `src/PrtScr.Core/`：不依赖 WinUI 的纯规则与模型；`ConfigService` 的基准目录与日志可注入，`PinBehaviorRules` / `HotkeyText` / `ColorRules` / `CaptureDelayRules` / `HistoryItem` 可脱离窗口单测。
+- `src/PrtScr.App/Services/`：热键注册、采集历史、贴图服务、Esc 仲裁、文件保存、提示背景、启动项等依赖 WinRT/Windows 的服务；可复用规则委托给 Core，不在 App 里复制第二份。
 - `src/PrtScr.App/Views/`：WinUI 窗口与卡片视图；窗口只做展示和输入编排，可复用规则优先下沉到 `Services`。
 
 ## 4. 运行数据
@@ -51,9 +54,10 @@
 
 ## 6. 验证方式
 
-当前没有自动化测试项目，验收顺序是：
+`PrtScr.Core.Tests` 覆盖纯规则与配置迁移；窗口、采集引擎与交互仍靠构建、冒烟和主人实机验收。顺序是：
 
 1. `dotnet build PrtScr.sln -c Debug --nologo`：0 错误；警告应为 0。
-2. `dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore`：通过。
-3. `IshWY.exe --smoke`：退出码 0，日志里五个热键 `register=0x1`，overlay pre-created。
-4. 交互与性能由主人在真实桌面验证；不要用合成按键或后台 UIA 代替。
+2. `dotnet test PrtScr.sln -c Debug --no-build --nologo`：全部通过（当前 77 个用例）。
+3. `dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore`：通过。
+4. `IshWY.exe --smoke`：退出码 0，日志里五个热键 `register=0x1`，overlay pre-created。
+5. 交互与性能由主人在真实桌面验证；不要用合成按键或后台 UIA 代替。

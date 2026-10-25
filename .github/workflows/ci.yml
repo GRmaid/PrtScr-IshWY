@@ -21,6 +21,9 @@ jobs:
       - name: Build (Debug)
         run: dotnet build PrtScr.sln -c Debug --nologo
 
+      - name: Run unit tests
+        run: dotnet test PrtScr.sln -c Debug --no-build --nologo
+
       - name: Check formatting
         run: dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore
 

@@ -29,6 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\PrtScr.Core\PrtScr.Core.csproj" />
     <ProjectReference Include="..\PrtScr.Capture\PrtScr.Capture.csproj" />
     <ProjectReference Include="..\PrtScr.Ocr\PrtScr.Ocr.csproj" />
     <ProjectReference Include="..\PrtScr.Interop\PrtScr.Interop.csproj" />

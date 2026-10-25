@@ -4,43 +4,6 @@ using System.Text.Json.Serialization;
 
 namespace PrtScr.App.Services;
 
-/// <summary>截图历史的分组模式：窗口截图按进程再分组，常规截图单独一组，早期无元数据文件归入未分类。</summary>
-public enum HistoryCaptureMode
-{
-    Window,
-    Normal,
-    Legacy,
-    PinCrop,
-}
-
-/// <summary>一条本机截图历史。</summary>
-public sealed record HistoryItem(
-    string FilePath,
-    DateTime CreatedAt,
-    long SizeBytes,
-    int Width,
-    int Height,
-    HistoryCaptureMode Mode,
-    string ProcessName,
-    string WindowTitle)
-{
-    public string FileName => Path.GetFileName(FilePath);
-
-    public string DisplayProcess => string.IsNullOrWhiteSpace(ProcessName) ? "未知进程" : ProcessName;
-
-    public string Source => Mode switch
-    {
-        HistoryCaptureMode.Window => $"窗口 · {DisplayProcess}",
-        HistoryCaptureMode.Normal => "常规截图",
-        HistoryCaptureMode.PinCrop => "贴图裁剪",
-        _ => "早期截图",
-    };
-
-    public string CategoryKey => Mode == HistoryCaptureMode.Window
-        ? $"window:{DisplayProcess}"
-        : $"mode:{Mode}";
-}
-
 /// <summary>
 /// 本机截图历史：PNG 与同名 <c>.png.json</c> 元数据都写在程序目录 data/history。
 /// 窗口截图按“进程”分组保留，常规/早期各一组；每个分类默认 30 张，可由设置调整。
@@ -60,15 +23,20 @@ public sealed class CaptureHistoryService
 
     private readonly object _sync = new();
 
+    /// <summary>默认单例使用程序目录 data/history；测试可传入临时目录。</summary>
+    public CaptureHistoryService(string? storageDirectory = null)
+    {
+        StorageDirectory = storageDirectory ?? Path.Combine(AppContext.BaseDirectory, "data", "history");
+    }
+
     public static CaptureHistoryService Instance { get; } = new();
+
+    public string StorageDirectory { get; }
 
     /// <summary>历史文件新增/修剪后触发；可能来自后台线程，订阅方自行切回 UI 线程。</summary>
     public event Action? HistoryChanged;
 
     private void NotifyHistoryChanged() => HistoryChanged?.Invoke();
-
-    public static string StorageDirectory => Path.Combine(
-        AppContext.BaseDirectory, "data", "history");
 
     public static int PerCategoryLimit =>
         Math.Clamp(App.Config.Current.HistoryPerCategory, 1, 200);
@@ -243,7 +211,7 @@ public sealed class CaptureHistoryService
         return cleared;
     }
 
-    private static void PruneLocked(int limit)
+    private void PruneLocked(int limit)
     {
         if (limit < 1)
             return;
@@ -390,7 +358,7 @@ public sealed class CaptureHistoryService
         }
     }
 
-    private static bool IsInsideStorage(string path)
+    private bool IsInsideStorage(string path)
     {
         try
         {

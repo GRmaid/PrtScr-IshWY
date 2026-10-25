@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 纯 .NET 规则层：不依赖 WinUI / Windows App SDK，便于单元测试。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>PrtScr.Core</RootNamespace>
+    <AssemblyName>PrtScr.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

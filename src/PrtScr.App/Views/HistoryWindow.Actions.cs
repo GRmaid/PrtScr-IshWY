@@ -330,11 +330,11 @@ public sealed partial class HistoryWindow
     {
         try
         {
-            Directory.CreateDirectory(CaptureHistoryService.StorageDirectory);
+            Directory.CreateDirectory(CaptureHistoryService.Instance.StorageDirectory);
             Process.Start(new ProcessStartInfo
             {
                 FileName = "explorer.exe",
-                Arguments = $"\"{CaptureHistoryService.StorageDirectory}\"",
+                Arguments = $"\"{CaptureHistoryService.Instance.StorageDirectory}\"",
                 UseShellExecute = true
             });
             StatusText.Text = "已在资源管理器中打开 data\\history";

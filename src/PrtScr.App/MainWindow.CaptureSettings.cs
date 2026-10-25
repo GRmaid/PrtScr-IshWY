@@ -160,28 +160,14 @@ public sealed partial class MainWindow
         return index;
     }
 
-    private static string? NormalizeHexColor(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return null;
-        var value = text.Trim();
-        if (!value.StartsWith('#'))
-            value = "#" + value;
-        if (value.Length != 7 || !uint.TryParse(value[1..],
-                System.Globalization.NumberStyles.HexNumber,
-                System.Globalization.CultureInfo.InvariantCulture, out _))
-            return null;
-        return value.ToUpperInvariant();
-    }
+    private static string? NormalizeHexColor(string? text) => ColorRules.NormalizeHexColor(text);
 
     private static Windows.UI.Color? ParseHexColor(string? text)
     {
-        var normalized = NormalizeHexColor(text);
-        if (normalized is null)
-            return null;
-        var rgb = uint.Parse(normalized[1..], System.Globalization.NumberStyles.HexNumber,
-            System.Globalization.CultureInfo.InvariantCulture);
-        return Windows.UI.Color.FromArgb(0xFF, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+        var rgb = ColorRules.ParseRgb(text);
+        return rgb is null
+            ? null
+            : Windows.UI.Color.FromArgb(0xFF, rgb.Value.R, rgb.Value.G, rgb.Value.B);
     }
 
 
@@ -277,23 +263,11 @@ public sealed partial class MainWindow
         App.Log($"CaptureOptions: gameFullscreenQuick={enabled}");
     }
 
-    private static int DelayToIndex(int seconds) => seconds switch
-    {
-        3 => 1,
-        5 => 2,
-        10 => 3,
-        _ => 0,
-    };
+    private static int DelayToIndex(int seconds) => CaptureDelayRules.ToIndex(seconds);
 
-    private static int DelayFromIndex(int index) => index switch
-    {
-        1 => 3,
-        2 => 5,
-        3 => 10,
-        _ => 0,
-    };
+    private static int DelayFromIndex(int index) => CaptureDelayRules.FromIndex(index);
 
-    private static int NormalizeDelay(int seconds) => seconds is 3 or 5 or 10 ? seconds : 0;
+    private static int NormalizeDelay(int seconds) => CaptureDelayRules.Normalize(seconds);
 
     private void UpdateCaptureOptions()
     {

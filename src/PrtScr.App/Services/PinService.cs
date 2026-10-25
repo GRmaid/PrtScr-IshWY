@@ -62,10 +62,10 @@ public sealed record PinPasteResult(PinPasteStatus Status, string Message)
 /// </summary>
 public static class PinService
 {
-    public const string BehaviorClipboard = "clipboard";
-    public const string BehaviorLatest = "latest";
-    public const string BehaviorText = "text";
-    public const string BehaviorOff = "off";
+    public const string BehaviorClipboard = PinBehaviorRules.Clipboard;
+    public const string BehaviorLatest = PinBehaviorRules.Latest;
+    public const string BehaviorText = PinBehaviorRules.Text;
+    public const string BehaviorOff = PinBehaviorRules.Off;
 
     private static readonly ConcurrentDictionary<nint, PinRecord> Registry = new();
 
@@ -149,31 +149,13 @@ public static class PinService
     }
 
     /// <summary>把设置里的贴图行为归一化成四种已知模式。</summary>
-    public static string NormalizeBehavior(string? value) => value?.Trim().ToLowerInvariant() switch
-    {
-        BehaviorLatest => BehaviorLatest,
-        BehaviorText => BehaviorText,
-        BehaviorOff => BehaviorOff,
-        _ => BehaviorClipboard,
-    };
+    public static string NormalizeBehavior(string? value) => PinBehaviorRules.Normalize(value);
 
     /// <summary>设置下拉框 / 状态栏用的中文名。</summary>
-    public static string DescribeBehavior(string? value) => NormalizeBehavior(value) switch
-    {
-        BehaviorLatest => "只贴最新截图",
-        BehaviorText => "只贴剪贴板文字",
-        BehaviorOff => "关闭贴图",
-        _ => "剪贴板优先",
-    };
+    public static string DescribeBehavior(string? value) => PinBehaviorRules.Describe(value);
 
     /// <summary>首页贴图卡片与托盘菜单用的短说明。</summary>
-    public static string DescribeBehaviorTarget(string? value) => NormalizeBehavior(value) switch
-    {
-        BehaviorLatest => "直接贴出截图历史里最新的一张。",
-        BehaviorText => "把剪贴板里的文字贴成卡片。",
-        BehaviorOff => "已关闭贴图；可在设置「贴图」中开启。",
-        _ => "剪贴板有图贴图、有字贴字。",
-    };
+    public static string DescribeBehaviorTarget(string? value) => PinBehaviorRules.DescribeTarget(value);
 
     /// <summary>贴图热键与托盘入口统一走这里：按设置决定取剪贴板还是最新截图。</summary>
     public static async Task<PinPasteResult> PasteByBehaviorAsync()

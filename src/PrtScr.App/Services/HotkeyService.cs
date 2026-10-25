@@ -411,56 +411,9 @@ public sealed unsafe class HotkeyService : IDisposable
     }
 
     /// <summary>M0 用键名 → 虚拟键码；旧配置 hotkeyVk 为 0 时按 hotkeyKey 回退。</summary>
-    public static uint KeyNameToVirtualKey(string name) => name.ToUpperInvariant() switch
-    {
-        "F1" => 0x70,
-        "F2" => 0x71,
-        "F3" => 0x72,
-        "F4" => 0x73,
-        "F5" => 0x74,
-        "F6" => 0x75,
-        "F7" => 0x76,
-        "F8" => 0x77,
-        "F9" => 0x78,
-        "F10" => 0x79,
-        "F11" => 0x7A,
-        "F12" => 0x7B,
-        "PAUSE" => 0x13,
-        "SCROLL" => 0x91,
-        _ => 0x70,
-    };
+    public static uint KeyNameToVirtualKey(string name) => HotkeyText.KeyNameToVirtualKey(name);
 
     /// <summary>把 vk + 修饰键位掩码转成可展示文本，例如 "Ctrl + Alt + P"。</summary>
     public static string Describe(int vk, int modifiers)
-    {
-        if (vk == 0)
-            return "未设置";
-
-        var parts = new List<string>();
-        if ((modifiers & 2) != 0) parts.Add("Ctrl");
-        if ((modifiers & 1) != 0) parts.Add("Alt");
-        if ((modifiers & 4) != 0) parts.Add("Shift");
-        if ((modifiers & 8) != 0) parts.Add("Win");
-        if (vk != 0)
-        {
-            // OEM 键（[ ] ; = , - . / \ `）的 VirtualKey 名称在中文系统上不可读，
-            // 取景器的默认切窗键正好是 [ ]，这里统一映射成键帽字符。
-            var name = vk switch
-            {
-                0xDB => "[",
-                0xDD => "]",
-                0xBA => ";",
-                0xBB => "=",
-                0xBC => ",",
-                0xBD => "-",
-                0xBE => ".",
-                0xBF => "/",
-                0xC0 => "`",
-                0xDC => "\\",
-                _ => ((Windows.System.VirtualKey)vk).ToString(),
-            };
-            parts.Add(name);
-        }
-        return string.Join(" + ", parts);
-    }
+        => HotkeyText.Describe(vk, modifiers, v => ((Windows.System.VirtualKey)v).ToString());
 }

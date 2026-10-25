@@ -2,7 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace PrtScr.App.Services;
+namespace PrtScr.Core;
 
 public sealed class AppConfig
 {
@@ -201,9 +201,20 @@ public sealed class ConfigService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    private readonly Action<string>? _log;
+
+    /// <param name="baseDirectory">数据根目录；测试可传临时目录。默认程序目录，保持便携布局。</param>
+    /// <param name="log">日志回调；由 App 注入，Core 不反向依赖 UI。</param>
+    public ConfigService(string? baseDirectory = null, Action<string>? log = null)
+    {
+        BaseDirectory = baseDirectory ?? AppContext.BaseDirectory;
+        _log = log;
+    }
+
+    public string BaseDirectory { get; }
+
     // 便携式布局（Snipaste 同款）：配置放在程序目录 data/config.json，随软件走
-    private static string FilePath => Path.Combine(
-        AppContext.BaseDirectory, "data", "config.json");
+    public string FilePath => Path.Combine(BaseDirectory, "data", "config.json");
 
     public AppConfig Current { get; private set; } = new();
 
@@ -230,12 +241,12 @@ public sealed class ConfigService
                 }
                 Current.ConfigVersion = 2;
                 Save();
-                App.Log($"配置迁移到 v2: 贴图 {Current.PinHotkeyVk:X} / OCR {Current.OcrHotkeyVk:X}");
+                _log?.Invoke($"配置迁移到 v2: 贴图 {Current.PinHotkeyVk:X} / OCR {Current.OcrHotkeyVk:X}");
             }
         }
         catch (Exception ex)
         {
-            App.Log($"配置读取失败，使用默认值: {ex.Message}");
+            _log?.Invoke($"配置读取失败，使用默认值: {ex.Message}");
             Current = new AppConfig();
         }
     }
@@ -249,7 +260,7 @@ public sealed class ConfigService
         }
         catch (Exception ex)
         {
-            App.Log($"配置保存失败: {ex.Message}");
+            _log?.Invoke($"配置保存失败: {ex.Message}");
         }
     }
 }
