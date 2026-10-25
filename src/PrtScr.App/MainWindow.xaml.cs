@@ -7,7 +7,9 @@ using Windows.System;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PrtScr.App.Services;
+using System.Diagnostics;
 using System.IO;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
@@ -38,6 +40,7 @@ public sealed partial class MainWindow : Window
     private nint[] _historyLoweredPins = [];
     private nint[] _pinManagerLoweredPins = [];
     private CancellationTokenSource? _delayCts;
+    private int _ocrProbeBusy;
     private Views.HistoryWindow? _historyWindow;
     private Views.PinManagerWindow? _pinManagerWindow;
 
@@ -50,6 +53,7 @@ public sealed partial class MainWindow : Window
         Title = $"{AppInfo.Name} 设置";
 
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
+        WindowAppearance.ApplyTitleBar(this, (FrameworkElement)Content);
 
         // 设置窗 Esc = 收进托盘（与点关闭一致）
         var interceptor = new Services.KeyInterceptor(WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -263,12 +267,18 @@ public sealed partial class MainWindow : Window
             : $"{count} 张 · 窗口截图按进程分栏 · 每类保留 {limit} 张";
     }
 
-    /// <summary>设置页与首页共用一条可读状态，避免动作反馈只出现在折叠区里。</summary>
+    /// <summary>首页状态只显示通用动作反馈；快捷键页的反馈单独走 InfoBar，避免串台。</summary>
     private void SetStatus(string message)
     {
-        HotkeyStatusText.Text = message;
         if (HomeStatusText is not null)
             HomeStatusText.Text = message;
+    }
+
+    private void SetHotkeyStatus(string message, InfoBarSeverity severity = InfoBarSeverity.Informational)
+    {
+        HotkeyStatusBar.Severity = severity;
+        HotkeyStatusBar.Message = message;
+        HotkeyStatusBar.IsOpen = !string.IsNullOrWhiteSpace(message);
     }
 
     private void HistoryLimit_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -1634,7 +1644,7 @@ public sealed partial class MainWindow : Window
         _recordingAction = action;
         _recordingButton = button;
         button.Content = "按键…";
-        SetStatus($"正在录制「{HotkeyLabel(action)}」：请按下组合键，Esc 取消。");
+        SetHotkeyStatus($"正在录制「{HotkeyLabel(action)}」：请按下组合键，Esc 取消。");
         _ = button.Focus(FocusState.Programmatic);
     }
 
@@ -1651,7 +1661,7 @@ public sealed partial class MainWindow : Window
         if (vk == 0x1B)
         {
             ResetHotkeyRecording(button);
-            SetStatus("已取消录制快捷键。");
+            SetHotkeyStatus("已取消录制快捷键。");
             return;
         }
 
@@ -1667,25 +1677,25 @@ public sealed partial class MainWindow : Window
         var isFunctionKey = vk is >= 0x70 and <= 0x7B;
         if (mods == 0 && !isFunctionKey && !overlayOnly)
         {
-            SetStatus("请按住 Ctrl / Alt / Shift / Win 之一（F1–F12 可单独使用）");
+            SetHotkeyStatus("请按住 Ctrl / Alt / Shift / Win 之一（F1–F12 可单独使用）");
             return;
         }
 
         if (overlayOnly && (mods & (1 | 8)) != 0)
         {
-            SetStatus("取景器切窗键不支持 Alt / Win 修饰（Alt 会和取景操作冲突）");
+            SetHotkeyStatus("取景器切窗键不支持 Alt / Win 修饰（Alt 会和取景操作冲突）");
             return;
         }
 
         if (overlayOnly && IsReservedOverlayKey(vk, mods, out var reserved))
         {
-            SetStatus($"「{reserved}」是取景器固定按键，换一个");
+            SetHotkeyStatus($"「{reserved}」是取景器固定按键，换一个");
             return;
         }
 
         if (TryFindAnyHotkeyConflict(_recordingAction, vk, mods, out var other))
         {
-            SetStatus($"这个组合键已经给了「{other}」，换一个");
+            SetHotkeyStatus($"这个组合键已经给了「{other}」，换一个");
             ResetHotkeyRecording(button);
             return;
         }
@@ -1801,7 +1811,7 @@ public sealed partial class MainWindow : Window
 
         SetHotkeyText(action, "未设置");
         SyncHotkeyTexts();
-        SetStatus(action is "windowprev" or "windownext"
+        SetHotkeyStatus(action is "windowprev" or "windownext"
             ? $"已删除「{HotkeyLabel(action)}」按键；取景器内仍可用滚轮切窗，点「修改」可重新录制。"
             : $"已删除「{HotkeyLabel(action)}」快捷键；仍可用首页按钮或托盘菜单，点「修改」可重新录制。");
         App.Log($"Hotkey: 删除 {action}");
@@ -1930,14 +1940,12 @@ public sealed partial class MainWindow : Window
 
         if (TryFindAnyHotkeyConflict(action, vk, mods, out var other))
         {
-            SetStatus($"「{HotkeyLabel(action)}」的默认键被「{other}」占用，先调整那一项再恢复默认。");
-            HotkeyStatusText.Text = $"「{HotkeyLabel(action)}」默认键 {HotkeyService.Describe(vk, mods)} 与「{other}」冲突，未恢复。";
+            SetHotkeyStatus($"「{HotkeyLabel(action)}」的默认键被「{other}」占用，先调整那一项再恢复默认。");
             return;
         }
 
         ApplyHotkey(action, vk, mods);
-        SetStatus($"已把「{HotkeyLabel(action)}」恢复默认 {HotkeyService.Describe(vk, mods)}。");
-        HotkeyStatusText.Text = $"「{HotkeyLabel(action)}」已恢复默认。";
+        SetHotkeyStatus($"已把「{HotkeyLabel(action)}」恢复默认 {HotkeyService.Describe(vk, mods)}。");
         App.Log($"Hotkey: 恢复默认 {action}");
     }
 
@@ -1980,8 +1988,7 @@ public sealed partial class MainWindow : Window
         }
 
         SyncHotkeyTexts();
-        SetStatus("所有快捷键已恢复默认。");
-        HotkeyStatusText.Text = "所有快捷键已恢复默认。";
+        SetHotkeyStatus("所有快捷键已恢复默认。");
         App.Log("Hotkey: 全部恢复默认");
     }
 
@@ -1989,8 +1996,7 @@ public sealed partial class MainWindow : Window
     {
         if (vk != 0 && TryFindAnyHotkeyConflict(action, vk, mods, out var occupied))
         {
-            SetStatus($"这个组合键已经给了「{occupied}」，换一个");
-            HotkeyStatusText.Text = $"「{HotkeyService.Describe(vk, mods)}」与「{occupied}」冲突，未保存。";
+            SetHotkeyStatus($"这个组合键已经给了「{occupied}」，换一个");
             return;
         }
 
@@ -2006,7 +2012,7 @@ public sealed partial class MainWindow : Window
                 Services.EscOverPinHook.SetScreenshotKey(vk, mods);
                 _hotkey.Restart(vk, mods);
                 ScreenshotHotkeyText.Text = text;
-                SetStatus($"截图热键已设为 {text}");
+                SetHotkeyStatus($"截图热键已设为 {text}");
                 break;
 
             case "fullscreen":
@@ -2016,7 +2022,7 @@ public sealed partial class MainWindow : Window
                 Services.EscOverPinHook.SetFullScreenKey(vk, mods);
                 _hotkey.SetFullscreenKey(vk, mods);
                 FullHotkeyText.Text = text;
-                SetStatus($"全屏截图热键已设为 {text}");
+                SetHotkeyStatus($"全屏截图热键已设为 {text}");
                 break;
 
             case "pin":
@@ -2025,7 +2031,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 _hotkey.SetPinKey(vk, mods);
                 PinHotkeyText.Text = text;
-                SetStatus($"贴图热键已设为 {text}");
+                SetHotkeyStatus($"贴图热键已设为 {text}");
                 break;
 
             case "ocr":
@@ -2034,7 +2040,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 _hotkey.SetOcrKey(vk, mods);
                 OcrHotkeyText.Text = text;
-                SetStatus($"OCR 热键已设为 {text}");
+                SetHotkeyStatus($"OCR 热键已设为 {text}");
                 break;
 
             case "mode":
@@ -2044,7 +2050,7 @@ public sealed partial class MainWindow : Window
                 Services.EscOverPinHook.SetModeSwitchKey(vk, mods);
                 _hotkey.SetModeKey(vk, mods);
                 ModeHotkeyText.Text = text;
-                SetStatus($"切换截图档位热键已设为 {text}");
+                SetHotkeyStatus($"切换截图档位热键已设为 {text}");
                 break;
 
             case "windowprev":
@@ -2053,7 +2059,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 PushWindowSwitchKeys();
                 WindowPrevHotkeyText.Text = text;
-                SetStatus($"取景器「上一个窗口」已设为 {text}");
+                SetHotkeyStatus($"取景器「上一个窗口」已设为 {text}");
                 break;
 
             case "windownext":
@@ -2062,7 +2068,7 @@ public sealed partial class MainWindow : Window
                 App.Config.Save();
                 PushWindowSwitchKeys();
                 WindowNextHotkeyText.Text = text;
-                SetStatus($"取景器「下一个窗口」已设为 {text}");
+                SetHotkeyStatus($"取景器「下一个窗口」已设为 {text}");
                 break;
         }
 
@@ -2284,6 +2290,8 @@ public sealed partial class MainWindow : Window
             App.Config.Current.BackgroundOpacity = e.NewValue;
             App.Config.Save();
         }
+
+        UpdateBackgroundAppearance();
     }
 
     private void ApplyBackgroundFromConfig()
@@ -2300,6 +2308,62 @@ public sealed partial class MainWindow : Window
         {
             BackgroundImage.Source = null;
             BackgroundImage.Opacity = 0;
+        }
+
+        UpdateBackgroundAppearance();
+    }
+
+    private void UpdateBackgroundAppearance()
+    {
+        var path = App.Config.Current.BackgroundImagePath;
+        var hasImage = BackgroundImage.Source is not null;
+        BackgroundPreviewImage.Source = hasImage ? BackgroundImage.Source : null;
+        BackgroundFileNameText.Text = hasImage ? Path.GetFileName(path) : "默认背景（未设置图片）";
+        BackgroundOpacityText.Text = hasImage
+            ? $"不透明度 {BackgroundImage.Opacity * 100:0}%"
+            : "不透明度 —";
+        BackgroundOpacitySlider.IsEnabled = hasImage;
+        BackgroundDisabledHintText.Text = hasImage
+            ? "背景图会覆盖窗口底色；觉得文字对比度不够时，把不透明度调低或恢复默认。"
+            : "没有背景图时不透明度不可调；先点「选择背景图片…」。";
+    }
+
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+        => OpenDataFolder(Path.Combine(AppContext.BaseDirectory, "data", "logs"), "日志");
+
+    private void OpenDataFolder_Click(object sender, RoutedEventArgs e)
+        => OpenDataFolder(Path.Combine(AppContext.BaseDirectory, "data"), "数据");
+
+    private void OpenDataFolder(string path, string label)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            AboutStatusText.Text = $"已打开{label}文件夹：{path}";
+        }
+        catch (Exception ex)
+        {
+            AboutStatusText.Text = $"打开{label}文件夹失败：{ex.Message}";
+            App.Log($"About: 打开{label}文件夹失败 {ex.Message}");
+        }
+    }
+
+    private void CopyVersionInfo_Click(object sender, RoutedEventArgs e)
+    {
+        var info = $"{AppInfo.Name} v{typeof(App).Assembly.GetName().Version}\n{AppInfo.Tagline}\n分窗口截屏截图工具（IshWY.exe）";
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(info);
+            Clipboard.SetContent(package);
+            Clipboard.Flush();
+            AboutStatusText.Text = "已复制版本信息到剪贴板。";
+        }
+        catch (Exception ex)
+        {
+            AboutStatusText.Text = $"复制失败：{ex.Message}";
+            App.Log($"About: 复制版本信息失败 {ex.Message}");
         }
     }
 
@@ -2319,11 +2383,49 @@ public sealed partial class MainWindow : Window
 
     private async Task RefreshOcrStatusAsync()
     {
-        var windows = PrtScr.Ocr.WindowsOcrEngine.GetStatus();
-        var umi = await new PrtScr.Ocr.UmiOcrClient(App.Config.Current.UmiOcrPort).ProbeAsync();
+        if (Interlocked.Exchange(ref _ocrProbeBusy, 1) == 1)
+            return;
 
-        OcrStatusText.Text =
-            $"Windows OCR：{(windows.Available ? $"可用（{windows.LanguageCount} 种语言）" : "不可用（系统缺少 OCR 语言包）")}\n" +
-            $"Umi-OCR：{(umi.Online ? $"在线 ✓ 自动启用（端口 {umi.Port}）" : $"未运行（可选引擎，端口 {umi.Port} 未响应；未安装也能正常使用本软件）")}";
+        TestUmiButton.IsEnabled = false;
+        UmiTestRing.IsActive = true;
+        UmiTestRing.Visibility = Visibility.Visible;
+        try
+        {
+            var windows = PrtScr.Ocr.WindowsOcrEngine.GetStatus();
+            var umi = await new PrtScr.Ocr.UmiOcrClient(App.Config.Current.UmiOcrPort).ProbeAsync();
+            var prefer = App.Config.Current.PreferUmiOcr;
+
+            OcrStatusBar.Severity = !windows.Available
+                ? InfoBarSeverity.Error
+                : umi.Online && prefer
+                    ? InfoBarSeverity.Success
+                    : umi.Online
+                        ? InfoBarSeverity.Informational
+                        : InfoBarSeverity.Warning;
+            OcrStatusBar.Title = !windows.Available
+                ? "OCR 不可用：缺少 Windows 语言包"
+                : umi.Online && prefer
+                    ? "OCR 引擎就绪：Umi-OCR 优先"
+                    : umi.Online
+                        ? "OCR 引擎就绪：Umi-OCR 已在线"
+                        : "OCR 引擎就绪：使用 Windows OCR";
+            OcrStatusBar.Message =
+                $"Windows OCR：{(windows.Available ? $"可用（{windows.LanguageCount} 种语言）" : "不可用（系统缺少 OCR 语言包）")} · " +
+                $"Umi-OCR：{(umi.Online ? $"在线（端口 {umi.Port}）" : $"未运行（端口 {umi.Port} 未响应）")}";
+        }
+        catch (Exception ex)
+        {
+            OcrStatusBar.Severity = InfoBarSeverity.Error;
+            OcrStatusBar.Title = "OCR 状态检测失败";
+            OcrStatusBar.Message = ex.Message;
+            App.Log($"OCR: 状态检测失败 {ex.Message}");
+        }
+        finally
+        {
+            TestUmiButton.IsEnabled = true;
+            UmiTestRing.IsActive = false;
+            UmiTestRing.Visibility = Visibility.Collapsed;
+            Interlocked.Exchange(ref _ocrProbeBusy, 0);
+        }
     }
 }

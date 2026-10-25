@@ -5,13 +5,15 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:tb="using:H.NotifyIcon">
 
-    <Grid>
+    <Grid
+        x:Name="RootGrid"
+        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
         <Grid.Resources>
             <Style x:Key="ActionCardButtonStyle" TargetType="Button">
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Stretch" />
-                <Setter Property="MinHeight" Value="112" />
+                <Setter Property="MinHeight" Value="88" />
                 <Setter Property="Padding" Value="16" />
                 <Setter Property="CornerRadius" Value="12" />
             </Style>
@@ -21,12 +23,12 @@
                 <Setter Property="Margin" Value="0,0,0,2" />
             </Style>
             <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontSize" Value="16" />
                 <Setter Property="FontWeight" Value="SemiBold" />
-                <Setter Property="Margin" Value="0,4,0,0" />
+                <Setter Property="Margin" Value="0,10,0,0" />
             </Style>
             <Style x:Key="HintTextStyle" TargetType="TextBlock">
-                <Setter Property="Opacity" Value="0.62" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
             <Style x:Key="ActionCardDescriptionStyle" TargetType="TextBlock" BasedOn="{StaticResource HintTextStyle}">
@@ -52,6 +54,15 @@
                 <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
             </Style>
+            <Style x:Key="HotkeyEditButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Padding" Value="9,3" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
+            </Style>
             <Style x:Key="HotkeyIconButtonStyle" TargetType="Button">
                 <Setter Property="Width" Value="28" />
                 <Setter Property="Height" Value="28" />
@@ -62,6 +73,9 @@
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="6" />
+            </Style>
+            <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
             </Style>
             <Style x:Key="SettingsPageStyle" TargetType="StackPanel">
                 <Setter Property="Spacing" Value="12" />
@@ -81,9 +95,9 @@
         <NavigationView
             x:Name="SettingsNav"
             PaneDisplayMode="Auto"
-            ExpandedModeThresholdWidth="800"
+            ExpandedModeThresholdWidth="720"
             CompactModeThresholdWidth="0"
-            OpenPaneLength="200"
+            OpenPaneLength="168"
             IsSettingsVisible="False"
             IsBackButtonVisible="Collapsed"
             SelectionChanged="SettingsNav_SelectionChanged">
@@ -359,7 +373,7 @@
                                     AutomationProperties.HelpText="点击后按下新的组合键，Esc 取消录制"
                                     Grid.Row="1"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="screenshot"
                                     Click="HotkeyRecord_Click"
@@ -400,7 +414,7 @@
                                     AutomationProperties.HelpText="点击后按下新的组合键，Esc 取消录制"
                                     Grid.Row="2"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="fullscreen"
                                     Click="HotkeyRecord_Click"
@@ -441,7 +455,7 @@
                                     AutomationProperties.HelpText="点击后按下新的组合键，Esc 取消录制"
                                     Grid.Row="3"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="pin"
                                     Click="HotkeyRecord_Click"
@@ -482,7 +496,7 @@
                                     AutomationProperties.HelpText="点击后按下新的组合键，Esc 取消录制"
                                     Grid.Row="4"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="ocr"
                                     Click="HotkeyRecord_Click"
@@ -523,7 +537,7 @@
                                     AutomationProperties.HelpText="点击后按下新的组合键，Esc 取消录制"
                                     Grid.Row="5"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="mode"
                                     Click="HotkeyRecord_Click"
@@ -564,7 +578,7 @@
                                     AutomationProperties.HelpText="点击后按下新的按键，可用无修饰单键，Esc 取消录制"
                                     Grid.Row="6"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="windowprev"
                                     Click="HotkeyRecord_Click"
@@ -605,7 +619,7 @@
                                     AutomationProperties.HelpText="点击后按下新的按键，可用无修饰单键，Esc 取消录制"
                                     Grid.Row="7"
                                     Grid.Column="2"
-                                    MinWidth="72"
+                                    Style="{StaticResource HotkeyEditButtonStyle}"
                                     Content="修改"
                                     Tag="windownext"
                                     Click="HotkeyRecord_Click"
@@ -634,9 +648,11 @@
                                     Click="HotkeyReset_Click" />
                             </Grid>
                         </Border>
-                        <TextBlock
-                            x:Name="HotkeyStatusText"
-                            Style="{StaticResource HintTextStyle}" />
+                        <InfoBar
+                            x:Name="HotkeyStatusBar"
+                            IsOpen="False"
+                            IsClosable="False"
+                            Severity="Informational" />
                         <TextBlock
                             Text="小叉叉删除当前快捷键；旋转箭头只把这一项恢复默认。删除后仍可用主页按钮或托盘菜单，也可随时点「修改」重新录制。最后两行只在取景器打开时生效，可录成 [ 和 ] 这类无修饰键单键。"
                             Style="{StaticResource HintTextStyle}" />
@@ -812,7 +828,7 @@
                                 x:Name="CaptureProfileCombo"
                                 MinWidth="260"
                                 MaxWidth="420"
-                                HorizontalAlignment="Stretch"
+                                HorizontalAlignment="Left"
                                 SelectionChanged="CaptureProfileCombo_SelectionChanged">
                                 <ComboBoxItem Content="常规取景（冻屏后框选 / 选窗）" Tag="normal" />
                                 <ComboBoxItem Content="快捷全屏（直接复制到剪贴板）" Tag="quick" />
@@ -826,7 +842,7 @@
                                 x:Name="DefaultModeCombo"
                                 MinWidth="260"
                                 MaxWidth="420"
-                                HorizontalAlignment="Stretch"
+                                HorizontalAlignment="Left"
                                 SelectionChanged="DefaultModeCombo_SelectionChanged">
                                 <ComboBoxItem Content="窗口截图（抗遮挡，抓窗口本体）" Tag="window" />
                                 <ComboBoxItem Content="常规截图（所见即所得，可抓菜单/光标）" Tag="normal" />
@@ -1119,7 +1135,11 @@
                         <TextBlock x:Name="HistoryStatusText" Style="{StaticResource HintTextStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="打开截图历史" Click="OpenHistory_Click" />
-                            <Button x:Name="ClearHistoryButton" Content="清空全部历史…" Click="ClearHistory_Click" />
+                            <Button
+                                x:Name="ClearHistoryButton"
+                                Content="清空全部历史…"
+                                Style="{StaticResource DangerButtonStyle}"
+                                Click="ClearHistory_Click" />
                         </StackPanel>
                         <TextBlock
                             Text="清空会永久删除所有分类的历史截图（包括历史窗里没显示出来的较早截图），删除前会先确认数量。"
@@ -1145,10 +1165,31 @@
                         <TextBlock
                             Text="给界面换一张喜欢的背景图（背景图与不透明度会保存，重启后依然生效）。"
                             TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="选择背景图片…" Click="PickBackground_Click" />
-                            <Button Content="恢复默认" AutomationProperties.Name="恢复默认背景（移除背景图）" Click="ClearBackground_Click" />
-                        </StackPanel>
+                        <Border Style="{StaticResource SettingsCardStyle}">
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border
+                                    Width="120"
+                                    Height="68"
+                                    CornerRadius="8"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                    <Image x:Name="BackgroundPreviewImage" Stretch="UniformToFill" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock x:Name="BackgroundFileNameText" FontWeight="SemiBold" Text="默认背景" />
+                                    <TextBlock x:Name="BackgroundOpacityText" Text="不透明度 25%" Style="{StaticResource HintTextStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button Content="选择背景图片…" Click="PickBackground_Click" />
+                                        <Button Content="恢复默认" AutomationProperties.Name="恢复默认背景（移除背景图）" Click="ClearBackground_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                         <Slider
                             x:Name="BackgroundOpacitySlider"
                             Header="背景不透明度"
@@ -1158,6 +1199,7 @@
                             Width="260"
                             HorizontalAlignment="Left"
                             ValueChanged="BackgroundOpacity_ValueChanged" />
+                        <TextBlock x:Name="BackgroundDisabledHintText" Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
 
                     <!-- OCR 引擎 -->
@@ -1177,14 +1219,26 @@
                                 Width="160"
                                 ValueChanged="UmiPort_ValueChanged" />
                             <Button
+                                x:Name="TestUmiButton"
                                 Content="测试 Umi-OCR 连接"
                                 Click="TestUmi_Click"
                                 VerticalAlignment="Bottom" />
+                            <ProgressRing
+                                x:Name="UmiTestRing"
+                                Width="18"
+                                Height="18"
+                                IsActive="False"
+                                Visibility="Collapsed"
+                                VerticalAlignment="Bottom"
+                                Margin="0,0,0,6" />
                         </StackPanel>
-                        <TextBlock
-                            x:Name="OcrStatusText"
-                            Text="检测中…"
-                            TextWrapping="Wrap" />
+                        <InfoBar
+                            x:Name="OcrStatusBar"
+                            IsOpen="True"
+                            IsClosable="False"
+                            Severity="Informational"
+                            Title="OCR 引擎状态"
+                            Message="检测中…" />
                         <TextBlock
                             Text="Windows OCR 是默认引擎、零依赖；Umi-OCR（PaddleOCR）精度更高，默认关闭。打开上方开关后，检测到本机 1224 端口在线才会使用，没安装则自动回退 Windows OCR。"
                             Style="{StaticResource HintTextStyle}" />
@@ -1196,6 +1250,12 @@
                         <TextBlock
                             x:Name="AboutText"
                             TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="打开日志文件夹" Click="OpenLogFolder_Click" />
+                            <Button Content="打开数据文件夹" Click="OpenDataFolder_Click" />
+                            <Button Content="复制版本信息" Click="CopyVersionInfo_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="AboutStatusText" Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
                 </Grid>
             </ScrollViewer>

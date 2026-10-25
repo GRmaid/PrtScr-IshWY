@@ -36,3 +36,9 @@
 - 唯一冲突是 `src/PrtScr.App/MainWindow.xaml`：采用本分支的 NavigationView 布局，再把主分支新增的「贴图来源 / 文字贴图背景与预览 / 初始大小」三段重新插入 `PinSection`；`MainWindow.xaml.cs` 自动合并，贴图字段、设置页处理器与两处 `PasteByBehaviorAsync` 入口均保留。
 - 合并后 `dotnet build PrtScr.sln -c Debug --nologo` 退出 0、0 错误、仅 CS0067 ×2（35.19s）；`IshWY.exe --smoke` 退出 0，五个热键均 `register=0x1`，取景器预创建；Debug PID 40664 已启动。
 - 本文件「尚未完成的验收」一节继续有效：合并与启动只证明构建/启动通过，真实 UI、截图、读屏、tooltip、DPI/主题与交互流程仍需主人实机确认。
+
+## 第二轮美化建议落地（2026-10-25 傍晚）
+
+- 依据主人提供的 `PrtScr-IshWY-实机UI建议-校正版.md`，落地 P0 全部与 P1 主要项：`WindowAppearance` 统一四个窗口标题栏深浅主题；根背景改主题色；导航 720/168；区块标题 16；操作卡 88 并给主页窗口截图卡加强调色左条；危险操作统一 `DangerButtonStyle`；历史标题行去掉浮动状态、真实张数并入说明、页脚只留瞬时状态；快捷键页改 InfoBar 并隔离主页/本页状态；截图行为下拉左对齐；外观页缩略图/文件名/百分比与无图禁用；OCR 状态分级 + 测试转圈；关于页日志/数据/版本按钮；文字贴图背景不透明；裁剪 HUD 去重、抬不透明度并给居中提示加底板。
+- 未做项：贴图管理状态图标、提示位置编辑器的强调色拖动框/坐标/保存主按钮、OCR 结果窗标题与复制状态再分层、删除重复「按键一览」卡片、快捷键目录表格键帽、标注工具栏「取消」条件变红/状态溢出/尺寸标遮挡、批量按钮计数、固定品牌紫。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 两次退出 0、0 错误、仅 CS0067 ×2（65.26s / 38.04s）；`IshWY.exe --smoke` 两次退出 0，五个热键 `register=0x1`、取景器预创建、`Memory[startup] ws=177MB private=106MB managed=3MB`；Debug PID 49968 启动。仍未做截图、读屏、DPI 与真实交互验收。

@@ -5,7 +5,12 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:PrtScr.App.Views">
 
-    <Grid x:Name="RootGrid" Padding="18" RowSpacing="12" PreviewKeyDown="RootGrid_PreviewKeyDown">
+    <Grid x:Name="RootGrid" Padding="18" RowSpacing="12" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" PreviewKeyDown="RootGrid_PreviewKeyDown">
+        <Grid.Resources>
+            <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+            </Style>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -27,9 +32,20 @@
                     Text="所有贴图都在这里；被隐藏或点击穿透的贴图可以从这里恢复。" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Button Content="全部隐藏" Click="HideAll_Click" />
-                <Button Content="全部显示" Click="ShowAll_Click" />
-                <Button Content="全部关闭" Click="CloseAll_Click" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="全部隐藏" Click="HideAll_Click" />
+                    <Button Content="全部显示" Click="ShowAll_Click" />
+                </StackPanel>
+                <Border
+                    Width="1"
+                    Height="20"
+                    Margin="4,0"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <Button
+                    Content="全部关闭"
+                    Click="CloseAll_Click"
+                    Style="{StaticResource DangerButtonStyle}" />
             </StackPanel>
         </Grid>
 
@@ -41,6 +57,7 @@
                 ItemClick="PinGrid_ItemClick">
                 <GridView.ItemContainerStyle>
                     <Style TargetType="GridViewItem">
+                        <Setter Property="Background" Value="Transparent" />
                         <Setter Property="Margin" Value="0" />
                         <Setter Property="Padding" Value="0" />
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />

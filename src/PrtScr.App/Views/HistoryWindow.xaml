@@ -5,7 +5,12 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:PrtScr.App.Views">
 
-    <Grid x:Name="RootGrid" Padding="18" RowSpacing="12" KeyboardAcceleratorPlacementMode="Hidden" PreviewKeyDown="RootGrid_PreviewKeyDown">
+    <Grid x:Name="RootGrid" Padding="18" RowSpacing="12" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" KeyboardAcceleratorPlacementMode="Hidden" PreviewKeyDown="RootGrid_PreviewKeyDown">
+        <Grid.Resources>
+            <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+            </Style>
+        </Grid.Resources>
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Delete" Invoked="DeleteAccelerator_Invoked" />
             <KeyboardAccelerator Key="A" Modifiers="Control" Invoked="SelectAllAccelerator_Invoked" />
@@ -16,35 +21,21 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Spacing="2">
-                <TextBlock Text="截图历史" FontSize="20" FontWeight="SemiBold" />
-                <TextBlock
-                    x:Name="SubtitleText"
-                    FontSize="12"
-                    Opacity="0.6"
-                    TextWrapping="Wrap"
-                    Text="仅保存在本机 data\history。" />
-                <TextBlock
-                    Margin="0,2,0,0"
-                    FontSize="12"
-                    Opacity="0.62"
-                    TextWrapping="Wrap"
-                    Text="左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。" />
-            </StackPanel>
+        <StackPanel Spacing="2">
+            <TextBlock Text="截图历史" FontSize="20" FontWeight="SemiBold" />
             <TextBlock
-                x:Name="StatusText"
-                Grid.Column="1"
-                VerticalAlignment="Bottom"
-                HorizontalAlignment="Right"
-                MaxWidth="420"
-                Opacity="0.65"
-                TextTrimming="CharacterEllipsis" />
-        </Grid>
+                x:Name="SubtitleText"
+                FontSize="12"
+                Opacity="0.6"
+                TextWrapping="Wrap"
+                Text="仅保存在本机 data\history。" />
+            <TextBlock
+                Margin="0,2,0,0"
+                FontSize="12"
+                Opacity="0.62"
+                TextWrapping="Wrap"
+                Text="左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。" />
+        </StackPanel>
 
         <Grid Grid.Row="1" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
@@ -207,12 +198,26 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock
-                x:Name="ActionHintText"
-                FontSize="12"
-                Opacity="0.62"
-                TextTrimming="CharacterEllipsis"
-                Text="选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。删除与清空会先确认，确认后不可恢复。" />
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    x:Name="ActionHintText"
+                    FontSize="12"
+                    Opacity="0.62"
+                    TextTrimming="CharacterEllipsis"
+                    Text="选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。删除与清空会先确认，确认后不可恢复。" />
+                <TextBlock
+                    x:Name="StatusText"
+                    Grid.Column="1"
+                    MaxWidth="360"
+                    FontSize="12"
+                    Opacity="0.65"
+                    VerticalAlignment="Center"
+                    TextTrimming="CharacterEllipsis" />
+            </Grid>
 
             <Grid x:Name="BottomBar" Grid.Row="1" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
@@ -259,11 +264,13 @@
                     <Button
                         Content="删除…"
                         Click="Delete_Click"
+                        Style="{StaticResource DangerButtonStyle}"
                         MinWidth="0"
                         Padding="10,6" />
                     <Button
                         Content="清空分类…"
                         Click="Clear_Click"
+                        Style="{StaticResource DangerButtonStyle}"
                         MinWidth="0"
                         Padding="10,6" />
                 </StackPanel>

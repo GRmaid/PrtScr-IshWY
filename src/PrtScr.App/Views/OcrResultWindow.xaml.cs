@@ -65,6 +65,7 @@ public sealed partial class OcrResultWindow : Window
     {
         _ownerHwnd = ownerHwnd;
         InitializeComponent();
+        WindowAppearance.ApplyTitleBar(this, (FrameworkElement)Content);
         Title = $"{PrtScr.App.AppInfo.Name} OCR 结果";
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
 

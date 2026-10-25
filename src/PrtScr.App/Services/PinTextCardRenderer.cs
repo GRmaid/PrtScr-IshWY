@@ -83,7 +83,7 @@ internal static class PinTextCardRenderer
         graphics.Clear(Color.Transparent);
 
         using var path = RoundedRectangle(new RectangleF(0.5f, 0.5f, width - 1.5f, height - 1.5f), corner);
-        using (var fill = new SolidBrush(Color.FromArgb(248, background)))
+        using (var fill = new SolidBrush(Color.FromArgb(255, background)))
             graphics.FillPath(fill, path);
         using (var border = new Pen(borderColor, Math.Max(1f, scale)))
             graphics.DrawPath(border, path);

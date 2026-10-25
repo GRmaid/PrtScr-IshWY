@@ -342,14 +342,14 @@ public sealed partial class PinCropWindow : Window
             SelectionBorder.Visibility = Visibility.Collapsed;
             MetaChip.Visibility = Visibility.Collapsed;
             ActionBar.Visibility = Visibility.Collapsed;
-            CenterHint.Visibility = Visibility.Visible;
+            CenterHintPlate.Visibility = Visibility.Visible;
             HudHintText.Text = "拖拽 框选 · Esc / 右键 退出";
             return;
         }
 
         var sel = _selection;
         MaskAll.Visibility = Visibility.Collapsed;
-        CenterHint.Visibility = Visibility.Collapsed;
+        CenterHintPlate.Visibility = Visibility.Collapsed;
 
         MaskTop.Visibility = Visibility.Visible;
         MaskTop.Width = w;

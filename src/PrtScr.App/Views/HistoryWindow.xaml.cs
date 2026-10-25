@@ -45,6 +45,7 @@ public sealed partial class HistoryWindow : Window
     public HistoryWindow()
     {
         InitializeComponent();
+        WindowAppearance.ApplyTitleBar(this, (FrameworkElement)Content);
         ClearBottomBarToolTips();
         RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(RootGrid_PointerPressed), true);
         Title = $"{AppInfo.Name} 截图历史";
@@ -444,7 +445,7 @@ public sealed partial class HistoryWindow : Window
         var shown = _items.Count;
 
         SubtitleText.Text = $"按截图模式 / 进程分类，每类最多 {CaptureHistoryService.PerCategoryLimit} 张；"
-            + $"仅保存在本机 data\\history · 共 {_allItems.Count} 张 / {FormatSize(totalBytes)}";
+            + "仅保存在本机 data\\history。";
 
         EmptyText.Text = _allItems.Count == 0
             ? "还没有截图历史。按截图热键截一张图，或检查“保存截图历史”是否已打开。"
@@ -453,18 +454,15 @@ public sealed partial class HistoryWindow : Window
 
         var title = CategoryTitle(_selectedCategoryKey);
         var scope = CategoryScopeNote(_selectedCategoryKey);
+        var total = $"全库共 {_allItems.Count} 张 / {FormatSize(totalBytes)}";
         ScopeText.Text = filteredCount == 0
-            ? $"「{title}」{scope}暂无截图。"
+            ? $"「{title}」{scope}暂无截图（{total}）。"
             : filteredCount > shown
-                ? $"「{title}」{scope}共 {filteredCount} 张，列表只显示最新 {shown} 张；「清空分类」会删除全部 {filteredCount} 张。"
-                : $"「{title}」{scope}共 {filteredCount} 张，已全部显示。";
+                ? $"「{title}」{scope}共 {filteredCount} 张，列表只显示最新 {shown} 张；「清空分类」会删除全部 {filteredCount} 张。{total}。"
+                : $"「{title}」{scope}共 {filteredCount} 张，已全部显示。{total}。";
 
-        if (shown == 0)
-            StatusText.Text = string.Empty;
-        else if (filteredCount > shown)
-            StatusText.Text = $"显示最新 {shown} / {filteredCount} 张";
-        else
-            StatusText.Text = $"当前分类 {shown} 张 · 单张另存为，多选批量另存为";
+        // 顶部统计已并入 ScopeText；右上只留给“已删除”等一次性操作反馈。
+        StatusText.Text = string.Empty;
     }
 
     private string CategoryTitle(string categoryKey) =>

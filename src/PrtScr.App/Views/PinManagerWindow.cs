@@ -21,6 +21,7 @@ public sealed partial class PinManagerWindow : Window
     public PinManagerWindow()
     {
         InitializeComponent();
+        WindowAppearance.ApplyTitleBar(this, (FrameworkElement)Content);
         Title = $"{AppInfo.Name} 屏幕贴图管理";
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         PinGrid.ItemsSource = _cards;
