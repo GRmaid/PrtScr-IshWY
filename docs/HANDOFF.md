@@ -1,4 +1,4 @@
-# 实践小梅IshWY（IshWY）交接文档（2026-10-25）
+# 实践小梅IshWY（IshWY）交接文档（2026-10-26）
 
 > 给下一位接手的小智/开发者：先读这份，再读 `docs/ROADMAP.md` 与项目记忆。
 > 工作区：仓库根目录（开源项目，MIT，已初始化 git）。
@@ -409,6 +409,9 @@ FullscreenBypass: 已归还原前台
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 退出 0、0 错误、0 警告（16.41s）；重新执行 `pwsh scripts/publish.ps1 -Version 1.3.0` 退出 0，移除 56 个可选组件（约 64 MB）/37 个 winmd/82 个语言目录，包目录 74.2 MB；新 zip 31,144,289 字节、sha256 `50020596d6781e8224267ad0be93466ec40a9d05e8cbba09dbcc920b7f083b5a`，zip 内含 `Microsoft.UI.Xaml.Phone.dll` 且无 `data`。
 - 实机包验证：把 zip 解压到 `artifacts/IshWY-1.3.0-verify` 后正常启动，PID 20632，标题「实践小梅IshWY 设置」，日志有 `OnLaunched: window created` / `window activated`、五个热键 `register=0x1`、`Memory[startup] ws=154MB private=101MB managed=2MB`，无 `OnLaunched 异常`。
 - 状态：主人 2026-10-26 00:25 确认修复包能正常打开（原话「好,能打开,继续吧」）。本修复与 v1.3.0 版本号、README、发布脚本在同一提交中提交并发布，发布结果见本节下方。
+- 发布：提交 `9754b58`「Release v1.3.0」、tag `v1.3.0` 已推送；Release workflow `40211813630` 成功；https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.3.0 为 Latest（非 draft/pre）。CI 资产 `IshWY-1.3.0-win-x64.zip` 31,144,267 字节、sha256 `9244dbabd10bc9b76ddaa8423a9bbdce8459889d9f801a62aa7e75980138ec17`，下载回读一致；CI 包与本地包差 22 字节、哈希不同属构建环境差异，以 CI 为准。
+- 发布包复核：把 CI 资产解压到 `artifacts/IshWY-1.3.0-gh-verify` 后执行 `--smoke` 退出 0，日志有 `App: InitializeComponent done`、`MainWindow: InitializeComponent done`、`OnLaunched: window created` / `window activated`、五个热键 `register=0x1`、`Memory[startup] ws=154MB private=101MB managed=2MB`；zip 内含 `Microsoft.UI.Xaml.Phone.dll` 与四个语言 MUI。smoke 期间 HKCU Run 被临时改写，已恢复为 Debug `--startup`。
+- 桌面副本：`C:\Users\asus\DeskBox\我的桌面\IshWY-1.3.0-win-x64.zip` 31,144,267 字节，sha256 与 CI 资产一致。
 
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
