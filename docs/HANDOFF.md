@@ -340,6 +340,14 @@ FullscreenBypass: 已归还原前台
 - 未做（诚实记录）：贴图管理状态图标、提示位置编辑器的强调色拖动框/坐标/保存主按钮、OCR 结果窗标题与复制状态再分层、删除重复「按键一览」卡片、快捷键目录表格键帽、标注工具栏「取消」条件变红/状态溢出/尺寸标遮挡、批量按钮计数、固定品牌紫。均属建议文档 P1/P2 的剩余项，不影响本批构建。
 - 验证：停掉旧进程后 `dotnet build PrtScr.sln -c Debug --nologo` 两次均退出 0、0 错误、仅既有 CS0067 ×2（65.26s / 38.04s）；`IshWY.exe --smoke` 两次均退出 0，五个热键 `register=0x1`、取景器预创建、`Memory[startup] ws=177MB private=106MB managed=3MB`；Debug PID 49968 已启动，标题「实践小梅IshWY 设置」。主人 2026-10-25 17:34 对当前界面给出「视觉验收通过；侧条删除后继续」，随后提交 `319103e` 并推送 main；标题栏、主题、排版与 DPI 由主人实机确认，功能路径未逐项复测。
 
+### v1.2.0 发布（2026-10-25 傍晚）
+
+- 版本：`PrtScr.App.csproj` `<Version>` 1.1.0 → 1.2.0；README「当前最新版本」与下载文件名同步为 v1.2.0 / `IshWY-1.2.0-win-x64.zip`，未写版本历史或开发过程，主人个人段落未改。
+- 内容：贴图来源四档与文字贴图（`pinBehavior`/`pinTextBackground`）、Aevrilen 社区 UI 合并（NavigationView 十页、历史确认与真实张数、OCR 复制状态）、第二轮 UI 美化（主题标题栏与根背景、危险色、快捷键 InfoBar、外观预览、OCR 分级/转圈、关于页操作、裁剪 HUD 去重），主页侧条按主人意见全部撤回。
+- 发布构建：`pwsh scripts/publish.ps1 -Version 1.2.0` 退出 0；`IshWY.pri` + 9 个 `.xbf`；移除 57 个可选组件、37 个 winmd、82 个语言目录；发布目录 73 MB；zip 30,696,742 字节，sha256 `269e2ddc920bc54bd22572258ba4f9e3ceae0272aab0645b46d89261b18cbabf`；包内 `--smoke` 通过。仅本地构建证据，CI 资产与 Release 状态待回读。
+- 发布注意：`--smoke` 会把 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY` 指向测试副本；本轮已恢复为 Debug 路径。全新配置/旧配置迁移未在本轮重测。
+- 待办：提交版本号与本文档 → 推送 main → tag `v1.2.0` → 等 Release workflow → 回读 Latest 与资产 sha256 → 桌面校验副本 → 补发布链接。
+
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
 - 主人确认的首次启动状态：窗口截图 `Alt+A`、全屏快速截图 `Alt+D`、默认「常规截图」、默认 Windows OCR（Umi 默认关闭）、开机自启动默认关闭、关闭主窗口驻留托盘。只影响全新配置；旧配置不迁移、不覆盖。

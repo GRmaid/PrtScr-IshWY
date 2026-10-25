@@ -44,7 +44,7 @@
 
 ## 下载与运行
 
-当前最新版本：**v1.1.0**。从 [Releases](https://github.com/GRmaid/PrtScr-IshWY/releases/latest) 下载 `IshWY-1.1.0-win-x64.zip`，解压到任意目录，双击 `IshWY.exe`。程序启动后驻留托盘。
+当前最新版本：**v1.2.0**。从 [Releases](https://github.com/GRmaid/PrtScr-IshWY/releases/latest) 下载 `IshWY-1.2.0-win-x64.zip`，解压到任意目录，双击 `IshWY.exe`。程序启动后驻留托盘。
 
 - 配置：`data/config.json`
 - 日志：`data/logs/app.log`（反馈问题请附上这个文件）
