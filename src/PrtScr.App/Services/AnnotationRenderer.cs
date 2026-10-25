@@ -54,56 +54,56 @@ public static class AnnotationRenderer
         switch (a.Tool)
         {
             case AnnotationTool.Rectangle:
-            {
-                var rect = ToRect(a.Start, a.End);
-                graphics.DrawRectangle(pen, rect);
-                break;
-            }
+                {
+                    var rect = ToRect(a.Start, a.End);
+                    graphics.DrawRectangle(pen, rect);
+                    break;
+                }
 
             case AnnotationTool.Arrow:
-            {
-                var start = ToPointF(a.Start);
-                var end = ToPointF(a.End);
-                graphics.DrawLine(pen, start, end);
-                DrawArrowHead(graphics, brush, start, end, Math.Max(8, a.Size * 4));
-                break;
-            }
+                {
+                    var start = ToPointF(a.Start);
+                    var end = ToPointF(a.End);
+                    graphics.DrawLine(pen, start, end);
+                    DrawArrowHead(graphics, brush, start, end, Math.Max(8, a.Size * 4));
+                    break;
+                }
 
             case AnnotationTool.Pen:
-            {
-                if (a.Points.Count >= 2)
                 {
-                    var points = a.Points.Select(ToPointF).ToArray();
-                    graphics.DrawLines(pen, points);
+                    if (a.Points.Count >= 2)
+                    {
+                        var points = a.Points.Select(ToPointF).ToArray();
+                        graphics.DrawLines(pen, points);
+                    }
+                    else if (a.Points.Count == 1)
+                    {
+                        var p = ToPointF(a.Points[0]);
+                        graphics.FillEllipse(brush, p.X - a.Size / 2, p.Y - a.Size / 2, a.Size, a.Size);
+                    }
+                    break;
                 }
-                else if (a.Points.Count == 1)
-                {
-                    var p = ToPointF(a.Points[0]);
-                    graphics.FillEllipse(brush, p.X - a.Size / 2, p.Y - a.Size / 2, a.Size, a.Size);
-                }
-                break;
-            }
 
             case AnnotationTool.Text:
-            {
-                using var font = new Font("Microsoft YaHei UI", a.Size, FontStyle.Regular, GraphicsUnit.Pixel);
-                graphics.DrawString(a.Text, font, brush, ToPointF(a.Start));
-                break;
-            }
+                {
+                    using var font = new Font("Microsoft YaHei UI", a.Size, FontStyle.Regular, GraphicsUnit.Pixel);
+                    graphics.DrawString(a.Text, font, brush, ToPointF(a.Start));
+                    break;
+                }
 
             case AnnotationTool.Number:
-            {
-                var center = ToPointF(a.Start);
-                var radius = a.Size;
-                graphics.FillEllipse(brush, center.X - radius, center.Y - radius, radius * 2, radius * 2);
-                using var font = new Font("Segoe UI", radius * 1.2f, FontStyle.Bold, GraphicsUnit.Pixel);
-                using var white = new SolidBrush(Color.White);
-                var text = a.Number.ToString();
-                var size = graphics.MeasureString(text, font);
-                graphics.DrawString(text, font, white,
-                    center.X - size.Width / 2, center.Y - size.Height / 2);
-                break;
-            }
+                {
+                    var center = ToPointF(a.Start);
+                    var radius = a.Size;
+                    graphics.FillEllipse(brush, center.X - radius, center.Y - radius, radius * 2, radius * 2);
+                    using var font = new Font("Segoe UI", radius * 1.2f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var white = new SolidBrush(Color.White);
+                    var text = a.Number.ToString();
+                    var size = graphics.MeasureString(text, font);
+                    graphics.DrawString(text, font, white,
+                        center.X - size.Width / 2, center.Y - size.Height / 2);
+                    break;
+                }
         }
     }
 

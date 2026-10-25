@@ -49,6 +49,7 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 src/PrtScr.App/
   App.xaml.cs                 日志(加锁)、启动、单实例(\Local\IshWY.Activate)、--startup 静默模式、注入 WGC/DXGI 日志钩子、安装键盘钩子；XAML 初始化/配置读取/单实例/启动项失败都会落日志并尽量继续启动
   MainWindow.xaml(.cs)        设置窗（NavigationView 左侧十页导航，一次只显示一页；窄窗自动收成图标栏）、托盘、七个动作的热键录制/删除 ✕/单项恢复、延时截图/取消入口、鼠标指针开关、游戏全屏自动快照开关、默认截图模式、开机自启动开关、截图历史开关/窗口、贴图来源/文字背景/初始大小、贴图管理入口、OCR 状态、Umi 端口
+  MainWindow.*.cs              设置窗 partial 拆分：PinSettings / CaptureSettings / ToastSettings / Windows / Ocr / Hotkeys / Capture / Appearance；主文件只留字段、构造、导航与状态
   Services/ConfigService.cs   便携 config.json
   Services/StartupService.cs  HKCU Run 开机自启动（值 IshWY，命令 exe --startup；移动目录后自动刷新）
   Services/CaptureHistoryService.cs  本机截图历史（data\history，每类默认 30 张；写入/读取/删除/清空/修剪）
@@ -64,6 +65,7 @@ src/PrtScr.App/
   Services/PinTextCardRenderer.cs  把剪贴板文字排成圆角文字卡片 PNG（微软雅黑 16 DIP、最大 360 DIP 文本宽、自动换行、按背景亮度取黑/白字），复用 NativePinWindow 的贴图能力
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部；`CaptureMode`（Window/Normal，Tab 切换，起始模式读 `defaultCaptureMode`）；窗口预高亮/单击选窗两种模式共用；指针事件挂在根 `Root`；选区右上角「保存」/`Ctrl+S` 另存为，保存后仍复制并写历史；`Ctrl+C`（无选区）复制放大镜色值；19×19 取色器复用 WriteableBitmap 与 byte 缓冲
   Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；卡片支持拖到外部程序，选中多张时整批拖出；删除与清空分类先弹确认并保存目标快照；标题区写明分类真实张数与「列表只显示最新 120 张」；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
+  Views/HistoryWindow.Selection.cs / .Actions.cs  历史窗 partial 拆分：选择/右键/拖出/键盘；复制/贴图/标注/另存为/删除/清空/打开文件夹
   Views/PinManagerWindow.xaml(.cs) + PinCardView.cs  贴图管理窗：全部贴图卡片、复制/另存/OCR/关闭/恢复交互、隐藏/显示/关闭全部；打开时把所有贴图降到 NOTOPMOST，关闭后恢复 TOPMOST
   Views/PinSnapGuide.cs        拖动贴图时的 8px 吸附参考线（两条 1px 青色分层线，松手即隐藏）
   Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键菜单可锁定/点击穿透/裁剪/另存/打开历史；标注工具栏「完成」= 烘焙+复制、「另存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；指针锚定滚轮缩放、左右半屏切换历史、8px 吸附、拖动加 SWP_NOREDRAW，退出标注回收 DIB；工具栏按宽度分两排并在文字工具下显示字号步进器；窗口类挂 IDC_ARROW 光标，文字输入框按图片原点定位、输入中可用滚轮调字号）
@@ -360,6 +362,15 @@ FullscreenBypass: 已归还原前台
 - 验证：dotnet build PrtScr.sln -c Debug --nologo 退出 0、0 错误、仅既有 CS0067 ×2（14.85s）；IshWY.exe --smoke 退出 0，五个热键 register=0x1、取景器预创建、Memory[startup] ws=176MB private=105MB managed=4MB；Debug PID 48796。主人 2026-10-25 21:35 实测通过并反馈「做的不错」：游戏内截图卡顿/断音消失，独占全屏直接整屏，历史单张与多选整批拖出正常。
 - 说明：启动失败当时没有留下崩溃日志或 WER 记录，无法复现具体原因；本轮只做启动阶段加固与可诊断化，不能宣称根因已定位。
 
+### 代码优化 Phase 0 与大类拆分（2026-10-25 深夜）
+
+- 触发：主人要求按「精简、格式化、模块化，便于他人阅读修改」做代码优化，选定方案 B（Phase 0 + 测试接缝 + 大类拆分），首批先做规范/护栏与 MainWindow/HistoryWindow 拆分。
+- Phase 0：新增 `.editorconfig`、`Directory.Build.props`、`Directory.Packages.props`、`global.json`、`docs/ARCHITECTURE.md`、`docs/CONTRIBUTING.md`；四个 csproj 继承公共 TargetFramework/Nullable/ImplicitUsings 与中央包版本；`DelegateCommand.CanExecuteChanged` 明确 add/remove，CS0067 归零；CI 增加 `dotnet format whitespace ... --verify-no-changes`。`dotnet format whitespace` 一次改 17 个文件（+271/−278，纯空白），构建 0 错误 0 警告。
+- HistoryWindow 拆分：`HistoryWindow.xaml.cs` 481 行只留字段/构造/刷新/分类/摘要；新增 `HistoryWindow.Selection.cs` 345 行（选择、右键、拖出、键盘）与 `HistoryWindow.Actions.cs` 351 行（复制/贴图/标注/另存为/删除/清空/打开文件夹），类保持 partial。
+- MainWindow 拆分：`MainWindow.xaml.cs` 2462→304 行，只留字段、构造、OnLoaded、导航、内存计时、历史开关/状态与 `SetStatus`；新增 8 个 partial：PinSettings 202、CaptureSettings 384、ToastSettings 201、Windows 391、Ocr 96、Hotkeys 695、Capture 227、Appearance 144。全部按原文件行段切分，不改方法体。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 退出 0、0 错误、0 警告（14.75s）；`dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore` 退出 0；`IshWY.exe --smoke` 退出 0，五个热键 `register=0x1`、取景器预创建、`Memory[startup] ws=178MB private=107MB managed=4MB`；Debug PID 35724 已启动，等待主人做界面/功能回归。
+- 诚实边界：本批只做结构/格式，不改采集引擎、取景器输入、贴图 GDI 绘制、提示合成或配置字段；行为应保持原样，但仍需主人按 §6 回归。
+
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
 - 主人确认的首次启动状态：窗口截图 `Alt+A`、全屏快速截图 `Alt+D`、默认「常规截图」、默认 Windows OCR（Umi 默认关闭）、开机自启动默认关闭、关闭主窗口驻留托盘。只影响全新配置；旧配置不迁移、不覆盖。
@@ -638,3 +649,4 @@ FullscreenBypass: 已归还原前台
 - [ ] 主人复测 2026-10-25 下午社区 UI 合并（Debug PID 40664）：① 左侧十页导航逐页切换，窄窗收成图标栏；② 主页四卡与历史摘要、窗口卡片动态文案；③ 贴图页仍有来源四档、文字背景/预设/预览、初始大小，四种来源都能用；④ 历史删除/清空先确认，取消与 Esc 不删，标题真实张数与 120 张上限说明正确；⑤ OCR 复制按钮空文本禁用、成功/失败/复制后再编辑提示正确；⑥ 主题、100%/125%/150% 缩放、重启后配置保留；⑦ 启动项、热键、托盘、单实例不回归。
 - [x] 主人复测 2026-10-25 傍晚第二轮 UI 美化（Debug PID 49560，建议文档 P0/P1 已落地、P1/P2 剩余项未做；主人 17:34 判定「视觉验收通过」，主页五卡侧条已按 17:33 意见全部删除；功能路径未逐项复测）：① 主窗/历史/贴图管理/OCR 结果窗标题栏随深浅主题，不再白条；② 十页导航与窄窗图标栏，主页操作卡不再过高（侧条已按主人意见全部删除）；③ 历史删除/清空为危险色，标题行不再有浮动状态，真实张数与 120 张上限在说明里，页脚状态只在操作后出现；④ 快捷键页只显示本页结果（InfoBar），不再出现全局状态，七个「修改」按钮更轻；⑤ 截图行为两个下拉左对齐，外观页有缩略图/文件名/百分比且无图时滑杆禁用，OCR 页状态分级且测试时有转圈，关于页三个按钮可用；⑥ 文字贴图背景不透，裁剪 HUD 无重复退出提示、提示有底板；⑦ 浅/深色、100%/125%/150%、重启保留、热键/托盘/单实例不回归。
 - [x] 主人验收 2026-10-25 21:35（Debug PID 48796）：「做的不错」。① 普通窗口/无边框全屏游戏按截图热键不再先闪一下；② 独占全屏游戏直接整屏、不弹取景器，游戏声音不再中断；设置 → 截图行为可关闭「游戏全屏时直接全屏截图」；③ 历史窗单选/右键进入多选后可把卡片拖到资源管理器/微信/文档，落地为真实 PNG，历史原图与剪贴板不变；④ 拖已选卡片带整批、拖未选中卡片只带这一张，取消拖出无副作用；⑤ 启动加固后正常启动；启动失败根因仍未复现，若再出现按 data/logs/app.log 定位。
+- [ ] 主人复测 2026-10-25 深夜代码优化（Debug PID 35724）：① 十页导航、主页四卡与历史摘要；② 七个热键录制/删除/恢复、取景器键盘与托盘；③ 截图行为/贴图来源/文字背景/提示设置可读写并落盘；④ 历史窗选择/右键多选/单张与整批拖出/删除确认/清空分类；⑤ 贴图、OCR、全屏游戏快照不回归；⑥ `dotnet build` 0 错误 0 警告、`dotnet format whitespace ... --verify-no-changes` 通过。

@@ -913,56 +913,56 @@ public sealed unsafe partial class NativePinWindow
         switch (a.Tool)
         {
             case AnnotationTool.Rectangle:
-            {
-                var rect = RectFrom(a.Start, a.End);
-                graphics.DrawRectangle(pen, rect);
-                break;
-            }
+                {
+                    var rect = RectFrom(a.Start, a.End);
+                    graphics.DrawRectangle(pen, rect);
+                    break;
+                }
 
             case AnnotationTool.Arrow:
-            {
-                var s = new PointF((float)a.Start.X, (float)a.Start.Y);
-                var e = new PointF((float)a.End.X, (float)a.End.Y);
-                graphics.DrawLine(pen, s, e);
-                var angle = Math.Atan2(e.Y - s.Y, e.X - s.X);
-                const double spread = Math.PI / 7;
-                var head = Math.Max(8, a.Size * 4);
-                var p1 = new PointF(e.X - (float)(head * Math.Cos(angle - spread)), e.Y - (float)(head * Math.Sin(angle - spread)));
-                var p2 = new PointF(e.X - (float)(head * Math.Cos(angle + spread)), e.Y - (float)(head * Math.Sin(angle + spread)));
-                graphics.FillPolygon(brush, new[] { e, p1, p2 });
-                break;
-            }
+                {
+                    var s = new PointF((float)a.Start.X, (float)a.Start.Y);
+                    var e = new PointF((float)a.End.X, (float)a.End.Y);
+                    graphics.DrawLine(pen, s, e);
+                    var angle = Math.Atan2(e.Y - s.Y, e.X - s.X);
+                    const double spread = Math.PI / 7;
+                    var head = Math.Max(8, a.Size * 4);
+                    var p1 = new PointF(e.X - (float)(head * Math.Cos(angle - spread)), e.Y - (float)(head * Math.Sin(angle - spread)));
+                    var p2 = new PointF(e.X - (float)(head * Math.Cos(angle + spread)), e.Y - (float)(head * Math.Sin(angle + spread)));
+                    graphics.FillPolygon(brush, new[] { e, p1, p2 });
+                    break;
+                }
 
             case AnnotationTool.Pen:
-            {
-                if (a.Points.Count >= 2)
                 {
-                    var points = a.Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
-                    graphics.DrawLines(pen, points);
+                    if (a.Points.Count >= 2)
+                    {
+                        var points = a.Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+                        graphics.DrawLines(pen, points);
+                    }
+                    break;
                 }
-                break;
-            }
 
             case AnnotationTool.Text:
-            {
-                using var font = new Font("Microsoft YaHei UI", a.Size, FontStyle.Regular, GraphicsUnit.Pixel);
-                graphics.DrawString(a.Text, font, brush, (float)a.Start.X, (float)a.Start.Y);
-                break;
-            }
+                {
+                    using var font = new Font("Microsoft YaHei UI", a.Size, FontStyle.Regular, GraphicsUnit.Pixel);
+                    graphics.DrawString(a.Text, font, brush, (float)a.Start.X, (float)a.Start.Y);
+                    break;
+                }
 
             case AnnotationTool.Number:
-            {
-                var cx = (float)a.Start.X;
-                var cy = (float)a.Start.Y;
-                var r = a.Size;
-                graphics.FillEllipse(brush, cx - r, cy - r, r * 2, r * 2);
-                using var font = new Font("Segoe UI", r * 1.2f, FontStyle.Bold, GraphicsUnit.Pixel);
-                using var white = new SolidBrush(Color.White);
-                var text = a.Number.ToString();
-                var size = graphics.MeasureString(text, font);
-                graphics.DrawString(text, font, white, cx - size.Width / 2, cy - size.Height / 2);
-                break;
-            }
+                {
+                    var cx = (float)a.Start.X;
+                    var cy = (float)a.Start.Y;
+                    var r = a.Size;
+                    graphics.FillEllipse(brush, cx - r, cy - r, r * 2, r * 2);
+                    using var font = new Font("Segoe UI", r * 1.2f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var white = new SolidBrush(Color.White);
+                    var text = a.Number.ToString();
+                    var size = graphics.MeasureString(text, font);
+                    graphics.DrawString(text, font, white, cx - size.Width / 2, cy - size.Height / 2);
+                    break;
+                }
         }
     }
 
@@ -1012,18 +1012,18 @@ public sealed unsafe partial class NativePinWindow
             switch (item.Kind)
             {
                 case ToolbarItemKind.Swatch:
-                {
-                    var color = Color.FromArgb((int)QuickColors[item.Id - 10]);
-                    using var brush = new SolidBrush(color);
-                    graphics.FillRectangle(brush, rect);
-                    graphics.DrawRectangle(swatchBorder, rect.X, rect.Y, rect.Width, rect.Height);
-                    if (colorId == item.Id)
                     {
-                        graphics.DrawRectangle(selectedPen, rect.X - 3 * scale, rect.Y - 3 * scale,
-                            rect.Width + 6 * scale, rect.Height + 6 * scale);
+                        var color = Color.FromArgb((int)QuickColors[item.Id - 10]);
+                        using var brush = new SolidBrush(color);
+                        graphics.FillRectangle(brush, rect);
+                        graphics.DrawRectangle(swatchBorder, rect.X, rect.Y, rect.Width, rect.Height);
+                        if (colorId == item.Id)
+                        {
+                            graphics.DrawRectangle(selectedPen, rect.X - 3 * scale, rect.Y - 3 * scale,
+                                rect.Width + 6 * scale, rect.Height + 6 * scale);
+                        }
+                        break;
                     }
-                    break;
-                }
 
                 case ToolbarItemKind.Tool:
                     if (item.Id == _toolId)
@@ -1040,34 +1040,34 @@ public sealed unsafe partial class NativePinWindow
                     break;
 
                 case ToolbarItemKind.Command:
-                {
-                    var disabled = item.Id is 20 or 21 && _annotations.Count == 0;
-                    var complete = item.Id == 22;
-                    if (complete)
-                        FillRoundedRectangle(graphics, activeBrush, rect, 5 * scale);
+                    {
+                        var disabled = item.Id is 20 or 21 && _annotations.Count == 0;
+                        var complete = item.Id == 22;
+                        if (complete)
+                            FillRoundedRectangle(graphics, activeBrush, rect, 5 * scale);
 
-                    if (layout.TextActions)
-                    {
-                        var label = item.Id switch
+                        if (layout.TextActions)
                         {
-                            20 => "撤销",
-                            21 => "清空",
-                            22 => "完成",
-                            23 => "取消",
-                            _ => "另存",
-                        };
-                        var brush = disabled ? disabledBrush
-                            : complete ? whiteBrush
-                            : item.Id == 23 ? cancelBrush
-                            : commandBrush;
-                        DrawCenteredText(graphics, label, commandFont, brush, rect);
+                            var label = item.Id switch
+                            {
+                                20 => "撤销",
+                                21 => "清空",
+                                22 => "完成",
+                                23 => "取消",
+                                _ => "另存",
+                            };
+                            var brush = disabled ? disabledBrush
+                                : complete ? whiteBrush
+                                : item.Id == 23 ? cancelBrush
+                                : commandBrush;
+                            DrawCenteredText(graphics, label, commandFont, brush, rect);
+                        }
+                        else
+                        {
+                            DrawIcon(graphics, item.Id, rect, scale);
+                        }
+                        break;
                     }
-                    else
-                    {
-                        DrawIcon(graphics, item.Id, rect, scale);
-                    }
-                    break;
-                }
             }
         }
 
@@ -1298,9 +1298,9 @@ public sealed unsafe partial class NativePinWindow
                 break;
 
             case 15:  // 调色盘
-            {
-                var colors = new[]
                 {
+                    var colors = new[]
+                    {
                     Color.FromArgb(0xFF, 0xFF, 0x3B, 0x30),
                     Color.FromArgb(0xFF, 0xFF, 0x95, 0x00),
                     Color.FromArgb(0xFF, 0xFF, 0xCC, 0x00),
@@ -1308,16 +1308,16 @@ public sealed unsafe partial class NativePinWindow
                     Color.FromArgb(0xFF, 0x00, 0x7A, 0xFF),
                     Color.FromArgb(0xFF, 0xAF, 0x52, 0xDE),
                 };
-                var radius = s * 1.0f;
-                for (var i = 0; i < colors.Length; i++)
-                {
-                    using var pie = new SolidBrush(colors[i]);
-                    graphics.FillPie(pie, cx - radius, cy - radius, radius * 2, radius * 2, -90 + i * 60, 60);
+                    var radius = s * 1.0f;
+                    for (var i = 0; i < colors.Length; i++)
+                    {
+                        using var pie = new SolidBrush(colors[i]);
+                        graphics.FillPie(pie, cx - radius, cy - radius, radius * 2, radius * 2, -90 + i * 60, 60);
+                    }
+                    using var outline = new Pen(Color.FromArgb(0xFF, 0x10, 0x10, 0x10), Math.Max(1, scale * 0.8f));
+                    graphics.DrawEllipse(outline, cx - radius, cy - radius, radius * 2, radius * 2);
+                    break;
                 }
-                using var outline = new Pen(Color.FromArgb(0xFF, 0x10, 0x10, 0x10), Math.Max(1, scale * 0.8f));
-                graphics.DrawEllipse(outline, cx - radius, cy - radius, radius * 2, radius * 2);
-                break;
-            }
 
             case 23:  // 退出（叉）
                 graphics.DrawLine(pen, cx - s * 0.75f, cy - s * 0.75f, cx + s * 0.75f, cy + s * 0.75f);

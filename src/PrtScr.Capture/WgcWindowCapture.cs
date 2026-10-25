@@ -213,7 +213,11 @@ public static class WgcWindowCapture
 
             var state = new MonitorPool
             {
-                Pool = pool, Session = session, Item = item, Device = device, Context = context,
+                Pool = pool,
+                Session = session,
+                Item = item,
+                Device = device,
+                Context = context,
             };
             var weak = new WeakReference<MonitorPool>(state);
             pool.FrameArrived += (sender, _) =>
@@ -406,29 +410,29 @@ public static class WgcWindowCapture
     {
         try
         {
-        var factory = ActivationFactory.Get("Windows.Graphics.Capture.GraphicsCaptureItem");
-        var interop = (IGraphicsCaptureItemInterop)Marshal.GetObjectForIUnknown(factory.ThisPtr);
-        try
-        {
-            interop.CreateForMonitor(hMonitor, IID_IGraphicsCaptureItem, out var itemAbi);
-            if (itemAbi == 0)
-            {
-                Log?.Invoke("WGC: CreateForMonitor 返回空 item");
-                return null;
-            }
+            var factory = ActivationFactory.Get("Windows.Graphics.Capture.GraphicsCaptureItem");
+            var interop = (IGraphicsCaptureItemInterop)Marshal.GetObjectForIUnknown(factory.ThisPtr);
             try
             {
-                return GraphicsCaptureItem.FromAbi(itemAbi);
+                interop.CreateForMonitor(hMonitor, IID_IGraphicsCaptureItem, out var itemAbi);
+                if (itemAbi == 0)
+                {
+                    Log?.Invoke("WGC: CreateForMonitor 返回空 item");
+                    return null;
+                }
+                try
+                {
+                    return GraphicsCaptureItem.FromAbi(itemAbi);
+                }
+                finally
+                {
+                    Marshal.Release(itemAbi);
+                }
             }
             finally
             {
-                Marshal.Release(itemAbi);
+                Marshal.ReleaseComObject(interop);
             }
-        }
-        finally
-        {
-            Marshal.ReleaseComObject(interop);
-        }
         }
         catch (Exception ex)
         {

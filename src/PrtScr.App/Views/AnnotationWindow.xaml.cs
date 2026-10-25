@@ -523,120 +523,123 @@ public sealed partial class AnnotationWindow : Window
         {
             case AnnotationTool.Rectangle:
             case AnnotationTool.Mosaic:
-            {
-                var left = Math.Min(start.X, end.X);
-                var top = Math.Min(start.Y, end.Y);
-                var width = Math.Abs(end.X - start.X);
-                var height = Math.Abs(end.Y - start.Y);
-
-                if (a.Tool == AnnotationTool.Mosaic && a.PreviewImage is not null)
                 {
-                    var patch = new Microsoft.UI.Xaml.Controls.Image
+                    var left = Math.Min(start.X, end.X);
+                    var top = Math.Min(start.Y, end.Y);
+                    var width = Math.Abs(end.X - start.X);
+                    var height = Math.Abs(end.Y - start.Y);
+
+                    if (a.Tool == AnnotationTool.Mosaic && a.PreviewImage is not null)
                     {
-                        Source = a.PreviewImage,
-                        Width = width,
-                        Height = height,
-                        Stretch = Stretch.Fill,
+                        var patch = new Microsoft.UI.Xaml.Controls.Image
+                        {
+                            Source = a.PreviewImage,
+                            Width = width,
+                            Height = height,
+                            Stretch = Stretch.Fill,
+                        };
+                        Canvas.SetLeft(patch, left);
+                        Canvas.SetTop(patch, top);
+                        DrawLayer.Children.Add(patch);
+                    }
+
+                    var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
+                    {
+                        Stroke = brush,
+                        StrokeThickness = thickness,
+                        Fill = a.Tool == AnnotationTool.Mosaic && a.PreviewImage is null
+                            ? new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x30, 0x80, 0x80, 0x80))
+                            : null,
                     };
-                    Canvas.SetLeft(patch, left);
-                    Canvas.SetTop(patch, top);
-                    DrawLayer.Children.Add(patch);
+                    Canvas.SetLeft(rect, left);
+                    Canvas.SetTop(rect, top);
+                    rect.Width = width;
+                    rect.Height = height;
+                    DrawLayer.Children.Add(rect);
+                    break;
                 }
 
-                var rect = new Microsoft.UI.Xaml.Shapes.Rectangle
-                {
-                    Stroke = brush,
-                    StrokeThickness = thickness,
-                    Fill = a.Tool == AnnotationTool.Mosaic && a.PreviewImage is null
-                        ? new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x30, 0x80, 0x80, 0x80))
-                        : null,
-                };
-                Canvas.SetLeft(rect, left);
-                Canvas.SetTop(rect, top);
-                rect.Width = width;
-                rect.Height = height;
-                DrawLayer.Children.Add(rect);
-                break;
-            }
-
             case AnnotationTool.Arrow:
-            {
-                var line = new Line
                 {
-                    X1 = start.X, Y1 = start.Y, X2 = end.X, Y2 = end.Y,
-                    Stroke = brush,
-                    StrokeThickness = thickness,
-                };
-                DrawLayer.Children.Add(line);
+                    var line = new Line
+                    {
+                        X1 = start.X,
+                        Y1 = start.Y,
+                        X2 = end.X,
+                        Y2 = end.Y,
+                        Stroke = brush,
+                        StrokeThickness = thickness,
+                    };
+                    DrawLayer.Children.Add(line);
 
-                var angle = Math.Atan2(end.Y - start.Y, end.X - start.X);
-                const double spread = Math.PI / 7;
-                var head = Math.Max(8, thickness * 4);
-                var p1 = new Windows.Foundation.Point(
-                    end.X - head * Math.Cos(angle - spread), end.Y - head * Math.Sin(angle - spread));
-                var p2 = new Windows.Foundation.Point(
-                    end.X - head * Math.Cos(angle + spread), end.Y - head * Math.Sin(angle + spread));
-                var polygon = new Polygon { Fill = brush };
-                polygon.Points.Add(end);
-                polygon.Points.Add(p1);
-                polygon.Points.Add(p2);
-                DrawLayer.Children.Add(polygon);
-                break;
-            }
+                    var angle = Math.Atan2(end.Y - start.Y, end.X - start.X);
+                    const double spread = Math.PI / 7;
+                    var head = Math.Max(8, thickness * 4);
+                    var p1 = new Windows.Foundation.Point(
+                        end.X - head * Math.Cos(angle - spread), end.Y - head * Math.Sin(angle - spread));
+                    var p2 = new Windows.Foundation.Point(
+                        end.X - head * Math.Cos(angle + spread), end.Y - head * Math.Sin(angle + spread));
+                    var polygon = new Polygon { Fill = brush };
+                    polygon.Points.Add(end);
+                    polygon.Points.Add(p1);
+                    polygon.Points.Add(p2);
+                    DrawLayer.Children.Add(polygon);
+                    break;
+                }
 
             case AnnotationTool.Pen:
-            {
-                var polyline = new Polyline
                 {
-                    Stroke = brush,
-                    StrokeThickness = thickness,
-                    StrokeLineJoin = PenLineJoin.Round,
-                };
-                foreach (var p in a.Points)
-                    polyline.Points.Add(ToDip(p));
-                DrawLayer.Children.Add(polyline);
-                break;
-            }
+                    var polyline = new Polyline
+                    {
+                        Stroke = brush,
+                        StrokeThickness = thickness,
+                        StrokeLineJoin = PenLineJoin.Round,
+                    };
+                    foreach (var p in a.Points)
+                        polyline.Points.Add(ToDip(p));
+                    DrawLayer.Children.Add(polyline);
+                    break;
+                }
 
             case AnnotationTool.Text:
-            {
-                var text = new TextBlock
                 {
-                    Text = a.Text,
-                    Foreground = brush,
-                    FontSize = Math.Max(10, a.Size / _pixelPerDip),
-                };
-                Canvas.SetLeft(text, start.X);
-                Canvas.SetTop(text, start.Y);
-                DrawLayer.Children.Add(text);
-                break;
-            }
+                    var text = new TextBlock
+                    {
+                        Text = a.Text,
+                        Foreground = brush,
+                        FontSize = Math.Max(10, a.Size / _pixelPerDip),
+                    };
+                    Canvas.SetLeft(text, start.X);
+                    Canvas.SetTop(text, start.Y);
+                    DrawLayer.Children.Add(text);
+                    break;
+                }
 
             case AnnotationTool.Number:
-            {
-                var radius = Math.Max(8, a.Size / _pixelPerDip);
-                var ellipse = new Ellipse
                 {
-                    Width = radius * 2,
-                    Height = radius * 2,
-                    Fill = brush,
-                };
-                Canvas.SetLeft(ellipse, start.X - radius);
-                Canvas.SetTop(ellipse, start.Y - radius);
-                DrawLayer.Children.Add(ellipse);
+                    var radius = Math.Max(8, a.Size / _pixelPerDip);
+                    var ellipse = new Ellipse
+                    {
+                        Width = radius * 2,
+                        Height = radius * 2,
+                        Fill = brush,
+                    };
+                    Canvas.SetLeft(ellipse, start.X - radius);
+                    Canvas.SetTop(ellipse, start.Y - radius);
+                    DrawLayer.Children.Add(ellipse);
 
-                var label = new TextBlock
-                {
-                    Text = a.Number.ToString(),
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
-                    FontSize = Math.Max(10, radius * 1.2),
-                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                };
-                Canvas.SetLeft(label, start.X - radius * 0.4);
-                Canvas.SetTop(label, start.Y - radius * 0.75);
-                DrawLayer.Children.Add(label);
-                break;
-            }
+                    var label = new TextBlock
+                    {
+                        Text = a.Number.ToString(),
+                        Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                        FontSize = Math.Max(10, radius * 1.2),
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    };
+                    Canvas.SetLeft(label, start.X - radius * 0.4);
+                    Canvas.SetTop(label, start.Y - radius * 0.75);
+                    DrawLayer.Children.Add(label);
+                    break;
+                }
         }
     }
 
