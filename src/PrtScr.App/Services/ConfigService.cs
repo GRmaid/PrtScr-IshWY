@@ -98,6 +98,14 @@ public sealed class AppConfig
     [JsonPropertyName("pinInitialScale")]
     public int PinInitialScale { get; set; } = 100;
 
+    /// <summary>贴图行为：clipboard = 剪贴板优先（图片/文字，空则最新截图）；latest = 只贴最新截图；text = 只贴剪贴板文字；off = 关闭。</summary>
+    [JsonPropertyName("pinBehavior")]
+    public string PinBehavior { get; set; } = "clipboard";
+
+    /// <summary>文字贴图卡片背景色（#RRGGBB）；文字颜色按背景明暗自动选择。</summary>
+    [JsonPropertyName("pinTextBackground")]
+    public string PinTextBackground { get; set; } = "#1F1F1F";
+
     /// <summary>贴图裁剪后是否写入截图历史（分类「贴图裁剪」）。</summary>
     [JsonPropertyName("historyPinCrop")]
     public bool HistoryPinCrop { get; set; } = true;

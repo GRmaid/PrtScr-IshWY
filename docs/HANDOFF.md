@@ -60,7 +60,8 @@ src/PrtScr.App/
   Services/FullscreenBypass.cs 抢前台逼游戏退出独占全屏（1×1 全透明分层窗 + AttachThreadInput，等 500ms，退出时还原前台/还原最小化）
   Services/ClipboardService.cs 剪贴板重试
   Services/CaptureService.cs  采集编排；CaptureMonitorBestAsync 四层引擎；DrawCursorIfEnabled 统一合成鼠标指针
-  Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService 维护所有贴图的 PinRecord 注册表、快照、命令与 PinsChanged；PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板）
+  Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService 维护所有贴图的 PinRecord 注册表、快照、命令与 PinsChanged；PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板；PasteByBehaviorAsync 按 pinBehavior 分派剪贴板图片/文字、最新截图或关闭状态；PasteText 供设置预览直接贴文字卡片）
+  Services/PinTextCardRenderer.cs  把剪贴板文字排成圆角文字卡片 PNG（微软雅黑 16 DIP、最大 360 DIP 文本宽、自动换行、按背景亮度取黑/白字），复用 NativePinWindow 的贴图能力
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部；`CaptureMode`（Window/Normal，Tab 切换，起始模式读 `defaultCaptureMode`）；窗口预高亮/单击选窗两种模式共用；指针事件挂在根 `Root`；选区右上角「保存」/`Ctrl+S` 另存为，保存后仍复制并写历史；`Ctrl+C`（无选区）复制放大镜色值；19×19 取色器复用 WriteableBitmap 与 byte 缓冲
   Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
   Views/PinManagerWindow.xaml(.cs) + PinCardView.cs  贴图管理窗：全部贴图卡片、复制/另存/OCR/关闭/恢复交互、隐藏/显示/关闭全部；打开时把所有贴图降到 NOTOPMOST，关闭后恢复 TOPMOST
@@ -302,6 +303,15 @@ FullscreenBypass: 已归还原前台
 - 热键删除：设置页五个热键行各加 28×28 ✕；`ClearHotkey` 清空配置、注销 `RegisterHotKey` 与 `EscOverPinHook`，行内显示「未设置」并禁用 ✕。窗口/全屏截图写 `-1` 哨兵，`ResolveScreenshotVk/ResolveFullscreenVk` 不再回退旧 `hotkeyKey/fullScreenHotkeyKey`；贴图/OCR/切换档位写 0。`HotkeyService.Describe(0,0)` 返回「未设置」。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2）；`IshWY.exe --smoke` 退出 0，五个热键均 `register=0x1`；2026-10-22 00:xx 主人验收「验收通过，做的非常好」。
 
+### 贴图来源与文字贴图（2026-10-25 中午）
+
+- 主人需求 m13221：剪贴板里是文字时能把文字贴出来且背景可选；能从截图历史贴最新一张；两者做成可选来源。
+- 来源配置：新增 `pinBehavior` 四档——`clipboard`（默认，剪贴板有图贴图、有字贴字）/ `latest`（只贴截图历史最新一张）/ `text`（只贴剪贴板文字）/ `off`（关闭贴图）。未知值归一为 `clipboard`，不写自动回退，行为可预期。
+- 文字贴图：`Services/PinTextCardRenderer.cs` 把文字渲染成 PNG 卡片（圆角、边框、自动换行、最多 4000 字/32 行、超出加省略号），再走现有 `NativePinWindow`，所以拖动/缩放/标注/裁剪/OCR/另存为/贴图管理都复用；`NativePinWindow.SetSourceScope("文字")` 让管理窗来源显示「文字」。背景色 `pinTextBackground`（默认 `#1F1F1F`），文字颜色按背景亮度自动取黑或白。
+- 最新截图：`CaptureHistoryService.GetItems()` 本身按 LastWriteTimeUtc 倒序，取 `[0]` 直接贴出，并把全部历史设为左右切换序列。
+- 入口与设置：主页贴图卡片描述与托盘入口文案跟随模式；设置 → 贴图新增「贴图行为」下拉、文字背景色（预览块 + #RRGGBB 输入 + 六个预设）、「预览文字贴图」按钮；模式切换/背景色修改即时写配置并更新提示。
+- 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2），`IshWY.exe --smoke` 退出 0，Debug PID 22912 已启动；待主人复测。
+
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
 - 主人确认的首次启动状态：窗口截图 `Alt+A`、全屏快速截图 `Alt+D`、默认「常规截图」、默认 Windows OCR（Umi 默认关闭）、开机自启动默认关闭、关闭主窗口驻留托盘。只影响全新配置；旧配置不迁移、不覆盖。
@@ -536,6 +546,7 @@ FullscreenBypass: 已归还原前台
 - [x] 主人复测 2026-10-23 晚五项中的②③④（Debug PID 39320）：滚轮约两格才切一窗；`[`/`]` 可切上/下一个窗口，改键删键立刻生效；设置窗默认 860×990 足够。
 - [x] 主人复测 2026-10-23 晚①⑤修订（Debug PID 51976，部分通过）：①缩放逻辑与边框/手柄方向通过，但黑色垫边被要求移除并改为可配置边框颜色；②③④通过；⑤Esc 仍不能首次直接退出，主人决定不再折腾，停止该方向投入。
 - [x] 主人验收 2026-10-23 深夜九（Debug PID 47920，待测项并入深夜十一，原话「你要我测的五个做的都达到了我的预期」）：①选区边框/8 个手柄用设置里的颜色，白色/亮青/亮黄等预设与 #RRGGBB 输入都生效，浅色与深色画面都看得清；②热键每行 ↻ 只恢复该项，表下按钮恢复全部 7 项；③「截图行为 → 恢复默认」回到常规取景 + 常规截图；④设置 → 提示里字号、九宫格位置、开关与三类文字可改，「预览提示」即时生效；⑤切换截图档位、截图成功、截图失败/异常分别弹出纯文字提示，不抢焦点、不挡鼠标；⑥取景器热键与切窗键跨表重复会被拒绝。
+- [x] 主人 2026-10-25 13:30 认可贴图来源与文字贴图「基本符合预期」，同意先提交并继续看社区 UI 分支（功能已构建、smoke 通过；未逐项复测文字卡片背景/预览与重启保留，后续随 UI 合并一起验）。
 - [x] 主人验收 2026-10-23 深夜十（Debug PID 57068，待测项并入深夜十一）：①「快捷键」标题右侧有「恢复默认快捷键」，每行 ↻ 仍只恢复该项；②「截图行为」标题右侧有「恢复默认」，原「截图热键行为」行已消失，恢复后为常规取景 + 常规截图；③选区颜色默认勾选「跟随主题色」，取景器边框与 8 个手柄显示系统强调色；取消勾选后可输入 #RRGGBB 或选预设色；④「提示 → 提示位置」选「自定义（编辑位置）」或点「编辑位置…」会打开铺满主屏幕的编辑器，拖动面板移动、拖右下角小方块缩放，保存后提示按同一位置预览；取消/Esc 不保存；九宫格各位置仍可用；⑤字号 11–32、三类开关与文字、预览提示、恢复默认提示均正常；⑥常规截图先框选再按 Tab：选区位置大小不变，能完整包住它的窗口存在时切到窗口截图，否则保持常规截图并提示；移动/缩放/回车确认仍按该选区工作。
 - [x] 主人验收 2026-10-23 深夜十二除提示材质外的全部（Debug PID 36388，原话「你要我测的都没问题，除了提示窗口材质显示」；材质由深夜十三/十四解决）：①提示背景材质选亚克力/液态玻璃时有真实模糊与透明层次，纯色/云母也正常；②贴图热键剪贴板无图、OCR 热键无图、延时开始都弹同款纯文字提示，不再出现系统通知；③延时设为 3/5 秒并与快捷档位组合，按下截图热键先倒计时再整屏截图，期间再按可取消；④常规档位延时仍先倒计时再冻结画面。
 - [x] 主人验收 2026-10-23 深夜十三（Debug PID 47000，原话「也行，正常生效了，那这个限制我接受」，冻结快照限制已接受）：①提示材质切亚克力/云母/液态玻璃，外观明显不同，且能看到提示框背后当前屏幕内容（与纯色对比）；②不透明度 35–100% 改变透出程度；③把提示移到不同背景（浅色/深色窗口）上，透出的内容随之变化；④「编辑位置」里的预览与真实提示一致，拖动/缩放后预览跟着更新；⑤保存后真实提示在保存位置出现，取消/Esc 不改原位置与外观；⑥纯色模式下调不透明度也生效；⑦提示仍不抢焦点、不挡鼠标。

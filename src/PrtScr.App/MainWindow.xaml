@@ -134,6 +134,7 @@
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="贴图" FontSize="18" FontWeight="SemiBold" />
                                     <TextBlock
+                                        x:Name="PinCardDescriptionText"
                                         Text="把剪贴板里的图片钉在桌面上。"
                                         MaxWidth="230"
                                         FontSize="12"
@@ -898,9 +899,64 @@
 
                 <Expander Header="贴图" HorizontalAlignment="Stretch">
                     <StackPanel Spacing="10" Margin="0,4">
+                        <TextBlock Text="贴图行为" TextWrapping="Wrap" />
+                        <ComboBox
+                            x:Name="PinBehaviorCombo"
+                            Width="420"
+                            HorizontalAlignment="Left"
+                            SelectionChanged="PinBehaviorCombo_SelectionChanged">
+                            <ComboBoxItem Content="剪贴板优先（图片 → 文字）" Tag="clipboard" />
+                            <ComboBoxItem Content="只贴最新截图" Tag="latest" />
+                            <ComboBoxItem Content="只贴剪贴板文字" Tag="text" />
+                            <ComboBoxItem Content="关闭贴图" Tag="off" />
+                        </ComboBox>
+                        <TextBlock x:Name="PinBehaviorHintText" Style="{StaticResource HintTextStyle}" />
+
+                        <TextBlock Text="文字贴图背景色" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border
+                                x:Name="PinTextColorPreview"
+                                Width="28"
+                                Height="28"
+                                CornerRadius="4"
+                                Background="#1F1F1F"
+                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1" />
+                            <TextBox
+                                x:Name="PinTextColorBox"
+                                Width="110"
+                                MaxLength="7"
+                                PlaceholderText="#1F1F1F"
+                                TextChanged="PinTextColorBox_TextChanged" />
+                            <ComboBox
+                                x:Name="PinTextColorPresetCombo"
+                                Width="150"
+                                PlaceholderText="预设背景"
+                                SelectionChanged="PinTextColorPreset_SelectionChanged">
+                                <ComboBoxItem Content="深灰" Tag="#1F1F1F" />
+                                <ComboBoxItem Content="浅白" Tag="#F7F7F7" />
+                                <ComboBoxItem Content="米色" Tag="#F3E9D2" />
+                                <ComboBoxItem Content="雾蓝" Tag="#263445" />
+                                <ComboBoxItem Content="墨绿" Tag="#1E332C" />
+                                <ComboBoxItem Content="暖棕" Tag="#3A2A22" />
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock x:Name="PinTextColorHintText" Style="{StaticResource HintTextStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Button
+                                x:Name="PinTextPreviewButton"
+                                Content="预览文字贴图"
+                                Click="PinTextPreview_Click" />
+                            <TextBlock
+                                Text="贴一段示例文字到桌面，关闭它即可。"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource HintTextStyle}" />
+                        </StackPanel>
+
                         <TextBlock
                             Text="新贴图初始大小（原图 80–100%）"
-                            TextWrapping="Wrap" />
+                            TextWrapping="Wrap"
+                            Margin="0,6,0,0" />
                         <NumberBox
                             x:Name="PinInitialScaleBox"
                             Width="220"
@@ -1134,7 +1190,7 @@
             <tb:TaskbarIcon.ContextFlyout>
                 <MenuFlyout x:Name="TrayMenu">
                     <MenuFlyoutItem Text="设置" Click="ShowSettings_Click" />
-                    <MenuFlyoutItem Text="从剪贴板贴图" Click="PastePin_Click" />
+                    <MenuFlyoutItem x:Name="TrayPinItem" Text="贴图（按设置）" Click="PastePin_Click" />
                     <MenuFlyoutItem Text="从剪贴板识别文字" Click="OcrClipboard_Click" />
                     <MenuFlyoutItem Text="全屏截图到剪贴板" Click="FullScreen_Click" />
                     <MenuFlyoutItem x:Name="DelayCaptureItem" Text="延时截图" Click="DelayCapture_Click" />

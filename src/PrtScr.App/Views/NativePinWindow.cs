@@ -399,6 +399,15 @@ public sealed unsafe partial class NativePinWindow
         PublishPinState();
     }
 
+    /// <summary>没有历史列表的贴图（例如文字贴图）也保留一个来源名，管理器里可区分。</summary>
+    public void SetSourceScope(string scope)
+    {
+        if (string.IsNullOrWhiteSpace(scope))
+            return;
+        _sourceScope = scope.Trim();
+        PublishPinState();
+    }
+
     /// <summary>在同一贴图窗内切换上一张/下一张截图，保持窗口中心不跳。</summary>
     private void Navigate(int direction)
     {
