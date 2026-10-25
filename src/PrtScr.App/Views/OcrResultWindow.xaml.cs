@@ -56,6 +56,11 @@ public sealed partial class OcrResultWindow : Window
     private readonly PrtScr.App.Services.KeyInterceptor _keys;
     private readonly nint _ownerHwnd;
     private bool _escapeRegistered;
+    private string _baseStatus = "";
+    private string _originalText = "";
+    private bool _copying;
+    private bool _closed;
+
     public OcrResultWindow(OcrResult result, long elapsedMs, nint ownerHwnd = 0)
     {
         _ownerHwnd = ownerHwnd;
@@ -110,6 +115,8 @@ public sealed partial class OcrResultWindow : Window
 
         Closed += (_, _) =>
         {
+            // 先标记关闭：下面清空文本会触发 TextChanged，复制若还在重试也不再回写界面。
+            _closed = true;
             EscRouter.Unregister(hwnd);
             UnregisterEscapeHotkey();
 
@@ -129,19 +136,59 @@ public sealed partial class OcrResultWindow : Window
             }
         };
 
-        if (result.Success)
+        if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
         {
-            StatusText.Text = $"识别完成 · 用时 {elapsedMs} ms";
+            _baseStatus = $"识别完成 · 用时 {elapsedMs} ms";
             EngineText.Text = $"引擎：{result.Engine}";
             TextOutput.Text = result.Text;
         }
+        else if (result.Success)
+        {
+            // 识别成功但没有文字：保留输入框，用户手动输入后仍可复制。
+            _baseStatus = $"未识别到文字 · 用时 {elapsedMs} ms";
+            EngineText.Text = $"引擎：{result.Engine} · 图片里可能没有可识别的文字";
+            TextOutput.Text = "";
+        }
         else
         {
-            StatusText.Text = "识别失败";
+            _baseStatus = "识别失败";
             EngineText.Text = result.Error ?? "未知错误";
             TextOutput.Text = "";
             TextOutput.IsEnabled = false;
         }
+
+        _originalText = TextOutput.Text;
+        StatusText.Text = _baseStatus;
+        UpdateCopyButton();
+    }
+
+    /// <summary>只有输入框可用、内容非空且没有正在进行的复制时，复制按钮才可点。</summary>
+    private void UpdateCopyButton() =>
+        CopyButton.IsEnabled = !_copying && TextOutput.IsEnabled && !string.IsNullOrWhiteSpace(TextOutput.Text);
+
+    /// <summary>复制结果是异步反馈，通知读屏软件播报状态变化。</summary>
+    private void AnnounceStatus(string text)
+    {
+        StatusText.Text = text;
+        Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(StatusText)
+            ?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
+    }
+
+    private void TextOutput_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_closed)
+            return;
+
+        UpdateCopyButton();
+        // 复制进行中由复制结果给出准确提示（会比对点击时与当前文本）。
+        if (_copying)
+            return;
+
+        var status = TextOutput.Text == _originalText
+            ? _baseStatus
+            : $"{_baseStatus} · 已编辑，复制会使用当前文本";
+        if (StatusText.Text != status)
+            StatusText.Text = status;
     }
 
     private void UnregisterEscapeHotkey()
@@ -153,13 +200,38 @@ public sealed partial class OcrResultWindow : Window
             new Windows.Win32.Foundation.HWND(WinRT.Interop.WindowNative.GetWindowHandle(this)), EscapeHotkeyId);
     }
 
-    private void Copy_Click(object sender, RoutedEventArgs e)
+    private async void Copy_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(TextOutput.Text))
+        // 复制的是点击这一刻的文本快照；重试期间按钮禁用，避免重复写剪贴板。
+        var text = TextOutput.Text;
+        if (_copying || _closed || string.IsNullOrWhiteSpace(text))
             return;
 
-        _ = PrtScr.App.Services.ClipboardService.SetTextAsync(TextOutput.Text);
-        StatusText.Text = "已复制到剪贴板";
+        _copying = true;
+        UpdateCopyButton();
+        AnnounceStatus("正在复制…");
+
+        bool ok;
+        try
+        {
+            ok = await PrtScr.App.Services.ClipboardService.SetTextAsync(text);
+        }
+        finally
+        {
+            _copying = false;
+        }
+
+        App.Log($"OCR: copy text {(ok ? "ok" : "failed")} chars={text.Length} closed={_closed}");
+        if (_closed)
+            return;
+
+        UpdateCopyButton();
+        if (!ok)
+            AnnounceStatus("复制失败：剪贴板可能被其他程序占用，请稍后再试");
+        else if (TextOutput.Text != text)
+            AnnounceStatus("已复制点击时的文本；之后的修改还没有复制");
+        else
+            AnnounceStatus($"已复制到剪贴板（{text.Length} 个字符）");
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)

@@ -39,6 +39,7 @@ public sealed partial class HistoryWindow : Window
     private bool _selectionMode;
     private bool _suppressSelectionSync;
     private bool _suppressExternalRefresh;
+    private bool _destructiveBusy;
     private long _lastEscapeTick;
 
     public HistoryWindow()
@@ -65,7 +66,8 @@ public sealed partial class HistoryWindow : Window
         _keys = new PrtScr.App.Services.KeyInterceptor(WindowNative.GetWindowHandle(this));
         _keys.KeyDown += vk =>
         {
-            if (vk == 0x1B && !HandleEscape())
+            // 删除确认框打开时 Esc 交给对话框取消，不能顺带把历史窗关掉。
+            if (vk == 0x1B && !_destructiveBusy && !HandleEscape())
                 Close();
         };
 
@@ -449,13 +451,32 @@ public sealed partial class HistoryWindow : Window
             : "当前分类还没有截图。";
         EmptyText.Visibility = shown == 0 ? Visibility.Visible : Visibility.Collapsed;
 
+        var title = CategoryTitle(_selectedCategoryKey);
+        var scope = CategoryScopeNote(_selectedCategoryKey);
+        ScopeText.Text = filteredCount == 0
+            ? $"「{title}」{scope}暂无截图。"
+            : filteredCount > shown
+                ? $"「{title}」{scope}共 {filteredCount} 张，列表只显示最新 {shown} 张；「清空分类」会删除全部 {filteredCount} 张。"
+                : $"「{title}」{scope}共 {filteredCount} 张，已全部显示。";
+
         if (shown == 0)
             StatusText.Text = string.Empty;
         else if (filteredCount > shown)
-            StatusText.Text = $"当前分类共 {filteredCount} 张，先显示最新 {shown} 张";
+            StatusText.Text = $"显示最新 {shown} / {filteredCount} 张";
         else
             StatusText.Text = $"当前分类 {shown} 张 · 单张另存为，多选批量另存为";
     }
+
+    private string CategoryTitle(string categoryKey) =>
+        _categories.FirstOrDefault(c => c.Key == categoryKey)?.Title ?? "当前分类";
+
+    /// <summary>「全部」和「窗口截图」是汇总分类，清空时会波及下面的子分类，要在文案里说清楚。</summary>
+    private static string CategoryScopeNote(string categoryKey) => categoryKey switch
+    {
+        AllCategoryKey => "（所有分类）",
+        WindowModeKey => "（含所有进程）",
+        _ => "",
+    };
 
     private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -733,6 +754,10 @@ public sealed partial class HistoryWindow : Window
 
     private async Task DeleteSelectedAsync()
     {
+        // 按钮、Delete 键与 KeyboardAccelerator 可能连续触发；确认框只开一个。
+        if (_destructiveBusy)
+            return;
+
         var selected = SelectedViews();
         if (selected.Count == 0)
         {
@@ -740,36 +765,92 @@ public sealed partial class HistoryWindow : Window
             return;
         }
 
-        _suppressExternalRefresh = true;
+        // 先固定要删的条目：确认期间列表刷新或新截图进来，都不会改变删除范围。
+        var targets = selected.Select(v => v.Item).ToList();
+        var size = FormatSize(targets.Sum(i => i.SizeBytes));
+        var message = targets.Count == 1
+            ? $"将永久删除这张截图（{selected[0].Caption}，{size}）。\n\n删除后无法恢复。"
+            : $"将永久删除选中的 {targets.Count} 张截图（共 {size}），未选中的截图不受影响。\n\n删除后无法恢复。";
+
+        _destructiveBusy = true;
         try
         {
-            var deleted = CaptureHistoryService.Instance.DeleteMany(selected.Select(v => v.Item));
-            await ReloadAsync();
-            StatusText.Text = $"已删除 {deleted} 张";
+            var confirmed = await ConfirmDialog.ShowAsync(
+                RootGrid, "删除截图", message, targets.Count == 1 ? "删除" : $"删除 {targets.Count} 张");
+            if (_closed)
+                return;
+            if (!confirmed)
+            {
+                StatusText.Text = "已取消删除";
+                return;
+            }
+
+            await DeleteTargetsAsync(targets, deleted => deleted == targets.Count
+                ? $"已删除 {deleted} 张"
+                : $"已删除 {deleted} 张，另有 {targets.Count - deleted} 张已不存在或删除失败（详见日志）");
         }
         finally
         {
-            _suppressExternalRefresh = false;
+            _destructiveBusy = false;
         }
-        HistoryChanged?.Invoke();
     }
 
-    private async void Clear_Click(object sender, RoutedEventArgs e)
+    private async void Clear_Click(object sender, RoutedEventArgs e) => await ClearCategoryAsync();
+
+    private async Task ClearCategoryAsync()
     {
-        var categoryTitle = _categories.FirstOrDefault(c => c.Key == _selectedCategoryKey)?.Title ?? "当前分类";
-        var targets = FilterItems(_selectedCategoryKey).ToList();
+        if (_destructiveBusy)
+            return;
+
+        // 范围按点击这一刻的分类快照确定，而不是只按列表里可见的最多 DisplayCap 张。
+        var categoryKey = _selectedCategoryKey;
+        var categoryTitle = CategoryTitle(categoryKey);
+        var targets = FilterItems(categoryKey).ToList();
         if (targets.Count == 0)
         {
             StatusText.Text = $"「{categoryTitle}」已经是空的";
             return;
         }
 
+        var hidden = Math.Max(0, targets.Count - DisplayCap);
+        var message =
+            $"将永久删除「{categoryTitle}」{CategoryScopeNote(categoryKey)}的全部 {targets.Count} 张截图（共 {FormatSize(targets.Sum(i => i.SizeBytes))}）。"
+            + (hidden > 0
+                ? $"\n\n其中 {hidden} 张较早的截图没有显示在列表里（列表最多显示最新 {DisplayCap} 张），也会一起删除。"
+                : "")
+            + "\n\n删除后无法恢复；确认期间新产生的截图不会被删除。";
+
+        _destructiveBusy = true;
+        try
+        {
+            var confirmed = await ConfirmDialog.ShowAsync(
+                RootGrid, "清空分类", message, $"删除 {targets.Count} 张");
+            if (_closed)
+                return;
+            if (!confirmed)
+            {
+                StatusText.Text = "已取消清空";
+                return;
+            }
+
+            await DeleteTargetsAsync(targets, deleted => deleted == targets.Count
+                ? $"已清空「{categoryTitle}」{deleted} 张"
+                : $"已删除「{categoryTitle}」{deleted} 张，另有 {targets.Count - deleted} 张已不存在或删除失败（详见日志）");
+        }
+        finally
+        {
+            _destructiveBusy = false;
+        }
+    }
+
+    private async Task DeleteTargetsAsync(List<HistoryItem> targets, Func<int, string> describe)
+    {
         _suppressExternalRefresh = true;
         try
         {
-            var count = CaptureHistoryService.Instance.DeleteMany(targets);
+            var deleted = CaptureHistoryService.Instance.DeleteMany(targets);
             await ReloadAsync();
-            StatusText.Text = $"已清空「{categoryTitle}」{count} 张";
+            StatusText.Text = describe(deleted);
         }
         finally
         {

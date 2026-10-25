@@ -83,9 +83,22 @@
                 </ListView.ItemTemplate>
             </ListView>
 
-            <Grid Grid.Column="1">
+            <Grid Grid.Column="1" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 常驻说明当前分类的真实数量与列表显示范围，清空/删除以此为准 -->
+                <TextBlock
+                    x:Name="ScopeText"
+                    FontSize="12"
+                    Opacity="0.75"
+                    TextWrapping="Wrap" />
+
                 <GridView
                     x:Name="HistoryGrid"
+                    Grid.Row="1"
                     SelectionMode="Single"
                     IsItemClickEnabled="True"
                     ItemClick="HistoryGrid_ItemClick"
@@ -168,6 +181,7 @@
 
                 <TextBlock
                     x:Name="EmptyText"
+                    Grid.Row="1"
                     Text="当前分类还没有截图。按截图热键截一张图，或检查“保存截图历史”是否已打开。"
                     TextWrapping="Wrap"
                     HorizontalAlignment="Center"
@@ -177,6 +191,7 @@
 
                 <ProgressRing
                     x:Name="LoadingRing"
+                    Grid.Row="1"
                     Width="36"
                     Height="36"
                     IsActive="False"
@@ -197,7 +212,7 @@
                 FontSize="12"
                 Opacity="0.62"
                 TextTrimming="CharacterEllipsis"
-                Text="选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。" />
+                Text="选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。删除与清空会先确认，确认后不可恢复。" />
 
             <Grid x:Name="BottomBar" Grid.Row="1" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
@@ -242,12 +257,12 @@
                         VerticalAlignment="Center"
                         Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
                     <Button
-                        Content="删除"
+                        Content="删除…"
                         Click="Delete_Click"
                         MinWidth="0"
                         Padding="10,6" />
                     <Button
-                        Content="清空分类"
+                        Content="清空分类…"
                         Click="Clear_Click"
                         MinWidth="0"
                         Padding="10,6" />
