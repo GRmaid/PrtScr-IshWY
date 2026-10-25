@@ -1,4 +1,4 @@
-# 实践小梅IshWY（IshWY）交接文档（2026-10-22）
+# 实践小梅IshWY（IshWY）交接文档（2026-10-25）
 
 > 给下一位接手的小智/开发者：先读这份，再读 `docs/ROADMAP.md` 与项目记忆。
 > 工作区：仓库根目录（开源项目，MIT，已初始化 git）。
@@ -48,7 +48,7 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 ```
 src/PrtScr.App/
   App.xaml.cs                 日志(加锁)、启动、单实例(\Local\IshWY.Activate)、--startup 静默模式、注入 WGC/DXGI 日志钩子、安装键盘钩子
-  MainWindow.xaml(.cs)        设置窗、托盘、五个动作的热键录制器与删除 ✕、延时截图/取消入口、鼠标指针开关、默认截图模式、开机自启动开关、截图历史开关/窗口、贴图管理入口、OCR 状态、Umi 端口
+  MainWindow.xaml(.cs)        设置窗（NavigationView 左侧十页导航，一次只显示一页；窄窗自动收成图标栏）、托盘、七个动作的热键录制/删除 ✕/单项恢复、延时截图/取消入口、鼠标指针开关、默认截图模式、开机自启动开关、截图历史开关/窗口、贴图来源/文字背景/初始大小、贴图管理入口、OCR 状态、Umi 端口
   Services/ConfigService.cs   便携 config.json
   Services/StartupService.cs  HKCU Run 开机自启动（值 IshWY，命令 exe --startup；移动目录后自动刷新）
   Services/CaptureHistoryService.cs  本机截图历史（data\history，每类默认 30 张；写入/读取/删除/清空/修剪）
@@ -63,12 +63,13 @@ src/PrtScr.App/
   Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService 维护所有贴图的 PinRecord 注册表、快照、命令与 PinsChanged；PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板；PasteByBehaviorAsync 按 pinBehavior 分派剪贴板图片/文字、最新截图或关闭状态；PasteText 供设置预览直接贴文字卡片）
   Services/PinTextCardRenderer.cs  把剪贴板文字排成圆角文字卡片 PNG（微软雅黑 16 DIP、最大 360 DIP 文本宽、自动换行、按背景亮度取黑/白字），复用 NativePinWindow 的贴图能力
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部；`CaptureMode`（Window/Normal，Tab 切换，起始模式读 `defaultCaptureMode`）；窗口预高亮/单击选窗两种模式共用；指针事件挂在根 `Root`；选区右上角「保存」/`Ctrl+S` 另存为，保存后仍复制并写历史；`Ctrl+C`（无选区）复制放大镜色值；19×19 取色器复用 WriteableBitmap 与 byte 缓冲
-  Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
+  Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；删除与清空分类先弹确认并保存目标快照；标题区写明分类真实张数与「列表只显示最新 120 张」；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
   Views/PinManagerWindow.xaml(.cs) + PinCardView.cs  贴图管理窗：全部贴图卡片、复制/另存/OCR/关闭/恢复交互、隐藏/显示/关闭全部；打开时把所有贴图降到 NOTOPMOST，关闭后恢复 TOPMOST
   Views/PinSnapGuide.cs        拖动贴图时的 8px 吸附参考线（两条 1px 青色分层线，松手即隐藏）
   Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键菜单可锁定/点击穿透/裁剪/另存/打开历史；标注工具栏「完成」= 烘焙+复制、「另存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；指针锚定滚轮缩放、左右半屏切换历史、8px 吸附、拖动加 SWP_NOREDRAW，退出标注回收 DIB；工具栏按宽度分两排并在文字工具下显示字号步进器；窗口类挂 IDC_ARROW 光标，文字输入框按图片原点定位、输入中可用滚轮调字号）
   Views/AnnotationWindow.xaml(.cs)      旧独立标注窗（已不用于贴图，保留）
-  Views/OcrResultWindow.xaml(.cs)   OCR 结果窗（关闭时清空文本，释放大段 OCR 结果）
+  Views/OcrResultWindow.xaml(.cs)   OCR 结果窗（复制按钮随可编辑文本/剪贴板忙闲启停，复制失败、复制后再编辑都有提示；关闭时清空文本，释放大段 OCR 结果）
+  Views/ConfirmDialog.cs        历史删除/清空的 ContentDialog 封装（默认「取消」，主题跟随宿主）
 src/PrtScr.Capture/
   ScreenCapturer.cs           GDI 虚拟屏捕获（CAPTUREBLT / 普通两种）
   WindowCapture.cs            PrintWindow(PW_RENDERFULLCONTENT) → WGC 窗口回退；9×9 黑屏判定
@@ -311,6 +312,17 @@ FullscreenBypass: 已归还原前台
 - 最新截图：`CaptureHistoryService.GetItems()` 本身按 LastWriteTimeUtc 倒序，取 `[0]` 直接贴出，并把全部历史设为左右切换序列。
 - 入口与设置：主页贴图卡片描述与托盘入口文案跟随模式；设置 → 贴图新增「贴图行为」下拉、文字背景色（预览块 + #RRGGBB 输入 + 六个预设）、「预览文字贴图」按钮；模式切换/背景色修改即时写配置并更新提示。
 - 验证：`dotnet build PrtScr.sln -c Debug --nologo` 0 错误（仅既有 CS0067×2），`IshWY.exe --smoke` 退出 0，Debug PID 22912 已启动；待主人复测。
+
+### 社区 UI 重构合并（2026-10-25 下午）
+
+- 来源：Aevrilen 的 fork 分支 `ui/frontend-interactions-v2`，tip `0157205`（父提交正是 `e82ad8e`），由 Claude 实现。分支在独立 worktree `E:/Explore/GoodGood/PrtScr-ui-review` 中构建通过（0 错误，仅 CS0067 ×2）。其自带 `docs/UI_VALIDATION.md` 明确写了未做真实 UI、截图、读屏、tooltip 与 `--smoke` 验收，只能当构建声明，不能当运行证据。
+- 合并：主分支先提交贴图批次 `e56b8ba`，再 `git merge --no-ff` 得到 `5ffd9bd`。唯一冲突是 `src/PrtScr.App/MainWindow.xaml`；处理方式是采用社区版布局，再把「贴图来源 / 文字贴图背景与预览 / 初始大小」三段设置和控制名重新插回 `PinSection`。`MainWindow.xaml.cs` 自动合并，贴图字段与方法都保留，`PasteByBehaviorAsync` 两处入口仍在。
+- 信息架构：根 Grid 保留自定义背景图（opacity 0.25），左侧新增 `NavigationView SettingsNav`（Auto 显示、800/0 阈值、200 展开宽、无设置项与返回键），内容区一次只显示一个 `StackPanel`：主页 / 快捷键 / 截图行为 / 贴图 / 提示 / 截图历史 / 启动与托盘 / 外观 / OCR 引擎 / 关于；内容宽度上限 760，整页可滚动，窄窗自动收成图标栏；窗口初始尺寸不超过工作区 −40。
+- 主页：2×2 操作卡片保留，窗口卡片标题/说明随档位、起始模式、倒计时实时更新；四张卡的热键角标仍在；历史摘要卡与「打开历史 / 屏幕贴图管理」保留；贴图卡片说明与托盘入口文案仍跟随 `pinBehavior` 变化。
+- 截图历史：删除与「清空分类」改为 `Views/ConfirmDialog.cs` 的 ContentDialog，默认按钮是「取消」；执行前对目标做快照，即使确认期间新增截图也不会误删；标题区写明当前分类真实张数、列表只显示最新 120 张、以及清空会删整个分类；删除/清空期间禁用重复点击，Esc 在对话框打开时不关历史窗。
+- OCR 结果窗：复制按钮初始禁用，只有存在非空可编辑文本且不在复制中才启用；复制取点击时快照，剪贴板忙/失败、复制后继续编辑都会提示；状态文本带读屏播报属性；窗口关闭后回调不再回写。
+- 贴图页：社区版把设置拆成页后，贴图页仍有「贴图来源」四档、「文字贴图」背景色（预览块 + #RRGGBB + 六预设 + 预览按钮）与「初始大小」80–100%；本轮只重排 UI，不改贴图逻辑。
+- 验证：合并后 `dotnet build PrtScr.sln -c Debug --nologo` 退出 0、0 错误、仅 CS0067 ×2（35.19s）；`IshWY.exe --smoke` 退出 0，日志 13:37:35 五个热键均 `register=0x1`、取景器预创建、`Memory[startup] ws=176MB private=105MB managed=3MB`；Debug PID 40664 已启动，标题「实践小梅IshWY 设置」，待主人实机复测。上述只证明能构建/启动，不证明交互与视觉效果。
 
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
@@ -587,3 +599,4 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-21 13:16 取景器 HUD：底部常驻模式/快捷键提示、选区外侧「截图 / 识别 / 保存」操作条、尺寸与进程提示纯数据化、取色器与 toast 避让 HUD 全部通过；顶部模式徽标已移除，Tab 与模式名共用一个蓝框且无灰色键帽。
 - [x] 主人验收 2026-10-21 13:46 贴图标注工具栏 + 文字输入 + 光标：分组两排/窄图降级、撤销/清空禁用态、当前工具/颜色/快捷键提示、Enter 完成与 Ctrl+S 另存均通过；文字输入框贴合点击处、字号按钮/滚轮可调、最终位置与字号正确；鼠标指针不再被贴图窗口隐藏。
 - [x] 主人验收 2026-10-21 凌晨补丁：① 窗口模式悬停/选中窗口时尺寸提示旁出现「进程 xxx.exe」，常规模式不出现；② 滚轮循环到目标窗口后直接按 `Enter`，无需单击即可截该窗口并复制/写历史（常规模式按同一矩形裁冻结帧）；③ 右键取消仍正常；④ 回车捕获改为不预先 `UpdateVisuals()`，主人反馈整体满意，重操作内存约 165 MB。构建 0 错误、`--smoke` 通过
+- [ ] 主人复测 2026-10-25 下午社区 UI 合并（Debug PID 40664）：① 左侧十页导航逐页切换，窄窗收成图标栏；② 主页四卡与历史摘要、窗口卡片动态文案；③ 贴图页仍有来源四档、文字背景/预设/预览、初始大小，四种来源都能用；④ 历史删除/清空先确认，取消与 Esc 不删，标题真实张数与 120 张上限说明正确；⑤ OCR 复制按钮空文本禁用、成功/失败/复制后再编辑提示正确；⑥ 主题、100%/125%/150% 缩放、重启后配置保留；⑦ 启动项、热键、托盘、单实例不回归。
