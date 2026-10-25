@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PrtScr.App.Services;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.UI;
 using WinRT.Interop;
@@ -567,6 +568,82 @@ public sealed partial class HistoryWindow : Window
         HistoryGrid.SelectedItems.OfType<HistoryItemView>()
             .OrderByDescending(v => v.Item.CreatedAt)
             .ToList();
+
+    /// <summary>
+    /// 把选中的历史截图作为真实 PNG 文件拖到资源管理器 / 微信 / 文档等外部程序。
+    /// 拖已选的卡片 = 整批；拖未选中的卡片 = 只拖这一张，避免误带上一批勾选。
+    /// 复制语义：历史原图与剪贴板都不变。
+    /// </summary>
+    private void HistoryGrid_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        var dragged = e.Items.OfType<HistoryItemView>().FirstOrDefault();
+        if (dragged is null)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        var selected = SelectedViews();
+        var batch = selected.Contains(dragged) ? selected : new List<HistoryItemView> { dragged };
+
+        e.Data.RequestedOperation = DataPackageOperation.Copy;
+        e.Data.Properties.Title = batch.Count > 1
+            ? $"IshWY 截图 · {batch.Count} 张"
+            : dragged.Item.FilePath is { } path ? Path.GetFileName(path) : "IshWY 截图";
+
+        // DragItemsStarting 没有 GetDeferral，不能在这里 await 文件；
+        // 用 SetDataProvider 延迟到目标程序真正取数据时再解析 StorageFile。
+        e.Data.SetDataProvider(StandardDataFormats.StorageItems, async request =>
+        {
+            var deferral = request.GetDeferral();
+            try
+            {
+                var files = new List<StorageFile>();
+                foreach (var view in batch)
+                {
+                    try
+                    {
+                        files.Add(await StorageFile.GetFileFromPathAsync(view.Item.FilePath));
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"History: 拖出时找不到 {Path.GetFileName(view.Item.FilePath)} {ex.Message}");
+                    }
+                }
+
+                if (files.Count == 0)
+                {
+                    App.Log("History: 拖出失败，所有截图文件都不存在");
+                    return;
+                }
+
+                request.SetData(files);
+                App.Log($"History: 拖出 {files.Count} 张截图");
+            }
+            catch (Exception ex)
+            {
+                App.Log($"History: 拖出异常 {ex}");
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        });
+
+        StatusText.Text = batch.Count > 1
+            ? $"正在拖出 {batch.Count} 张截图（复制到目标程序）"
+            : "正在拖出截图（复制到目标程序）";
+    }
+
+    private void HistoryGrid_DragItemsCompleted(object sender, DragItemsCompletedEventArgs e)
+    {
+        var count = e.Items.OfType<HistoryItemView>().Count();
+        StatusText.Text = e.DropResult == DataPackageOperation.None
+            ? "已取消拖出"
+            : e.DropResult == DataPackageOperation.Copy
+                ? (count > 1 ? $"已拖出 {count} 张截图（复制）" : "已拖出截图（复制）")
+                : "已拖出截图";
+    }
 
     private async void Copy_Click(object sender, RoutedEventArgs e) => await CopySelectedAsync();
 

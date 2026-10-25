@@ -120,6 +120,7 @@ public sealed partial class MainWindow : Window
         _suppressCaptureOptions = true;
         DelayCombo.SelectedIndex = DelayToIndex(App.Config.Current.CaptureDelaySeconds);
         CaptureCursorToggle.IsOn = App.Config.Current.CaptureCursor;
+        GameFullscreenQuickToggle.IsOn = App.Config.Current.GameFullscreenQuickCapture;
         DefaultModeCombo.SelectedIndex = IsNormalDefaultMode() ? 1 : 0;
         _suppressCaptureOptions = false;
 
@@ -901,6 +902,21 @@ public sealed partial class MainWindow : Window
         App.Log($"CaptureOptions: cursor={enabled}");
     }
 
+    private void GameFullscreenQuickToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressCaptureOptions || GameFullscreenQuickToggle is null)
+            return;
+
+        var enabled = GameFullscreenQuickToggle.IsOn;
+        if (App.Config.Current.GameFullscreenQuickCapture == enabled)
+            return;
+
+        App.Config.Current.GameFullscreenQuickCapture = enabled;
+        App.Config.Save();
+        UpdateCaptureOptions();
+        App.Log($"CaptureOptions: gameFullscreenQuick={enabled}");
+    }
+
     private static int DelayToIndex(int seconds) => seconds switch
     {
         3 => 1,
@@ -929,6 +945,9 @@ public sealed partial class MainWindow : Window
             ? $"当前：按下截图热键后等待 {delay} 秒再冻结画面；等待期间再按一次截图热键可取消。"
             : "当前：截图热键立即冻结画面；托盘菜单的「延时截图」默认等 3 秒。";
         CaptureOptionsText.Text += cursor ? " 截图会包含鼠标指针。" : " 截图不包含鼠标指针。";
+        CaptureOptionsText.Text += App.Config.Current.GameFullscreenQuickCapture
+            ? " 全屏游戏里按截图热键会直接截整屏，不弹取景器。"
+            : " 全屏游戏里仍会弹出取景器，可能短暂切换画面。";
 
         var quick = IsQuickProfile();
         DefaultModeCombo.IsEnabled = !quick;
@@ -1553,22 +1572,26 @@ public sealed partial class MainWindow : Window
         }
 
         App.Log("QuickCapture: hotkey pressed");
+        Services.FullscreenBypass? bypass = null;
         try
         {
-            using var bypass = await Services.FullscreenBypass.BeginAsync();
-
+            // 先直接抓：WGC/DXGI 在大多数窗口化、无边框全屏下不需要抢焦点。
+            // 只有首帧失败或疑似黑屏（独占全屏）才短暂切前台，避免每次按热键都闪一下、游戏音频中断。
             var result = await Services.CaptureService.CaptureFullScreenPngAsync();
-            if (result.LikelyBlack)
+            if (result.Png is null || result.LikelyBlack)
             {
-                App.Log($"QuickCapture: 首帧疑似黑屏，重试一次 (bypass={bypass.Activated})");
+                App.Log($"QuickCapture: 首帧不可用 black={result.LikelyBlack}，短暂切前台后重试");
+                bypass = await Services.FullscreenBypass.BeginAsync();
                 await Task.Delay(150);
                 result = await Services.CaptureService.CaptureFullScreenPngAsync();
             }
 
+            var activated = bypass?.Activated ?? false;
+
             if (result.Png is null)
             {
                 SetStatus("全屏截图失败");
-                App.Log($"QuickCapture: 失败，无图像 (bypass={bypass.Activated})");
+                App.Log($"QuickCapture: 失败，无图像 (bypass={activated})");
                 ToastService.ShowCaptureFailure();
                 return;
             }
@@ -1576,24 +1599,23 @@ public sealed partial class MainWindow : Window
             if (result.LikelyBlack)
             {
                 SetStatus("当前画面像是独占全屏游戏，Windows 无法截取");
-                App.Log($"QuickCapture: 两次都是黑屏 (bypass={bypass.Activated})");
+                App.Log($"QuickCapture: 两次都是黑屏 (bypass={activated})");
                 ToastService.ShowCaptureFailure();
                 return;
             }
 
             var copyTask = Services.ClipboardService.SetImageAsync(result.Png);
-            var historyTask = Services.CaptureHistoryService.Instance.AddAsync(
+            var historyTask = await Services.CaptureHistoryService.Instance.AddAsync(
                 result.Png, Services.HistoryCaptureMode.Normal);
-            await Task.WhenAll(copyTask, historyTask);
+            var ok = await copyTask;
 
-            var ok = copyTask.Result;
             SetStatus(ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）");
             if (ok)
                 ToastService.ShowCaptureSuccess();
             else
                 ToastService.ShowCaptureFailure();
-            App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={bypass.Activated} history={historyTask.Result is not null}");
-            if (historyTask.Result is { } savedPath)
+            App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={activated} history={historyTask is not null}");
+            if (historyTask is { } savedPath)
                 App.Log($"QuickCapture: history saved {savedPath}");
         }
         catch (Exception ex)
@@ -1603,6 +1625,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            bypass?.Dispose();
             Volatile.Write(ref _quickCaptureBusy, 0);
         }
     }
@@ -2180,6 +2203,15 @@ public sealed partial class MainWindow : Window
             if (delay > 0)
             {
                 await StartDelayedCaptureAsync(delay);
+                return;
+            }
+
+            if (delay == 0 && !IsQuickProfile()
+                && App.Config.Current.GameFullscreenQuickCapture
+                && Services.FullscreenBypass.IsForegroundFullscreenGame())
+            {
+                App.Log("Capture: 前台全屏游戏，自动改用全屏快照，避免取景器抢焦点");
+                OnFullScreenPressed();
                 return;
             }
 

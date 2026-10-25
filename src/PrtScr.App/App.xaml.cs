@@ -18,12 +18,8 @@ public partial class App : Application
 
     public App()
     {
-        Log("App: ctor start");
-        InitializeComponent();
-        Log("App: InitializeComponent done");
-        Services.EscOverPinHook.Install();
-        PrtScr.Capture.WgcWindowCapture.Log = Log;
-        PrtScr.Capture.DesktopDuplicationCapture.Log = Log;
+        // 先挂异常处理，再初始化 XAML：InitializeComponent 里的资源/PRI 失败也要能落日志并提示，
+        // 否则进程会在没有任何窗口的情况下静默退出，用户只看到「启动失败」。
         UnhandledException += (_, e) =>
         {
             var detail = $"{e.Message}\n\n{e.Exception?.StackTrace}";
@@ -31,24 +27,77 @@ public partial class App : Application
             ShowFatal(detail);
             e.Handled = true;
         };
+
+        Log("App: ctor start");
+        try
+        {
+            InitializeComponent();
+            Log("App: InitializeComponent done");
+        }
+        catch (Exception ex)
+        {
+            Log($"App: InitializeComponent 失败 {ex}");
+            ShowFatal($"初始化界面失败，请确认 IshWY.pri 与 XBF 资源完整。\n\n{ex}");
+            throw;
+        }
+
+        try
+        {
+            Services.EscOverPinHook.Install();
+        }
+        catch (Exception ex)
+        {
+            // 钩子安装失败只影响 Esc 兜底，没有理由拖死整个程序。
+            Log($"App: EscOverPinHook 安装失败 {ex.Message}");
+        }
+
+        PrtScr.Capture.WgcWindowCapture.Log = Log;
+        PrtScr.Capture.DesktopDuplicationCapture.Log = Log;
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Log("OnLaunched: start");
-        Config.Load();
-        Log("OnLaunched: config loaded");
+        try
+        {
+            Config.Load();
+            Log("OnLaunched: config loaded");
+        }
+        catch (Exception ex)
+        {
+            // 配置损坏不应阻止启动：ConfigService 会用默认值继续，最坏只是这次不读用户设置。
+            Log($"OnLaunched: 配置读取失败，使用默认值 {ex}");
+        }
 
         // 单实例：托盘常驻程序被再次启动时，唤醒已有实例的设置窗后退出
-        if (!TryAcquireSingleInstance())
+        bool isFirstInstance;
+        try
+        {
+            isFirstInstance = TryAcquireSingleInstance();
+        }
+        catch (Exception ex)
+        {
+            // 命名事件可能因权限/会话隔离失败；宁可允许启动，也不要让程序完全打不开。
+            Log($"OnLaunched: 单实例检测失败，按首实例继续 {ex.Message}");
+            isFirstInstance = true;
+        }
+
+        if (!isFirstInstance)
         {
             Log("OnLaunched: 已有实例，已请求其显示设置窗，本进程退出");
             PInvoke.ExitProcess(0);
             return;
         }
 
-        // 便携版被移动后，登录启动项仍指向旧路径；每次启动顺手校正
-        StartupService.RefreshIfEnabled();
+        try
+        {
+            // 便携版被移动后，登录启动项仍指向旧路径；每次启动顺手校正
+            StartupService.RefreshIfEnabled();
+        }
+        catch (Exception ex)
+        {
+            Log($"OnLaunched: 启动项校正失败 {ex.Message}");
+        }
 
         var startHidden = Environment.GetCommandLineArgs()
             .Any(a => a.Equals("--startup", StringComparison.OrdinalIgnoreCase));

@@ -48,7 +48,27 @@ internal sealed class FullscreenBypass : IDisposable
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hwnd, int cmd);
 
+    [DllImport("shell32.dll")]
+    private static extern int SHQueryUserNotificationState(out int state);
+
     private const int SW_RESTORE = 9;
+
+    /// <summary>
+    /// 当前前台是否处于全屏游戏/全屏应用状态。独占全屏下弹取景器会触发模式切换，
+    /// 导致短暂黑屏和游戏音频中断；该状态用于改走不抢焦点的全屏快照。
+    /// </summary>
+    public static bool IsForegroundFullscreenGame()
+    {
+        try
+        {
+            // QUNS_BUSY=2（全屏应用）、QUNS_RUNNING_D3D_FULL_SCREEN=3（D3D 独占全屏）、QUNS_PRESENTATION_MODE=4
+            return SHQueryUserNotificationState(out var state) == 0 && state is 2 or 3 or 4;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect

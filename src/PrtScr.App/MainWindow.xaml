@@ -867,6 +867,10 @@
                             x:Name="CaptureCursorToggle"
                             Header="截图包含鼠标指针（截图取景和全屏截图都生效）"
                             Toggled="CaptureCursorToggle_Toggled" />
+                        <ToggleSwitch
+                            x:Name="GameFullscreenQuickToggle"
+                            Header="游戏全屏时直接全屏截图（不弹取景器，避免抢占焦点导致声音中断）"
+                            Toggled="GameFullscreenQuickToggle_Toggled" />
                         <TextBlock x:Name="CaptureOptionsText" Style="{StaticResource HintTextStyle}" />
 
                         <TextBlock Text="选区边框颜色" Style="{StaticResource SectionTitleStyle}" />

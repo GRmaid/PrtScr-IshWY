@@ -79,6 +79,10 @@ public sealed class AppConfig
     [JsonPropertyName("captureCursor")]
     public bool CaptureCursor { get; set; } = false;
 
+    /// <summary>前台是全屏游戏/全屏应用时，直接全屏快照，避免弹取景器抢焦点导致音频中断。默认开启。</summary>
+    [JsonPropertyName("gameFullscreenQuickCapture")]
+    public bool GameFullscreenQuickCapture { get; set; } = true;
+
     /// <summary>截图档位：normal = 常规取景（冻屏后框选/选窗），quick = 快捷全屏（直接进剪贴板）。</summary>
     [JsonPropertyName("captureProfile")]
     public string CaptureProfile { get; set; } = "normal";

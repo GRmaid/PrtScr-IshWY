@@ -47,8 +47,8 @@ Windows 截图工具，特色是「**窗口内容捕获**」：
 
 ```
 src/PrtScr.App/
-  App.xaml.cs                 日志(加锁)、启动、单实例(\Local\IshWY.Activate)、--startup 静默模式、注入 WGC/DXGI 日志钩子、安装键盘钩子
-  MainWindow.xaml(.cs)        设置窗（NavigationView 左侧十页导航，一次只显示一页；窄窗自动收成图标栏）、托盘、七个动作的热键录制/删除 ✕/单项恢复、延时截图/取消入口、鼠标指针开关、默认截图模式、开机自启动开关、截图历史开关/窗口、贴图来源/文字背景/初始大小、贴图管理入口、OCR 状态、Umi 端口
+  App.xaml.cs                 日志(加锁)、启动、单实例(\Local\IshWY.Activate)、--startup 静默模式、注入 WGC/DXGI 日志钩子、安装键盘钩子；XAML 初始化/配置读取/单实例/启动项失败都会落日志并尽量继续启动
+  MainWindow.xaml(.cs)        设置窗（NavigationView 左侧十页导航，一次只显示一页；窄窗自动收成图标栏）、托盘、七个动作的热键录制/删除 ✕/单项恢复、延时截图/取消入口、鼠标指针开关、游戏全屏自动快照开关、默认截图模式、开机自启动开关、截图历史开关/窗口、贴图来源/文字背景/初始大小、贴图管理入口、OCR 状态、Umi 端口
   Services/ConfigService.cs   便携 config.json
   Services/StartupService.cs  HKCU Run 开机自启动（值 IshWY，命令 exe --startup；移动目录后自动刷新）
   Services/CaptureHistoryService.cs  本机截图历史（data\history，每类默认 30 张；写入/读取/删除/清空/修剪）
@@ -57,13 +57,13 @@ src/PrtScr.App/
   Services/KeyInterceptor.cs  窗口消息层拦截 Enter/Esc/Tab/O（可选）；MakeClientAreaFullWindow 把 1px 非客户区并进客户区
   Services/EscRouter.cs       全局 Esc 统一仲裁：编辑中只退编辑、OCR/贴图重叠关最上层、不重叠先关 OCR
   Services/EscOverPinHook.cs  WH_KEYBOARD_LL：全屏截图组合键 + 取景窗可见期间的 Tab/Esc/Enter/O/Ctrl+C/Ctrl+S 直通（不依赖取景窗焦点；钩子内自记账修饰键 + 300ms 去抖；回调内不写盘、日志走队列；兜底命中时请求重装自愈）
-  Services/FullscreenBypass.cs 抢前台逼游戏退出独占全屏（1×1 全透明分层窗 + AttachThreadInput，等 500ms，退出时还原前台/还原最小化）
+  Services/FullscreenBypass.cs 全屏游戏检测（SHQueryUserNotificationState）+ 抢前台逼游戏退出独占全屏（1×1 全透明分层窗 + AttachThreadInput，等 500ms，退出时还原前台/还原最小化）；仅在首帧黑屏/失败时调用
   Services/ClipboardService.cs 剪贴板重试
   Services/CaptureService.cs  采集编排；CaptureMonitorBestAsync 四层引擎；DrawCursorIfEnabled 统一合成鼠标指针
   Services/OcrUiService.cs / PinService.cs / AnnotationRenderer.cs / AnnotationModels.cs（PinService 维护所有贴图的 PinRecord 注册表、快照、命令与 PinsChanged；PastePng / PastePngAndEdit 可从历史字节直接贴图，不经过剪贴板；PasteByBehaviorAsync 按 pinBehavior 分派剪贴板图片/文字、最新截图或关闭状态；PasteText 供设置预览直接贴文字卡片）
   Services/PinTextCardRenderer.cs  把剪贴板文字排成圆角文字卡片 PNG（微软雅黑 16 DIP、最大 360 DIP 文本宽、自动换行、按背景亮度取黑/白字），复用 NativePinWindow 的贴图能力
   Views/CaptureOverlayWindow.xaml(.cs)  冻屏取景 + 窗口局部；`CaptureMode`（Window/Normal，Tab 切换，起始模式读 `defaultCaptureMode`）；窗口预高亮/单击选窗两种模式共用；指针事件挂在根 `Root`；选区右上角「保存」/`Ctrl+S` 另存为，保存后仍复制并写历史；`Ctrl+C`（无选区）复制放大镜色值；19×19 取色器复用 WriteableBitmap 与 byte 缓冲
-  Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；删除与清空分类先弹确认并保存目标快照；标题区写明分类真实张数与「列表只显示最新 120 张」；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
+  Views/HistoryWindow.xaml(.cs)         截图历史窗（缩略图网格、复制/贴图/标注/另存为/删除/清空/打开文件夹；卡片支持拖到外部程序，选中多张时整批拖出；删除与清空分类先弹确认并保存目标快照；标题区写明分类真实张数与「列表只显示最新 120 张」；根 Grid PreviewKeyDown 处理 Esc；AppWindow.SetIcon 与主窗一致；关闭时清空 ItemsSource/缩略图集合）
   Views/PinManagerWindow.xaml(.cs) + PinCardView.cs  贴图管理窗：全部贴图卡片、复制/另存/OCR/关闭/恢复交互、隐藏/显示/关闭全部；打开时把所有贴图降到 NOTOPMOST，关闭后恢复 TOPMOST
   Views/PinSnapGuide.cs        拖动贴图时的 8px 吸附参考线（两条 1px 青色分层线，松手即隐藏）
   Views/NativePinWindow.cs + .Edit.cs   原生贴图窗口 + 原位标注（Esc 关闭 = 自身 30ms 轮询后交给 EscRouter 仲裁；右键菜单可锁定/点击穿透/裁剪/另存/打开历史；标注工具栏「完成」= 烘焙+复制、「另存」= 烘焙+复制+另存为；不常驻全分辨率解码位图，按需解码并直接绘制到常驻 DIB；指针锚定滚轮缩放、左右半屏切换历史、8px 吸附、拖动加 SWP_NOREDRAW，退出标注回收 DIB；工具栏按宽度分两排并在文字工具下显示字号步进器；窗口类挂 IDC_ARROW 光标，文字输入框按图片原点定位、输入中可用滚轮调字号）
@@ -348,6 +348,18 @@ FullscreenBypass: 已归还原前台
 - 发布：提交 `ea25570`、tag `v1.2.0`、Release workflow 40181482458 成功；https://github.com/GRmaid/PrtScr-IshWY/releases/tag/v1.2.0 为 Latest（非 draft/pre），GitHub 资产 30,696,712 字节、sha256 `112e6d8d06d7fe69d1762c3df63c4de799b5da8a18061e437ef1f6ace69118ae`，下载回读一致；`C:\Users\asus\DeskBox\我的桌面\IshWY-1.2.0-win-x64.zip` 同哈希。
 - 发布注意：`--smoke` 会把 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IshWY` 指向测试副本；本轮已恢复为 Debug 路径。全新配置/旧配置迁移未在本轮重测。
 
+### 全屏游戏快照、启动加固与历史拖出（2026-10-25 夜）
+
+- 触发：主人 m14444 反馈三件事——游戏里按截图热键会短暂卡顿且游戏声音消失；IshWY 启动失败；确认截图历史要支持多选整批拖到其他软件。
+- 游戏卡顿根因：OnFullScreenPressed 原来无条件先 FullscreenBypass.BeginAsync()，创建 1×1 置顶分层窗并用 AttachThreadInput 抢前台，固定等 500ms 才截图；常规档位随后还会创建全屏取景器。独占全屏游戏因此发生焦点/显示模式切换，声音被短暂中断。
+- 修复一：OnFullScreenPressed 改为先直接 CaptureFullScreenPngAsync()；只有首帧为空或 LikelyBlack 才调用 bypass，再等 150ms 重试一次。bypass 可空并在 finally 中释放，日志记录 bypass=True/False。
+- 修复二：FullscreenBypass.IsForegroundFullscreenGame() 用 SHQueryUserNotificationState 判断 QUNS_BUSY / QUNS_RUNNING_D3D_FULL_SCREEN / QUNS_PRESENTATION_MODE。OnHotkeyPressed 在常规档位、无延时、开启新配置 gameFullscreenQuickCapture（默认 true）且前台是全屏游戏时，直接走 OnFullScreenPressed()，不再创建取景器，避免抢焦点导致声音中断；快捷档位和延时截图行为不变。
+- 设置：设置 → 截图行为在鼠标指针开关下方新增「游戏全屏时直接全屏截图（不弹取景器，避免抢占焦点导致声音中断）」；GameFullscreenQuickToggle_Toggled 即时保存并刷新说明。
+- 启动加固：App 构造先挂 UnhandledException 再 InitializeComponent，失败时记录并弹「初始化界面失败…请确认 IshWY.pri 与 XBF 资源完整」；EscOverPinHook.Install 失败只记日志不阻断启动。OnLaunched 对 Config.Load、TryAcquireSingleInstance、StartupService.RefreshIfEnabled 分别 try/catch，单实例失败按首实例继续启动，启动项校正失败只记日志。
+- 历史拖出：HistoryWindow 的 HistoryGrid 设置 CanDragItems=True，新增 DragItemsStarting / DragItemsCompleted。拖已选中的卡片时整批、拖未选中卡片只带这一张；DataPackage.RequestedOperation=Copy，SetDataProvider(StandardDataFormats.StorageItems, ...) 在目标真正取数据时才异步解析 StorageFile（DragItemsStartingEventArgs 没有 GetDeferral，不能直接 await）。落地是真实 PNG，历史原图与剪贴板不变；取消拖出显示「已取消拖出」。
+- 验证：dotnet build PrtScr.sln -c Debug --nologo 退出 0、0 错误、仅既有 CS0067 ×2（14.85s）；IshWY.exe --smoke 退出 0，五个热键 register=0x1、取景器预创建、Memory[startup] ws=176MB private=105MB managed=4MB；Debug PID 48796。主人 2026-10-25 21:35 实测通过并反馈「做的不错」：游戏内截图卡顿/断音消失，独占全屏直接整屏，历史单张与多选整批拖出正常。
+- 说明：启动失败当时没有留下崩溃日志或 WER 记录，无法复现具体原因；本轮只做启动阶段加固与可诊断化，不能宣称根因已定位。
+
 ### v1.0.0 初始状态与瘦身发布（2026-10-22 凌晨）
 
 - 主人确认的首次启动状态：窗口截图 `Alt+A`、全屏快速截图 `Alt+D`、默认「常规截图」、默认 Windows OCR（Umi 默认关闭）、开机自启动默认关闭、关闭主窗口驻留托盘。只影响全新配置；旧配置不迁移、不覆盖。
@@ -624,4 +636,5 @@ FullscreenBypass: 已归还原前台
 - [x] 主人验收 2026-10-21 13:46 贴图标注工具栏 + 文字输入 + 光标：分组两排/窄图降级、撤销/清空禁用态、当前工具/颜色/快捷键提示、Enter 完成与 Ctrl+S 另存均通过；文字输入框贴合点击处、字号按钮/滚轮可调、最终位置与字号正确；鼠标指针不再被贴图窗口隐藏。
 - [x] 主人验收 2026-10-21 凌晨补丁：① 窗口模式悬停/选中窗口时尺寸提示旁出现「进程 xxx.exe」，常规模式不出现；② 滚轮循环到目标窗口后直接按 `Enter`，无需单击即可截该窗口并复制/写历史（常规模式按同一矩形裁冻结帧）；③ 右键取消仍正常；④ 回车捕获改为不预先 `UpdateVisuals()`，主人反馈整体满意，重操作内存约 165 MB。构建 0 错误、`--smoke` 通过
 - [ ] 主人复测 2026-10-25 下午社区 UI 合并（Debug PID 40664）：① 左侧十页导航逐页切换，窄窗收成图标栏；② 主页四卡与历史摘要、窗口卡片动态文案；③ 贴图页仍有来源四档、文字背景/预设/预览、初始大小，四种来源都能用；④ 历史删除/清空先确认，取消与 Esc 不删，标题真实张数与 120 张上限说明正确；⑤ OCR 复制按钮空文本禁用、成功/失败/复制后再编辑提示正确；⑥ 主题、100%/125%/150% 缩放、重启后配置保留；⑦ 启动项、热键、托盘、单实例不回归。
-- [x] 主人复测 2026-10-25 傍晚第二轮 UI 美化（Debug PID 49560，建议文档 P0/P1 已落地、P1/P2 剩余项未做；主人 17:34 判定「视觉验收通过」，主页五卡侧条已按 17:33 意见全部删除；功能路径未逐项复测）：① 主窗/历史/贴图管理/OCR 结果窗标题栏随深浅主题，不再白条；② 十页导航与窄窗图标栏，主页窗口截图卡有强调色左条，操作卡不再过高；③ 历史删除/清空为危险色，标题行不再有浮动状态，真实张数与 120 张上限在说明里，页脚状态只在操作后出现；④ 快捷键页只显示本页结果（InfoBar），不再出现全局状态，七个「修改」按钮更轻；⑤ 截图行为两个下拉左对齐，外观页有缩略图/文件名/百分比且无图时滑杆禁用，OCR 页状态分级且测试时有转圈，关于页三个按钮可用；⑥ 文字贴图背景不透，裁剪 HUD 无重复退出提示、提示有底板；⑦ 浅/深色、100%/125%/150%、重启保留、热键/托盘/单实例不回归。
+- [x] 主人复测 2026-10-25 傍晚第二轮 UI 美化（Debug PID 49560，建议文档 P0/P1 已落地、P1/P2 剩余项未做；主人 17:34 判定「视觉验收通过」，主页五卡侧条已按 17:33 意见全部删除；功能路径未逐项复测）：① 主窗/历史/贴图管理/OCR 结果窗标题栏随深浅主题，不再白条；② 十页导航与窄窗图标栏，主页操作卡不再过高（侧条已按主人意见全部删除）；③ 历史删除/清空为危险色，标题行不再有浮动状态，真实张数与 120 张上限在说明里，页脚状态只在操作后出现；④ 快捷键页只显示本页结果（InfoBar），不再出现全局状态，七个「修改」按钮更轻；⑤ 截图行为两个下拉左对齐，外观页有缩略图/文件名/百分比且无图时滑杆禁用，OCR 页状态分级且测试时有转圈，关于页三个按钮可用；⑥ 文字贴图背景不透，裁剪 HUD 无重复退出提示、提示有底板；⑦ 浅/深色、100%/125%/150%、重启保留、热键/托盘/单实例不回归。
+- [x] 主人验收 2026-10-25 21:35（Debug PID 48796）：「做的不错」。① 普通窗口/无边框全屏游戏按截图热键不再先闪一下；② 独占全屏游戏直接整屏、不弹取景器，游戏声音不再中断；设置 → 截图行为可关闭「游戏全屏时直接全屏截图」；③ 历史窗单选/右键进入多选后可把卡片拖到资源管理器/微信/文档，落地为真实 PNG，历史原图与剪贴板不变；④ 拖已选卡片带整批、拖未选中卡片只带这一张，取消拖出无副作用；⑤ 启动加固后正常启动；启动失败根因仍未复现，若再出现按 data/logs/app.log 定位。
