@@ -55,10 +55,15 @@ public sealed partial class MainWindow : Window
         var interceptor = new Services.KeyInterceptor(WinRT.Interop.WindowNative.GetWindowHandle(this));
         interceptor.KeyDown += vk =>
         {
-            if (vk == 0x1B && Environment.TickCount64 - Services.OcrUiService.LastWindowClosedTick > 2500)
+            if (vk == 0x1B && !_clearHistoryBusy &&
+                Environment.TickCount64 - Services.OcrUiService.LastWindowClosedTick > 2500)
                 AppWindow.Hide();
         };
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(860, 990));
+        // 860×990 是主人验收过的默认尺寸；小屏（如 1366×768）上夹到工作区内，避免底部被任务栏挡住。
+        var workArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
+            AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(
+            Math.Min(860, workArea.Width - 40), Math.Min(990, workArea.Height - 40)));
 
         // 托盘常驻：点关闭 = 隐藏到托盘，真正退出走托盘菜单
         AppWindow.Closing += (sender, e) =>
@@ -68,6 +73,7 @@ public sealed partial class MainWindow : Window
         };
 
         InitTray();
+        SettingsNav.SelectedItem = HomeNavItem;
         ((FrameworkElement)Content).Loaded += OnLoaded;
 
         ApplyBackgroundFromConfig();
@@ -147,6 +153,31 @@ public sealed partial class MainWindow : Window
         StartMemoryTimer();
     }
 
+    private void SettingsNav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    {
+        if (args.SelectedItem is NavigationViewItem { Tag: string tag })
+            ShowSection(tag);
+    }
+
+    /// <summary>设置窗一次只显示一个分组；所有控件仍在同一棵 XAML 树里，初始化与事件不受影响。</summary>
+    private void ShowSection(string tag)
+    {
+        // 录制中的热键按钮离开页面后收不到按键，先恢复成「修改」，避免停在「按键…」。
+        if (_recordingButton is not null)
+            ResetHotkeyRecording(_recordingButton);
+
+        FrameworkElement[] sections =
+        [
+            HomeSection, HotkeysSection, CaptureSection, PinSection, ToastSection,
+            HistorySection, StartupSection, AppearanceSection, OcrSection, AboutSection,
+        ];
+        string[] tags = ["home", "hotkeys", "capture", "pin", "toast", "history", "startup", "appearance", "ocr", "about"];
+        for (var i = 0; i < sections.Length; i++)
+            sections[i].Visibility = tags[i] == tag ? Visibility.Visible : Visibility.Collapsed;
+
+        ContentScroll.ChangeView(null, 0, null, true);
+    }
+
     /// <summary>每 60 秒记一次工作集/私有内存/托管堆，主人长测后可对照操作时间线。</summary>
     private void StartMemoryTimer()
     {
@@ -184,6 +215,7 @@ public sealed partial class MainWindow : Window
             return;
         App.Config.Current.HistoryPinCrop = HistoryPinCropToggle.IsOn;
         App.Config.Save();
+        RefreshHistoryStatus();
         SetStatus(HistoryPinCropToggle.IsOn
             ? "贴图裁剪结果会写入截图历史的「贴图裁剪」分类。"
             : "贴图裁剪结果不再写入截图历史。");
@@ -790,7 +822,11 @@ public sealed partial class MainWindow : Window
         var profile = CaptureProfileCombo.SelectedIndex == 1 ? "quick" : "normal";
         _runtimeCaptureProfile = null;
         if (string.Equals(App.Config.Current.CaptureProfile, profile, StringComparison.OrdinalIgnoreCase))
+        {
+            // 配置没变，但热键临时切换过的本次档位已被清掉，主页与提示也要跟着回到实际档位。
+            UpdateCaptureOptions();
             return;
+        }
 
         App.Config.Current.CaptureProfile = profile;
         App.Config.Save();
@@ -799,7 +835,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Alt+Shift+C：立即切换本次运行使用的截图档位。
+    /// 切换档位热键（默认 Alt+Shift+C）：立即切换本次运行使用的截图档位。
     /// 不排队、不写配置——设置里的下拉框仍作为下次启动的默认档位。
     /// </summary>
     private void ToggleCaptureProfile()
@@ -810,7 +846,7 @@ public sealed partial class MainWindow : Window
         UpdateCaptureOptions();
 
         var label = string.Equals(next, "quick", StringComparison.OrdinalIgnoreCase) ? "快捷全屏" : "常规取景";
-        SetStatus($"截图模式已切换为「{label}」，下一次截图立即生效");
+        SetStatus($"截图档位已切换为「{label}」，下一次截图立即生效");
         ToastService.ShowProfile(label);
         App.Log($"CaptureProfile: toggled to {next} (runtime, next launch={App.Config.Current.CaptureProfile})");
     }
@@ -886,13 +922,11 @@ public sealed partial class MainWindow : Window
 
         var quick = IsQuickProfile();
         DefaultModeCombo.IsEnabled = !quick;
-        CaptureProfileHintText.Text = (quick
-            ? "当前：快捷全屏。按截图热键立即抓整屏、复制到剪贴板并写入历史，不出取景器；Alt+Shift+C 可随时切回常规取景。"
-            : "当前：常规取景。按截图热键冻结画面后框选或选窗；Alt+Shift+C 可随时切到快捷全屏。")
-            + " 下拉框是下次启动的默认档位，热键切换只影响本次运行。";
+        UpdateProfileHint();
+        var modeKey = ModeSwitchKeyText();
         HomeStatusText.Text = quick
-            ? "提示：当前为快捷模式，截图热键会直接截取整屏；Alt+Shift+C 可切回常规取景。"
-            : "提示：截图热键随时可用；取景中按 Tab 切换模式，回车截取当前窗口。";
+            ? $"提示：当前为快捷全屏档，截图热键会直接截取整屏{(modeKey is null ? "。" : $"；{modeKey} 可切回常规取景。")}"
+            : "提示：截图热键随时可用；取景中按 Tab 切换窗口截图 / 常规截图，回车截取当前窗口。";
 
         var normal = IsNormalDefaultMode();
         CaptureModeHintText.Text = quick
@@ -900,6 +934,62 @@ public sealed partial class MainWindow : Window
             : normal
                 ? "当前常规起始：常规截图。看到什么就截什么；按截图热键后按 Tab 可切到窗口截图。"
                 : "当前常规起始：窗口截图。会重建窗口本体，抗遮挡；按截图热键后按 Tab 可切到常规截图。";
+    }
+
+    /// <summary>切换档位热键的当前文案；被删除时返回 null，提示里不再写死 Alt+Shift+C。</summary>
+    private string? ModeSwitchKeyText()
+    {
+        var text = ModeHotkeyText.Text;
+        return string.IsNullOrEmpty(text) || text == "未设置" ? null : text;
+    }
+
+    private void UpdateProfileHint()
+    {
+        var modeKey = ModeSwitchKeyText();
+        CaptureProfileHintText.Text = (IsQuickProfile()
+            ? "当前：快捷全屏。按截图热键立即抓整屏、复制到剪贴板并写入历史，不出取景器；"
+              + (modeKey is null ? "切换档位热键未设置，可用上方下拉框切回常规取景。" : $"{modeKey} 可随时切回常规取景。")
+            : "当前：常规取景。按截图热键冻结画面后框选或选窗；"
+              + (modeKey is null ? "切换档位热键未设置，可用上方下拉框切到快捷全屏。" : $"{modeKey} 可随时切到快捷全屏。"))
+            + " 下拉框是下次启动的默认档位，热键切换只影响本次运行。";
+        UpdateScreenshotCard();
+    }
+
+    /// <summary>
+    /// 主页截图卡片与截图热键走同一条 <see cref="OnHotkeyPressed"/>：
+    /// 倒计时中再点 = 取消；快捷档位 = 直接整屏；常规档位 = 冻屏取景，起始模式看 defaultCaptureMode。
+    /// 标题与说明按这条真实分支显示，不再固定写「窗口截图 / 抗遮挡」。
+    /// </summary>
+    private void UpdateScreenshotCard()
+    {
+        SetScreenshotCardText();
+        // 卡片内容是自定义布局，读屏名称不会自动取到标题与说明，这里随状态同步。
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+            ScreenshotActionButton, $"{ScreenshotCardTitle.Text}：{ScreenshotCardDescription.Text}");
+    }
+
+    private void SetScreenshotCardText()
+    {
+        if (_delayCts is not null)
+        {
+            ScreenshotCardTitle.Text = "取消延时截图";
+            ScreenshotCardDescription.Text = "正在倒计时，点这里或再按截图热键取消。";
+            return;
+        }
+
+        var delay = NormalizeDelay(App.Config.Current.CaptureDelaySeconds);
+        var wait = delay > 0 ? $"等 {delay} 秒后" : "";
+        if (IsQuickProfile())
+        {
+            ScreenshotCardTitle.Text = "快捷全屏";
+            ScreenshotCardDescription.Text = $"{wait}直接截取整屏并复制到剪贴板，不打开取景器。";
+            return;
+        }
+
+        ScreenshotCardTitle.Text = "截图取景";
+        ScreenshotCardDescription.Text = IsNormalDefaultMode()
+            ? $"{wait}冻屏框选，从常规截图起步；Tab 可切到窗口截图（抗遮挡）。"
+            : $"{wait}冻屏框选，从窗口截图起步（抗遮挡）；Tab 可切到常规截图。";
     }
 
     private void OpenHistory()
@@ -1034,14 +1124,52 @@ public sealed partial class MainWindow : Window
         _pinManagerLoweredPins = [];
     }
 
-    private void ClearHistory_Click(object sender, RoutedEventArgs e)
-    {
-        var cleared = CaptureHistoryService.Instance.Clear();
-        RefreshHistoryStatus();
-        if (_historyWindow is not null)
-            _ = _historyWindow.RefreshAsync();
+    private bool _clearHistoryBusy;
 
-        HistoryStatusText.Text = cleared > 0 ? $"已清空 {cleared} 张历史截图。" : "历史目录已经是空的。";
+    private async void ClearHistory_Click(object sender, RoutedEventArgs e)
+    {
+        // 连点只弹一个确认框；Esc 收托盘的逻辑也会避开确认期间。
+        if (_clearHistoryBusy)
+            return;
+
+        // 先固定要删的文件：确认期间新截图写进来也不会被一起删掉。
+        var targets = CaptureHistoryService.Instance.GetItems().ToList();
+        if (targets.Count == 0)
+        {
+            HistoryStatusText.Text = "历史目录已经是空的。";
+            return;
+        }
+
+        var totalBytes = targets.Sum(i => i.SizeBytes);
+        var size = totalBytes >= 1024L * 1024 ? $"{totalBytes / 1024.0 / 1024.0:0.0} MB" : $"{totalBytes / 1024.0:0} KB";
+        var categories = targets.Select(i => i.CategoryKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        _clearHistoryBusy = true;
+        try
+        {
+            var confirmed = await Views.ConfirmDialog.ShowAsync(
+                (UIElement)Content,
+                "清空全部截图历史",
+                $"将永久删除 data\\history 里全部 {categories} 个分类的 {targets.Count} 张截图（共 {size}），包括历史窗列表里没显示出来的较早截图。\n\n删除后无法恢复；确认期间新产生的截图不会被删除。",
+                $"删除 {targets.Count} 张");
+            if (!confirmed)
+            {
+                HistoryStatusText.Text = "已取消清空。";
+                return;
+            }
+
+            var cleared = CaptureHistoryService.Instance.DeleteMany(targets);
+            RefreshHistoryStatus();
+            if (_historyWindow is not null)
+                _ = _historyWindow.RefreshAsync();
+
+            HistoryStatusText.Text = cleared == targets.Count
+                ? $"已清空 {cleared} 张历史截图。"
+                : $"已删除 {cleared} 张历史截图，另有 {targets.Count - cleared} 张已不存在或删除失败（详见日志）。";
+        }
+        finally
+        {
+            _clearHistoryBusy = false;
+        }
     }
 
     private void UmiPort_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
@@ -1576,11 +1704,11 @@ public sealed partial class MainWindow : Window
 
     private static string HotkeyLabel(string action) => action switch
     {
-        "screenshot" => "窗口截图",
+        "screenshot" => "截图",
         "fullscreen" => "全屏截图",
         "pin" => "贴图",
         "ocr" => "文字识别",
-        "mode" => "切换截图模式",
+        "mode" => "切换截图档位",
         "windowprev" => "上一个窗口",
         "windownext" => "下一个窗口",
         _ => action,
@@ -1688,6 +1816,8 @@ public sealed partial class MainWindow : Window
         OcrCardHotkey.Text = OcrHotkeyText.Text;
         SyncSimpleHotkeyTexts();
         UpdateHotkeyClearButtons();
+        // 档位说明里引用的是「切换截图档位」的当前组合键，改键/删键后同步。
+        UpdateProfileHint();
     }
 
     /// <summary>把一个全局热键的文案同步到「设置 → 热键」卡片；未设置时显示 未设置。</summary>
@@ -1755,11 +1885,11 @@ public sealed partial class MainWindow : Window
         var fullVk = ResolveFullscreenVk(c);
         return new[]
         {
-            ("screenshot", "窗口截图", screenshotVk, screenshotVk == 0 ? 0 : (int)c.HotkeyModifiers),
+            ("screenshot", "截图", screenshotVk, screenshotVk == 0 ? 0 : (int)c.HotkeyModifiers),
             ("fullscreen", "全屏截图", fullVk, fullVk == 0 ? 0 : c.FullHotkeyModifiers),
             ("pin", "贴图", c.PinHotkeyVk, c.PinHotkeyModifiers),
             ("ocr", "文字识别", c.OcrHotkeyVk, c.OcrHotkeyModifiers),
-            ("mode", "切换截图模式", c.ModeHotkeyVk, c.ModeHotkeyModifiers),
+            ("mode", "切换截图档位", c.ModeHotkeyVk, c.ModeHotkeyModifiers),
             ("windowprev", "上一个窗口", c.WindowPrevKeyVk, c.WindowPrevKeyModifiers),
             ("windownext", "下一个窗口", c.WindowNextKeyVk, c.WindowNextKeyModifiers),
         };
@@ -1914,7 +2044,7 @@ public sealed partial class MainWindow : Window
                 Services.EscOverPinHook.SetModeSwitchKey(vk, mods);
                 _hotkey.SetModeKey(vk, mods);
                 ModeHotkeyText.Text = text;
-                SetStatus($"切换截图模式热键已设为 {text}");
+                SetStatus($"切换截图档位热键已设为 {text}");
                 break;
 
             case "windowprev":
@@ -2074,6 +2204,7 @@ public sealed partial class MainWindow : Window
         var cts = new CancellationTokenSource();
         _delayCts = cts;
         CancelDelayItem.Visibility = Visibility.Visible;
+        UpdateScreenshotCard();
 
         try
         {
@@ -2115,6 +2246,7 @@ public sealed partial class MainWindow : Window
                 _delayCts = null;
                 CancelDelayItem.Visibility = Visibility.Collapsed;
                 ResetTrayToolTip();
+                UpdateScreenshotCard();
             }
 
             cts.Dispose();

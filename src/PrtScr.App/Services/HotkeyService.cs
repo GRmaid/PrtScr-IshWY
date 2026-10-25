@@ -301,7 +301,7 @@ public sealed unsafe class HotkeyService : IDisposable
 
         App.Log($"Hotkey: mode vk=0x{_modeVk:X} mods={_modeMods} register={ok}");
         if (!ok)
-            ReportFailure("切换截图模式", _modeVk, _modeMods);
+            ReportFailure("切换截图档位", _modeVk, _modeMods);
     }
 
     private void ReportFailure(string name, int vk, int mods) =>
