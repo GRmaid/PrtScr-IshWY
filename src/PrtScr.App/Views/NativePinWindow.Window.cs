@@ -232,6 +232,12 @@ public sealed unsafe partial class NativePinWindow
                     self.ApplyEdit(saveAs: true);
                     return default;
 
+                case WM_KEYDOWN when (int)wParam.Value == 0x43
+                    && (GetKeyState(0x11) & 0x8000) != 0:
+                    // 复制当前画面（标注态含未提交标注），不退出标注。
+                    self.CopyCurrentPng();
+                    return default;
+
                 case WM_LBUTTONDOWN:
                     if (self._locked)
                         return default;
@@ -299,14 +305,26 @@ public sealed unsafe partial class NativePinWindow
                 case WM_APP_CLEAR_NAV_HINT:
                     self._navHint = null;
                     self._navHintUntil = 0;
-                    self._needsRedrawAfterZoom = true;
-                    self.RenderAndPresent(highQuality: true);
+                    self.RefreshPinOverlays();
                     return default;
 
                 case WM_APP_END_FLASH:
                     self._flashUntil = 0;
                     self._needsRedrawAfterZoom = true;
                     self.RenderAndPresent(highQuality: true);
+                    return default;
+
+                case WM_APP_EXPORT_PNG:
+                    // 管理器等外部线程要「当前画面」：在贴图线程就地合成。
+                    self.CompleteExportRequest();
+                    return default;
+
+                case WM_APP_COPY_OK:
+                    self.ShowHint("已复制到剪贴板");
+                    return default;
+
+                case WM_APP_COPY_FAILED:
+                    self.ShowHint("复制失败：剪贴板被占用，请稍后重试", 2000);
                     return default;
 
                 case WM_APP_ENTER_EDIT:

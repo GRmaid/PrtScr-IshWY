@@ -222,20 +222,28 @@ public sealed unsafe partial class NativePinWindow
         }
 
         if (_navHint is not null && _navHintUntil > Environment.TickCount64)
-        {
-            using var chipBrush = new SolidBrush(Color.FromArgb(0xD8, 0x1E, 0x1E, 0x20));
-            using var chipText = new SolidBrush(Color.White);
-            using var chipFont = new Font("Microsoft YaHei UI", 11 * (float)scale, FontStyle.Regular, GraphicsUnit.Pixel);
-            var measured = graphics.MeasureString(_navHint, chipFont);
-            var chipW = Math.Max(150 * (float)scale, measured.Width + 26 * (float)scale);
-            var chipH = 28 * (float)scale;
-            var chip = new RectangleF(
-                (float)(_winW - chipW) / 2f,
-                (float)(_winH - chipH) - 14 * (float)scale,
-                chipW, chipH);
-            FillRoundedRectangle(graphics, chipBrush, chip, 6 * (float)scale);
-            DrawCenteredText(graphics, _navHint, chipFont, chipText, chip);
-        }
+            DrawNavHintChip(graphics, scale);
+    }
+
+    /// <summary>底部提示条（导航索引 / 出口失败）。标注态贴在图片底边之上，避免被工具栏挡住。</summary>
+    private void DrawNavHintChip(Graphics graphics, double scale)
+    {
+        if (_navHint is null)
+            return;
+
+        using var chipBrush = new SolidBrush(Color.FromArgb(0xD8, 0x1E, 0x1E, 0x20));
+        using var chipText = new SolidBrush(Color.White);
+        using var chipFont = new Font("Microsoft YaHei UI", 11 * (float)scale, FontStyle.Regular, GraphicsUnit.Pixel);
+        var measured = graphics.MeasureString(_navHint, chipFont);
+        var chipW = Math.Max(150 * (float)scale, measured.Width + 26 * (float)scale);
+        var chipH = 28 * (float)scale;
+        var bottom = _editMode ? _editOffsetY + _imgH : _winH;
+        var chip = new RectangleF(
+            (float)(_winW - chipW) / 2f,
+            (float)(bottom - chipH) - 14 * (float)scale,
+            chipW, chipH);
+        FillRoundedRectangle(graphics, chipBrush, chip, 6 * (float)scale);
+        DrawCenteredText(graphics, _navHint, chipFont, chipText, chip);
     }
 
     /// <summary>按需解码 PNG，不再复制一份全分辨率位图（省约 16 MB 瞬时占用）。调用方负责 Dispose。</summary>

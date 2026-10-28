@@ -157,7 +157,7 @@ public sealed unsafe partial class NativePinWindow
         switch (command)
         {
             case PinMenuWindow.CmdCopy:
-                PinClipboardHelper.Copy(_pngBytes, _uiQueue);
+                CopyCurrentPng();
                 break;
             case PinMenuWindow.CmdEdit:
                 EnterEditMode();
@@ -167,7 +167,7 @@ public sealed unsafe partial class NativePinWindow
                 break;
             case PinMenuWindow.CmdOcr:
                 App.Log("Pin: ocr menu clicked");
-                PinClipboardHelper.OpenOcr(_pngBytes, _uiQueue, (nint)_hwnd.Value);
+                OpenOcrCurrent();
                 break;
             case PinMenuWindow.CmdSaveAs:
                 if (_editMode)
@@ -208,8 +208,21 @@ public sealed unsafe partial class NativePinWindow
     /// </summary>
     private void StartCrop()
     {
-        var result = PinCropWindow.Show((nint)_hwnd.Value, _winX, _winY, _winW, _winH,
-            _pngBytes, _pixelWidth, _pixelHeight);
+        // 标注态裁剪的是「当前画面」，不是标注前的图。
+        var source = TryComposeCurrentPng();
+        if (source is null)
+        {
+            ShowHint(_editMode ? "裁剪失败：标注合成失败，编辑内容已保留" : "裁剪失败：图片解码失败");
+            return;
+        }
+
+        // 标注态窗口被工具栏撑高，裁剪层只能覆盖图像区域，否则选区坐标按整窗比例映射会偏移。
+        var cropX = _winX;
+        var cropY = _editMode ? _winY + _editOffsetY : _winY;
+        var cropW = _editMode ? _imgW : _winW;
+        var cropH = _editMode ? _imgH : _winH;
+        var result = PinCropWindow.Show((nint)_hwnd.Value, cropX, cropY, cropW, cropH,
+            source, _pixelWidth, _pixelHeight);
         if (result is null)
         {
             App.Log("Pin: crop cancelled");
@@ -273,8 +286,28 @@ public sealed unsafe partial class NativePinWindow
     /// <summary>在当前贴图上打开系统另存为对话框。unsafe 类里不能写 async，因此只 fire-and-forget。</summary>
     private void SaveAs()
     {
+        var bytes = TryComposeCurrentPng();
+        if (bytes is null)
+        {
+            ShowHint(_editMode ? "另存失败：标注合成失败，编辑内容已保留" : "另存失败：图片解码失败");
+            return;
+        }
+
         _ = PrtScr.App.Services.FileSaveService.SavePngAsync(
-            (nint)_hwnd.Value, _pngBytes, PrtScr.App.Services.FileSaveService.SuggestedName("pin"));
+            (nint)_hwnd.Value, bytes, PrtScr.App.Services.FileSaveService.SuggestedName("pin"));
+    }
+
+    /// <summary>识别文字出口：标注态取当前合成图，绝不读标注前的 <c>_pngBytes</c>。</summary>
+    private void OpenOcrCurrent()
+    {
+        var bytes = TryComposeCurrentPng();
+        if (bytes is null)
+        {
+            ShowHint(_editMode ? "识别失败：标注合成失败，编辑内容已保留" : "识别失败：图片解码失败");
+            return;
+        }
+
+        PinClipboardHelper.OpenOcr(bytes, _uiQueue, (nint)_hwnd.Value);
     }
 
 }

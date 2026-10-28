@@ -84,7 +84,12 @@ public sealed partial class PinManagerWindow : Window
         var cards = new List<PinCardView>(snapshot.Count);
         foreach (var record in snapshot)
         {
-            var card = await PinCardView.CreateAsync(record);
+            // 标注中的贴图显示「当前画面」；取不到就退回快照，缩略图允许，动作不允许。
+            var live = NativePinWindow.TryGetCurrentPng(record.Hwnd);
+            var effective = live.Status != PinExportStatus.Unavailable && live.Bytes is { } liveBytes
+                ? record with { PngBytes = liveBytes }
+                : record;
+            var card = await PinCardView.CreateAsync(effective);
             if (version != _reloadVersion || _closed)
                 return;
             cards.Add(card);
@@ -131,8 +136,17 @@ public sealed partial class PinManagerWindow : Window
         var view = ViewFrom(sender);
         if (view is null)
             return;
-        PinClipboardHelper.Copy(view.Item.PngBytes, DispatcherQueue);
-        SubtitleText.Text = $"已复制 {view.Item.PixelWidth} × {view.Item.PixelHeight} 到剪贴板";
+        if (!TryGetLivePng(view.Item, out var bytes))
+            return;
+        PinClipboardHelper.Copy(bytes, DispatcherQueue, ok =>
+        {
+            if (!_closed)
+            {
+                SubtitleText.Text = ok
+                    ? $"已复制 {view.Item.PixelWidth} × {view.Item.PixelHeight} 到剪贴板"
+                    : "复制失败：剪贴板被占用，请稍后重试";
+            }
+        });
     }
 
     private void SaveCard_Click(object sender, RoutedEventArgs e)
@@ -140,7 +154,9 @@ public sealed partial class PinManagerWindow : Window
         var view = ViewFrom(sender);
         if (view is null)
             return;
-        _ = FileSaveService.SavePngAsync(Hwnd, view.Item.PngBytes, FileSaveService.SuggestedName("pin"));
+        if (!TryGetLivePng(view.Item, out var bytes))
+            return;
+        _ = FileSaveService.SavePngAsync(Hwnd, bytes, FileSaveService.SuggestedName("pin"));
     }
 
     private void OcrCard_Click(object sender, RoutedEventArgs e)
@@ -148,7 +164,27 @@ public sealed partial class PinManagerWindow : Window
         var view = ViewFrom(sender);
         if (view is null)
             return;
-        _ = OcrUiService.RecognizeAndShowAsync(view.Item.PngBytes, Hwnd);
+        if (!TryGetLivePng(view.Item, out var bytes))
+            return;
+        _ = OcrUiService.RecognizeAndShowAsync(bytes, Hwnd);
+    }
+
+    /// <summary>
+    /// 管理器动作取图：标注态向贴图线程要「当前画面」，拿不到就报错，
+    /// 绝不退回标注前的旧图（B01）。
+    /// </summary>
+    private bool TryGetLivePng(PinRecord record, out byte[] bytes)
+    {
+        var result = NativePinWindow.TryGetCurrentPng(record.Hwnd);
+        if (result.Status != PinExportStatus.Unavailable && result.Bytes is { } current)
+        {
+            bytes = current;
+            return true;
+        }
+
+        bytes = [];
+        SubtitleText.Text = "贴图正在标注且暂未响应，请完成或退出标注后再试";
+        return false;
     }
 
     private void CloseCard_Click(object sender, RoutedEventArgs e)

@@ -113,7 +113,11 @@ public sealed unsafe partial class NativePinWindow
     private void RefreshPinOverlays()
     {
         _needsRedrawAfterZoom = true;
-        RenderAndPresent(highQuality: true);
+        // 标注态必须走标注渲染，否则提示条会被下一次标注重绘覆盖。
+        if (_editMode)
+            RenderEditMode();
+        else
+            RenderAndPresent(highQuality: true);
     }
 
     private void FlashPin(int milliseconds)
@@ -132,15 +136,23 @@ public sealed unsafe partial class NativePinWindow
     {
         if (_winW < 140 * (_dpiScale <= 0 ? 1.0 : _dpiScale))
             return;
-        _navHint = $"{index} / {count} · {scope}";
-        _navHintUntil = Environment.TickCount64 + 1200;
+        ShowHint($"{index} / {count} · {scope}", 1200);
+    }
+
+    /// <summary>在贴图底部浮一条提示；标注态也显示，用于出口失败的可见反馈。</summary>
+    private void ShowHint(string text, int durationMs = 1400)
+    {
+        if (_hwnd.IsNull || _winW <= 0)
+            return;
+        _navHint = text;
+        _navHintUntil = Environment.TickCount64 + durationMs;
         RefreshPinOverlays();
         _navHintTimer?.Dispose();
         _navHintTimer = new System.Threading.Timer(_ =>
         {
             if (!_hwnd.IsNull)
                 _ = PInvoke.PostMessage(_hwnd, WM_APP_CLEAR_NAV_HINT, default, default);
-        }, null, 1250, Timeout.Infinite);
+        }, null, durationMs + 50, Timeout.Infinite);
     }
 
 }

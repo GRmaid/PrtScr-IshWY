@@ -72,6 +72,10 @@ public sealed unsafe partial class NativePinWindow
 
             DrawToolbar(graphics);
             DrawPalette(graphics);
+
+            // 出口失败的可见反馈也画在标注画面里（含正在画的一笔）。
+            if (_navHint is not null && _navHintUntil > Environment.TickCount64)
+                DrawNavHintChip(graphics, Math.Max(1.0, _dpiScale));
         }
 
         Present();

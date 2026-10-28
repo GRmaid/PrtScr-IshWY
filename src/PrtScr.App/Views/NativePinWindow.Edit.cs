@@ -112,6 +112,14 @@ public sealed unsafe partial class NativePinWindow
 
     private void EnterEditMode()
     {
+        // B02：幂等——菜单「标注…」/重复请求不得清空画布与撤销栈。
+        if (_editMode)
+        {
+            App.Log("Pin: already in edit mode, ignored");
+            _ = PInvoke.SetFocus(_hwnd);
+            return;
+        }
+
         if (_pngBytes.Length == 0)
             return;
 

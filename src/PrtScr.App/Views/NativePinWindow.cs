@@ -504,11 +504,12 @@ internal static class PinClipboardHelper
         });
     }
 
-    public static void Copy(byte[] pngBytes, DispatcherQueue queue)
+    public static void Copy(byte[] pngBytes, DispatcherQueue queue, Action<bool>? completed = null)
     {
         queue.TryEnqueue(async () =>
         {
-            await PrtScr.App.Services.ClipboardService.SetImageAsync(pngBytes);
+            var ok = await PrtScr.App.Services.ClipboardService.SetImageAsync(pngBytes);
+            completed?.Invoke(ok);
         });
     }
 }

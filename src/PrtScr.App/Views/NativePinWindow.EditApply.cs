@@ -76,38 +76,29 @@ public sealed unsafe partial class NativePinWindow
 
     private void ApplyEditCore(bool saveAs)
     {
-        byte[]? bytes = null;
         // 提交瞬间先把缩放基底放掉，避免“基底 + 全分辨率解码 + 渲染结果”三份大图同时存在
         _baseScaled?.Dispose();
         _baseScaled = null;
-        try
-        {
-            using var full = DecodeSource();
-            if (full is null)
-            {
-                ExitEditMode(apply: false);
-                return;
-            }
 
-            using var rendered = AnnotationRenderer.Render(full.Image, _annotations);
-            using var ms = new MemoryStream();
-            rendered.Save(ms, ImageFormat.Png);
-            bytes = ms.ToArray();
-            _pngBytes = bytes;
-
-            PinClipboardHelper.Copy(bytes, _uiQueue);
-            App.Log("Pin: edit applied & copied");
-        }
-        catch (Exception ex)
+        // B03：先生成完整候选结果。合成失败时保留标注、保留编辑态，绝不当作成功退出。
+        var bytes = TryComposeCurrentPng();
+        if (bytes is null)
         {
-            App.Log($"Pin 应用标注失败: {ex}");
+            RebuildBaseScaled();
+            ShowHint("标注合成失败，已保留编辑内容，请重试", 2600);
+            App.Log("Pin: edit apply aborted (compose failed)");
+            return;
         }
+
+        _pngBytes = bytes;
+        PinClipboardHelper.Copy(bytes, _uiQueue, PostCopyResult);
+        App.Log("Pin: edit applied & copied");
 
         ExitEditMode(apply: true);
         // 标注会改写 _pngBytes，管理器缩略图与复制/另存都要拿到新图。
         PublishPinState();
 
-        if (saveAs && bytes is not null)
+        if (saveAs)
         {
             _ = PrtScr.App.Services.FileSaveService.SavePngAsync(
                 (nint)_hwnd.Value, bytes, PrtScr.App.Services.FileSaveService.SuggestedName("pin"));
