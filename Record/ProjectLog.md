@@ -31,3 +31,10 @@
 - 23:10 交付：task-8 P-07（A03，PrintWindow 期限）完成——2000ms 受控期限、晚到帧一次性释放、按 HWND 单飞、`WindowCaptureResult` 可判别失败原因；给 P-04 的契约是改用 `CaptureDetailedAsync`。报告 `Record/reports/P-07-printwindow-timeout.md`。
 - 23:25 门禁更正：`-t:Compile` 是假绿（不跑 WinUI XAML 代码生成，冷态 624 CS0103），编译门禁改为整包 `Build` + `-p:OutDir=.tmp/out-verify/`；lead 复验 0 错 0 警 12.86s、Core.Tests 77/77、format rc=0。基线报告与总纲 §8 已更正。
 - 23:30 收工（主人 m00208）：停止派单，三名女仆 idle；task-2/3/4/5/6、task-9/10 保持 pending；工作树未提交（HEAD 仍 `0b1ca41`）。交接 `Record/reports/2026-10-28-session-handoff.md`。
+
+## 2026-10-30
+
+- 20:25 诊断：主人 m00346 的三条贴图症状归因于运行中的 10-26 旧构建（bin 下 IshWY.dll 939520 字节、缺 PinExportResult 与「贴图正在标注」），HEAD 86d3541 代码侧无成因；另产出 .tmp/run-p01/（0 错 0 警 29.41s）备用。
+- 20:34 更正：上一节「工作树未提交、HEAD 仍 0b1ca41」已过时——P-01/P-07 改动、Record/ 与 HANDOFF 文档（含 docs/HANDOFF.md 8 行修改）已本地提交 86d3541，尚未推送。
+- 20:36 环境：主人退出旧实例（Get-Process IshWY = NOT RUNNING）后原地整包重建默认 bin → 0 错 0 警 17.63s；IshWY.dll 945152 字节、IshWY.exe 455168 字节，均为 2026-10-30T12:25:41Z；data/ 保留 226 文件 122,922,279 字节（history、logs）。
+- 20:37 待验收：请主人用默认 bin 复测四条（标注中 Ctrl+C 得带标注图 / 裁剪选区不含工具栏 / 裁剪不拉伸 / 管理器复制不拿旧图）；通过后推送 86d3541 并派 P-04/P-08/P-09a。
