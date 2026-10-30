@@ -141,15 +141,20 @@ public static unsafe class DesktopDuplicationCapture
                 if (enumHr != 0)
                 {
                     Log?.Invoke($"DXGI: EnumOutputs({i}) 失败 0x{enumHr:X}");
+                    if (output is not null)
+                        Marshal.ReleaseComObject(output);
                     break;
                 }
 
                 output.GetDesc(out var desc);
                 if (desc.Monitor == hMonitor)
                 {
-                    matched = output;
+                    matched = output;   // 交给外层 finally 释放
                     break;
                 }
+
+                // 非目标输出：RCW 不会立即回收，逐个别释放，避免多显示器下堆积
+                Marshal.ReleaseComObject(output);
             }
 
             if (matched is null)
@@ -316,56 +321,65 @@ public static unsafe class DesktopDuplicationCapture
             deviceContext->CopyResource((ID3D11Resource*)staging, (ID3D11Resource*)texturePtr);
             var mapped = new D3D11_MAPPED_SUBRESOURCE();
             deviceContext->Map((ID3D11Resource*)staging, 0, D3D11_MAP.D3D11_MAP_READ, 0, &mapped);
-            if (mapped.pData is null)
-                return null;
-
-            // duplication 刚建立时首帧可能是空表面（整帧 0），丢弃后由外层重试
-            var anyNonZero = false;
-            var totalBytes = (long)desc.Height * mapped.RowPitch;
-            for (long i = 0; i < totalBytes; i += 4)
-            {
-                var p = (byte*)mapped.pData + (nint)i;
-                if (p[0] != 0 || p[1] != 0 || p[2] != 0)
-                {
-                    anyNonZero = true;
-                    break;
-                }
-            }
-            if (!anyNonZero)
-            {
-                // 交给外层 finally 的 Unmap 释放，避免重复 Unmap
-                Log?.Invoke("DXGI: 拷贝后整帧全零，丢弃本帧");
-                return null;
-            }
-
             try
             {
+                if (mapped.pData is null)
+                    return null;
+
+                // duplication 刚建立时首帧可能是空表面（整帧 0），丢弃后由外层重试
+                var anyNonZero = false;
+                var totalBytes = (long)desc.Height * mapped.RowPitch;
+                for (long i = 0; i < totalBytes; i += 4)
+                {
+                    var p = (byte*)mapped.pData + (nint)i;
+                    if (p[0] != 0 || p[1] != 0 || p[2] != 0)
+                    {
+                        anyNonZero = true;
+                        break;
+                    }
+                }
+                if (!anyNonZero)
+                {
+                    Log?.Invoke("DXGI: 拷贝后整帧全零，丢弃本帧");
+                    return null;
+                }
+
                 var width = (int)desc.Width;
                 var height = (int)desc.Height;
                 var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-                var data = bitmap.LockBits(
-                    new Rectangle(0, 0, width, height),
-                    ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
                 try
                 {
-                    var source = (byte*)mapped.pData;
-                    var target = (byte*)data.Scan0;
-                    for (var y = 0; y < height; y++)
+                    var data = bitmap.LockBits(
+                        new Rectangle(0, 0, width, height),
+                        ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                    try
                     {
-                        Buffer.MemoryCopy(
-                            source + (nint)y * mapped.RowPitch,
-                            target + (nint)y * data.Stride,
-                            data.Stride, (nint)width * 4);
+                        var source = (byte*)mapped.pData;
+                        var target = (byte*)data.Scan0;
+                        for (var y = 0; y < height; y++)
+                        {
+                            Buffer.MemoryCopy(
+                                source + (nint)y * mapped.RowPitch,
+                                target + (nint)y * data.Stride,
+                                data.Stride, (nint)width * 4);
+                        }
+                    }
+                    finally
+                    {
+                        bitmap.UnlockBits(data);
                     }
                 }
-                finally
+                catch
                 {
-                    bitmap.UnlockBits(data);
+                    bitmap.Dispose();
+                    throw;
                 }
+
                 return bitmap;
             }
             finally
             {
+                // Map 成功后无论早退（全零）、异常还是正常返回都必须 Unmap
                 deviceContext->Unmap((ID3D11Resource*)staging, 0);
             }
         }

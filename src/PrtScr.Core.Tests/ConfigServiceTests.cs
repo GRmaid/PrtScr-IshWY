@@ -106,6 +106,80 @@ public sealed class ConfigServiceTests
         Assert.Equal(@"C:\Temp\PrtScrTests\data\config.json", service.FilePath);
     }
 
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    [InlineData(200, 200)]
+    [InlineData(999, 200)]
+    public void Load_HistoryPerCategory_IsClampedToAllowedRange(int stored, int expected)
+    {
+        using var temp = new TempDirectory();
+        WriteConfig(temp, $"{{\"configVersion\":2,\"historyPerCategory\":{stored}}}");
+
+        var service = new ConfigService(temp.Path);
+        service.Load();
+
+        Assert.Equal(expected, service.Current.HistoryPerCategory);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    [InlineData(65535, 65535)]
+    [InlineData(70000, 65535)]
+    public void Load_UmiOcrPort_IsClampedToAllowedRange(int stored, int expected)
+    {
+        using var temp = new TempDirectory();
+        WriteConfig(temp, $"{{\"configVersion\":2,\"umiOcrPort\":{stored}}}");
+
+        var service = new ConfigService(temp.Path);
+        service.Load();
+
+        Assert.Equal(expected, service.Current.UmiOcrPort);
+    }
+
+    [Fact]
+    public void Load_MissingFile_KeepsOcrDefaultsOffAndPort1224()
+    {
+        using var temp = new TempDirectory();
+        var service = new ConfigService(temp.Path);
+
+        service.Load();
+
+        Assert.False(service.Current.PreferUmiOcr);
+        Assert.Equal(1224, service.Current.UmiOcrPort);
+        Assert.Equal(30, service.Current.HistoryPerCategory);
+    }
+
+    [Fact]
+    public void OcrAndHistoryFields_KeepDocumentedJsonNamesAndDefaults()
+    {
+        var config = new AppConfig();
+
+        Assert.False(config.PreferUmiOcr);
+        Assert.Equal(1224, config.UmiOcrPort);
+        Assert.Equal(30, config.HistoryPerCategory);
+        Assert.True(config.HistoryPinCrop);
+        Assert.True(config.SaveHistory);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(config));
+        var root = doc.RootElement;
+        Assert.False(root.GetProperty("preferUmiOcr").GetBoolean());
+        Assert.Equal(1224, root.GetProperty("umiOcrPort").GetInt32());
+        Assert.Equal(30, root.GetProperty("historyPerCategory").GetInt32());
+        Assert.True(root.GetProperty("historyPinCrop").GetBoolean());
+        Assert.True(root.GetProperty("saveHistory").GetBoolean());
+    }
+
+    private static void WriteConfig(TempDirectory temp, string json)
+    {
+        Directory.CreateDirectory(System.IO.Path.Combine(temp.Path, "data"));
+        File.WriteAllText(System.IO.Path.Combine(temp.Path, "data", "config.json"), json);
+    }
+
     [Fact]
     public void Load_Migration_LogsThroughInjectedCallback()
     {

@@ -1,18 +1,18 @@
 namespace PrtScr.Ocr;
 
 /// <summary>
-/// OCR 门面：默认按“内置优先、可选引擎探测可用后启用”的顺序识别。
+/// OCR 门面：默认只用 Windows 内置 OCR；显式启用 Umi-OCR 时才把它加入候选。
 /// </summary>
 public sealed class OcrService
 {
     private readonly List<IOcrEngine> _engines;
 
-    /// <param name="preferUmi">true 时优先 Umi-OCR（在线才生效），否则先用 Windows 内置 OCR。</param>
+    /// <param name="preferUmi">true 时优先 Umi-OCR（在线才生效，失败回退 Windows OCR）；false 时完全不使用、不探测 Umi-OCR。</param>
     public OcrService(bool preferUmi = false, int umiPort = 1224)
     {
         var windows = new WindowsOcrEngine();
-        var umi = new UmiOcrClient(umiPort);
-        _engines = preferUmi ? [umi, windows] : [windows, umi];
+        // 关闭 Umi 时连候选都不放入：识别失败不会回退到 Umi，也不会产生任何探测请求。
+        _engines = preferUmi ? [new UmiOcrClient(umiPort), windows] : [windows];
     }
 
     public IReadOnlyList<IOcrEngine> Engines => _engines;

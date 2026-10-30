@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
     private bool _suppressStartupToggle;
     private bool _suppressHistoryToggle;
     private bool _suppressHistoryLimit;
+    private bool _pruneHistoryBusy;
     private bool _suppressPinInitialScale;
     private bool _suppressPinBehavior;
     private bool _suppressPinTextColor;
@@ -260,9 +261,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var count = CaptureHistoryService.Instance.GetItems().Count;
+        var items = CaptureHistoryService.Instance.GetItems();
+        var count = items.Count;
         var limit = CaptureHistoryService.PerCategoryLimit;
-        HistoryStatusText.Text = $"已开启：窗口截图按进程分栏，常规、早期未分类各一类；贴图裁剪{(App.Config.Current.HistoryPinCrop ? "单独成类" : "不收录")}。每类保留最近 {limit} 张（data\\history，当前共 {count} 张）。";
+        var overLimit = items
+            .GroupBy(i => i.CategoryKey, StringComparer.OrdinalIgnoreCase)
+            .Sum(g => Math.Max(0, g.Count() - limit));
+        var quotaNote = overLimit > 0
+            ? $"；其中 {overLimit} 张超出当前配额，可点「立即清理…」删除"
+            : "；当前没有超出配额的旧截图";
+        HistoryStatusText.Text = $"已开启：窗口截图按进程分栏，常规、早期未分类各一类；贴图裁剪{(App.Config.Current.HistoryPinCrop ? "单独成类" : "不收录")}。每类保留最近 {limit} 张（data\\history，当前共 {count} 张）{quotaNote}。";
         HistoryHomeSummaryText.Text = count == 0
             ? "还没有截图；按截图热键后会自动出现在这里。"
             : $"{count} 张 · 窗口截图按进程分栏 · 每类保留 {limit} 张";
@@ -294,11 +302,61 @@ public sealed partial class MainWindow : Window
         App.Config.Current.HistoryPerCategory = value;
         App.Config.Save();
 
-        // 调小上限立即回收旧文件；调大只影响以后新增，不主动恢复已删内容。
-        CaptureHistoryService.Instance.PruneNow(value);
+        // 只更新配额：已有截图原样保留，用户点「立即清理…」时才按新配额删除超出部分。
         RefreshHistoryStatus();
         _ = _historyWindow?.RefreshAsync();
         App.Log($"History: perCategory={value}");
+    }
+
+    /// <summary>按当前配额清理超出部分；先预演真实张数与分类，确认后才删除，取消则零删除。</summary>
+    private async void PruneHistoryNow_Click(object sender, RoutedEventArgs e)
+    {
+        // 连点只弹一个确认框。
+        if (_pruneHistoryBusy)
+            return;
+
+        var limit = CaptureHistoryService.PerCategoryLimit;
+        var plan = CaptureHistoryService.Instance.GetPrunePlan(limit);
+        if (plan.IsEmpty)
+        {
+            HistoryStatusText.Text = $"当前没有超出配额的历史截图（每类保留 {limit} 张），无需清理。";
+            return;
+        }
+
+        const int maxListedGroups = 8;
+        var detail = string.Join("\n", plan.Groups
+            .Take(maxListedGroups)
+            .Select(g => $"· {g.Title}：删 {g.DeleteCount} 张 / 留 {g.KeepCount} 张"));
+        if (plan.Groups.Count > maxListedGroups)
+            detail += $"\n…另有 {plan.Groups.Count - maxListedGroups} 个分类未列出";
+
+        _pruneHistoryBusy = true;
+        try
+        {
+            var confirmed = await Views.ConfirmDialog.ShowAsync(
+                (UIElement)Content,
+                "立即清理历史截图",
+                $"按当前配额「每类保留 {limit} 张」，将永久删除 {plan.Groups.Count} 个分类里的 {plan.TotalCount} 张旧截图：\n\n{detail}\n\n只删除各分类里最旧的超出部分；新截图和没超限的分类不受影响，删除后无法恢复。",
+                $"删除 {plan.TotalCount} 张");
+            if (!confirmed)
+            {
+                HistoryStatusText.Text = "已取消清理，没有删除任何截图。";
+                return;
+            }
+
+            var deleted = CaptureHistoryService.Instance.PruneNow(limit);
+            RefreshHistoryStatus();
+            if (_historyWindow is not null)
+                _ = _historyWindow.RefreshAsync();
+
+            HistoryStatusText.Text = deleted == plan.TotalCount
+                ? $"已按配额清理 {deleted} 张旧截图（每类保留 {limit} 张）。"
+                : $"已清理 {deleted} 张，与预演的 {plan.TotalCount} 张不同（期间文件可能已变化，详见日志）。";
+        }
+        finally
+        {
+            _pruneHistoryBusy = false;
+        }
     }
 
 }

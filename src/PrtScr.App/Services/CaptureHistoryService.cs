@@ -105,8 +105,14 @@ public sealed class CaptureHistoryService
                 App.Log($"History: 元数据写入失败 {name} {ex.Message}");
             }
 
+            // 配额只在写入新截图时对本分类生效；其他分类即使因调低配额而超限，
+            // 也等用户显式点「立即清理」再删，避免改设置后悄悄损失旧图。
+            // 分类键从刚写入的文件读回，与 PruneLocked 的归类保持一致（元数据写失败时归入早期类）。
             lock (_sync)
-                PruneLocked(PerCategoryLimit);
+            {
+                var saved = ToItem(new FileInfo(path));
+                PruneLocked(PerCategoryLimit, saved.CategoryKey);
+            }
 
             App.Log($"History: saved {name} ({pngBytes.Length / 1024}KB, {mode}, {processName ?? "-"})");
             NotifyHistoryChanged();
@@ -119,12 +125,51 @@ public sealed class CaptureHistoryService
         }
     }
 
-    /// <summary>设置改变后立即按新配额修剪，避免旧分类继续超限。</summary>
-    public void PruneNow(int? perCategory = null)
+    /// <summary>用户显式点「立即清理」时按配额修剪，返回实际删除的张数。</summary>
+    public int PruneNow(int? perCategory = null)
     {
+        int deleted;
         lock (_sync)
-            PruneLocked(perCategory ?? PerCategoryLimit);
+            deleted = PruneLocked(perCategory ?? PerCategoryLimit);
         NotifyHistoryChanged();
+        return deleted;
+    }
+
+    /// <summary>
+    /// 「立即清理」预演：只统计按配额会删除的张数，不删除任何文件。
+    /// 与 <see cref="PruneLocked"/> 共用同一套排序与分类，避免预演和实际删除结果不一致。
+    /// </summary>
+    public PrunePlan GetPrunePlan(int? perCategory = null)
+    {
+        var limit = Math.Clamp(perCategory ?? PerCategoryLimit, 1, 200);
+        var groups = new List<PruneGroup>();
+        lock (_sync)
+        {
+            try
+            {
+                foreach (var group in EnumerateHistoryLocked()
+                             .GroupBy(x => x.Item.CategoryKey, StringComparer.OrdinalIgnoreCase))
+                {
+                    var items = group.ToList();
+                    var deleteCount = Math.Max(0, items.Count - limit);
+                    if (deleteCount == 0)
+                        continue;
+
+                    groups.Add(new PruneGroup(
+                        group.Key, CategoryTitle(items[0].Item), deleteCount, items.Count - deleteCount));
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"History: 清理预演失败 {ex.Message}");
+                return PrunePlan.Empty;
+            }
+        }
+
+        groups.Sort((a, b) => a.DeleteCount != b.DeleteCount
+            ? b.DeleteCount.CompareTo(a.DeleteCount)
+            : string.Compare(a.Title, b.Title, StringComparison.CurrentCulture));
+        return new PrunePlan(groups, groups.Sum(g => g.DeleteCount));
     }
 
     public async Task<byte[]?> ReadAsync(HistoryItem item)
@@ -211,32 +256,30 @@ public sealed class CaptureHistoryService
         return cleared;
     }
 
-    private void PruneLocked(int limit)
+    /// <param name="onlyCategoryKey">只修剪这一个分类；null 表示按配额清理全部分类（显式清理）。</param>
+    private int PruneLocked(int limit, string? onlyCategoryKey = null)
     {
         if (limit < 1)
-            return;
+            return 0;
 
-        var dir = new DirectoryInfo(StorageDirectory);
-        if (!dir.Exists)
-            return;
-
-        var files = dir.GetFiles("*.png")
-            .OrderByDescending(f => f.LastWriteTimeUtc)
-            .ThenByDescending(f => f.Name, StringComparer.Ordinal)
-            .ToArray();
-
+        var deleted = 0;
         // 每个分类（窗口截图按进程，常规/早期按模式）各自保留 limit 张；
         // 窗口进程分类多时总文件数会大于 limit，这是有意为之。
-        var groups = files.GroupBy(f => ToItem(f).CategoryKey, StringComparer.OrdinalIgnoreCase);
-        foreach (var group in groups)
+        foreach (var group in EnumerateHistoryLocked()
+                     .GroupBy(x => x.Item.CategoryKey, StringComparer.OrdinalIgnoreCase))
         {
-            foreach (var file in group.Skip(limit))
+            if (onlyCategoryKey is not null &&
+                !string.Equals(group.Key, onlyCategoryKey, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var (file, _) in group.Skip(limit))
             {
                 try
                 {
                     file.Delete();
                     TryDeleteMetadata(file.FullName);
                     App.Log($"History: pruned {file.Name}");
+                    deleted++;
                 }
                 catch (Exception ex)
                 {
@@ -244,7 +287,30 @@ public sealed class CaptureHistoryService
                 }
             }
         }
+
+        return deleted;
     }
+
+    /// <summary>按时间倒序枚举历史文件及其分类信息；调用方必须已持有 <see cref="_sync"/> 锁。</summary>
+    private IEnumerable<(FileInfo File, HistoryItem Item)> EnumerateHistoryLocked()
+    {
+        var dir = new DirectoryInfo(StorageDirectory);
+        if (!dir.Exists)
+            return Array.Empty<(FileInfo, HistoryItem)>();
+
+        return dir.GetFiles("*.png")
+            .OrderByDescending(f => f.LastWriteTimeUtc)
+            .ThenByDescending(f => f.Name, StringComparer.Ordinal)
+            .Select(f => (File: f, Item: ToItem(f)));
+    }
+
+    private static string CategoryTitle(HistoryItem item) => item.Mode switch
+    {
+        HistoryCaptureMode.Window => $"窗口 · {item.DisplayProcess}",
+        HistoryCaptureMode.Normal => "常规截图",
+        HistoryCaptureMode.PinCrop => "贴图裁剪",
+        _ => "早期未分类",
+    };
 
     private static async Task WriteMetadataAsync(
         string pngPath, HistoryCaptureMode mode, string? processName, string? windowTitle, DateTime capturedAt)
@@ -391,4 +457,15 @@ public sealed class CaptureHistoryService
         [JsonPropertyName("capturedAt")]
         public DateTime CapturedAt { get; set; }
     }
+}
+
+/// <summary>「立即清理」预演中的一个分类：按配额将删除多少张、保留多少张。</summary>
+public sealed record PruneGroup(string CategoryKey, string Title, int DeleteCount, int KeepCount);
+
+/// <summary>「立即清理」的预演结果；<see cref="TotalCount"/> 为 0 表示当前没有超出配额的历史。</summary>
+public sealed record PrunePlan(IReadOnlyList<PruneGroup> Groups, int TotalCount)
+{
+    public static PrunePlan Empty { get; } = new(Array.Empty<PruneGroup>(), 0);
+
+    public bool IsEmpty => TotalCount == 0;
 }

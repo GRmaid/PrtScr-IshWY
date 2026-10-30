@@ -225,6 +225,12 @@ public sealed class ConfigService
             if (File.Exists(FilePath))
                 Current = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(FilePath), JsonOptions) ?? new AppConfig();
 
+            // 手改配置可能写出越界值；统一夹到设置页允许的 1–200，避免数字框显示非法配额。
+            Current.HistoryPerCategory = Math.Clamp(Current.HistoryPerCategory, 1, 200);
+
+            // Umi-OCR 端口同样防手改越界：1–65535，避免拼出非法 URL 或状态页显示错误端口。
+            Current.UmiOcrPort = Math.Clamp(Current.UmiOcrPort, 1, 65535);
+
             // v2：旧默认 Ctrl+Alt+P / Ctrl+Alt+O 在本机被其他程序占用（RegisterHotKey 1409），
             // 迁移到 Ctrl+Alt+V（贴图）/ Ctrl+Alt+S（OCR）；只改仍是旧默认值的配置。
             if ((Current.ConfigVersion ?? 0) < 2)

@@ -36,6 +36,8 @@ public enum WindowCaptureFailure
 /// 窗口捕获结果。<see cref="Bitmap"/> 非空即成功；<see cref="Source"/> 给出实际来源；
 /// <see cref="PrintWindowTimedOut"/> 单独标出「PrintWindow 超期后降级」这一事实——
 /// 即使最终由 WGC 成功，上层（A02/P-04）也需要知道窗口捕获被降级过。
+/// 粗粒度 <see cref="Failure"/> 保持 P-04 已消费的语义；WGC 回退的真实原因另见
+/// <see cref="WgcFailure"/> / <see cref="WgcHResult"/> / <see cref="WgcDetail"/>。
 /// </summary>
 public sealed class WindowCaptureResult
 {
@@ -44,13 +46,19 @@ public sealed class WindowCaptureResult
         WindowCaptureSource source,
         WindowCaptureFailure failure,
         bool printWindowTimedOut,
-        string? detail)
+        string? detail,
+        WgcWindowCaptureFailure wgcFailure,
+        int wgcHResult,
+        string? wgcDetail)
     {
         Bitmap = bitmap;
         Source = source;
         Failure = failure;
         PrintWindowTimedOut = printWindowTimedOut;
         Detail = detail;
+        WgcFailure = wgcFailure;
+        WgcHResult = wgcHResult;
+        WgcDetail = wgcDetail;
     }
 
     public Bitmap? Bitmap { get; }
@@ -58,16 +66,42 @@ public sealed class WindowCaptureResult
     public WindowCaptureFailure Failure { get; }
     public bool PrintWindowTimedOut { get; }
     public string? Detail { get; }
+
+    /// <summary>WGC 回退的真实失败原因；未走 WGC 或 WGC 成功时为 <see cref="WgcWindowCaptureFailure.None"/>。</summary>
+    public WgcWindowCaptureFailure WgcFailure { get; }
+
+    /// <summary>WGC 失败时的原生 HRESULT；未失败时为 0。</summary>
+    public int WgcHResult { get; }
+
+    /// <summary>WGC 失败时的原始 Detail（P-08 产出）；未失败时为 null。</summary>
+    public string? WgcDetail { get; }
+
     public bool IsSuccess => Bitmap is not null;
     public bool IsTimeout => Failure == WindowCaptureFailure.Timeout;
 
+    /// <summary>整条链是否因调用方取消而结束（含 WGC 侧取消归一后的结果）。</summary>
+    public bool IsCanceled => Failure == WindowCaptureFailure.Canceled;
+
     internal static WindowCaptureResult Success(
-        Bitmap bitmap, WindowCaptureSource source, bool printWindowTimedOut, string? detail)
-        => new(bitmap, source, WindowCaptureFailure.None, printWindowTimedOut, detail);
+        Bitmap bitmap,
+        WindowCaptureSource source,
+        bool printWindowTimedOut,
+        string? detail,
+        WgcWindowCaptureFailure wgcFailure = WgcWindowCaptureFailure.None,
+        int wgcHResult = 0,
+        string? wgcDetail = null)
+        => new(bitmap, source, WindowCaptureFailure.None, printWindowTimedOut, detail,
+            wgcFailure, wgcHResult, wgcDetail);
 
     internal static WindowCaptureResult Failed(
-        WindowCaptureFailure failure, bool printWindowTimedOut, string? detail)
-        => new(null, WindowCaptureSource.None, failure, printWindowTimedOut, detail);
+        WindowCaptureFailure failure,
+        bool printWindowTimedOut,
+        string? detail,
+        WgcWindowCaptureFailure wgcFailure = WgcWindowCaptureFailure.None,
+        int wgcHResult = 0,
+        string? wgcDetail = null)
+        => new(null, WindowCaptureSource.None, failure, printWindowTimedOut, detail,
+            wgcFailure, wgcHResult, wgcDetail);
 }
 
 /// <summary>
@@ -170,10 +204,23 @@ public static class WindowCapture
     /// 晚到的 Bitmap 由一次性后继释放。同一窗口同时只允许一次 PrintWindow 在飞（单飞）。
     /// 限制：超期不能终止目标窗口的 PrintWindow，底层线程会残留到系统自行返回为止；
     /// 门闩由该线程返回时释放，期间对同一窗口的调用得到 <see cref="WindowCaptureFailure.Busy"/>。
+    /// WGC 回退失败时，<see cref="WindowCaptureResult.WgcFailure"/> /
+    /// <see cref="WindowCaptureResult.WgcHResult"/> / <see cref="WindowCaptureResult.WgcDetail"/> 给出 WGC 侧真实原因；
+    /// WGC 报取消时整条链归一为 <see cref="WindowCaptureFailure.Canceled"/>，不误报成 PrintWindowUnavailable。
+    /// 调用方 token 在进入时已取消 → 立即返回 <see cref="WindowCaptureFailure.Canceled"/>，不占门闩、不发起 PrintWindow。
     /// </summary>
     public static async Task<WindowCaptureResult> CaptureDetailedAsync(
         WindowInfo window, CancellationToken cancellationToken = default)
     {
+        // 入口预判：token 已取消时立即脱身——不占单飞门闩、不起 PrintWindow、不产生晚到帧。
+        // 已经起跑之后再取消仍走「调用方脱身 + 晚到帧一次性后继释放」，这里不放大既有竞态。
+        if (cancellationToken.IsCancellationRequested)
+        {
+            Trace("取消：进入捕获前 token 已取消，不发起 PrintWindow");
+            return WindowCaptureResult.Failed(
+                WindowCaptureFailure.Canceled, false, "捕获已取消（进入捕获前 token 已取消）");
+        }
+
         var width = window.FrameBounds.Width;
         var height = window.FrameBounds.Height;
         if (window.Handle == 0 || width <= 0 || height <= 0)
@@ -247,40 +294,63 @@ public static class WindowCapture
             if (cancellationToken.IsCancellationRequested)
                 return WindowCaptureResult.Failed(WindowCaptureFailure.Canceled, printWindowTimedOut, "捕获已取消");
 
-            Bitmap? viaWgc;
+            WgcWindowCaptureResult wgc;
             try
             {
-                viaWgc = await WgcWindowCapture.CaptureWindowAsync(window, cancellationToken).ConfigureAwait(false);
+                // P-07b：走详细入口拿 WGC 侧的 Failure/HRESULT/Detail，不再只剩 null。
+                // P-08 契约下该入口不抛异常；保留兜底 catch 以防实现变化把异常漏到上层。
+                wgc = await WgcWindowCapture.CaptureWindowDetailedAsync(window, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                return WindowCaptureResult.Failed(WindowCaptureFailure.Canceled, printWindowTimedOut, "捕获已取消");
+                Trace($"取消：hwnd=0x{window.Handle:X} WGC 回退抛出取消，整条链按取消返回");
+                return WindowCaptureResult.Failed(
+                    WindowCaptureFailure.Canceled, printWindowTimedOut, "捕获已取消",
+                    WgcWindowCaptureFailure.Canceled, 0, "WGC 调用抛出 OperationCanceledException");
             }
             catch (Exception ex)
             {
-                Trace($"WGC 回退异常：hwnd=0x{window.Handle:X} {ex.GetType().Name} 0x{ex.HResult:X}: {ex.Message}");
-                viaWgc = null;
+                var detail = $"{ex.GetType().Name} 0x{ex.HResult:X8}: {ex.Message}";
+                Trace($"WGC 回退异常：hwnd=0x{window.Handle:X} {detail}");
+                return WindowCaptureResult.Failed(
+                    printWindowTimedOut ? WindowCaptureFailure.Timeout : WindowCaptureFailure.PrintWindowUnavailable,
+                    printWindowTimedOut,
+                    ComposeWgcFailureDetail(printWindowTimedOut, $"WGC 调用异常 {detail}"),
+                    WgcWindowCaptureFailure.CaptureFailed, ex.HResult, detail);
             }
 
-            if (viaWgc is not null)
+            if (wgc.Bitmap is not null)
             {
                 if (printWindowTimedOut)
                     Trace($"降级成功：hwnd=0x{window.Handle:X} PrintWindow 超时后 WGC 取到窗口内容");
                 else if (printTask is null)
                     Trace($"降级成功：hwnd=0x{window.Handle:X} PrintWindow 线程未起，改由 WGC 取窗口内容");
                 return WindowCaptureResult.Success(
-                    viaWgc,
+                    wgc.Bitmap,
                     WindowCaptureSource.Wgc,
                     printWindowTimedOut,
-                    printWindowTimedOut ? $"PrintWindow 超过 {PrintWindowTimeoutMs}ms，已改用 WGC" : null);
+                    printWindowTimedOut ? $"PrintWindow 超过 {PrintWindowTimeoutMs}ms，已改用 WGC" : null,
+                    WgcWindowCaptureFailure.None, wgc.HResult, wgc.Detail);
             }
 
+            // WGC 的取消必须归一为 Canceled：上层（P-04）据 Failure 决定「会话作废」还是「失败提示」，
+            // 误报成 PrintWindowUnavailable/Timeout 会让取消也弹失败提示。
+            if (wgc.Failure == WgcWindowCaptureFailure.Canceled)
+            {
+                Trace($"取消：hwnd=0x{window.Handle:X} WGC 回退报告已取消（PrintWindow 超时={printWindowTimedOut}），" +
+                      "整条链按取消返回");
+                return WindowCaptureResult.Failed(
+                    WindowCaptureFailure.Canceled, printWindowTimedOut,
+                    ComposeWgcFailureDetail(printWindowTimedOut, DescribeWgcFailure(wgc)),
+                    wgc.Failure, wgc.HResult, wgc.Detail);
+            }
+
+            Trace($"WGC 回退失败：hwnd=0x{window.Handle:X} {DescribeWgcFailure(wgc)}");
             return WindowCaptureResult.Failed(
                 printWindowTimedOut ? WindowCaptureFailure.Timeout : WindowCaptureFailure.PrintWindowUnavailable,
                 printWindowTimedOut,
-                printWindowTimedOut
-                    ? $"PrintWindow 超过 {PrintWindowTimeoutMs}ms 且 WGC 回退失败"
-                    : "PrintWindow 失败（返回假或纯黑）且 WGC 回退失败");
+                ComposeWgcFailureDetail(printWindowTimedOut, DescribeWgcFailure(wgc)),
+                wgc.Failure, wgc.HResult, wgc.Detail);
         }
         finally
         {
@@ -307,6 +377,19 @@ public static class WindowCapture
         else
             _ = task.Exception;
     }
+
+    /// <summary>把 P-08 的 WGC 失败结果压成一行人读描述（枚举名 + HRESULT + 原始 Detail）。</summary>
+    private static string DescribeWgcFailure(WgcWindowCaptureResult wgc)
+        => wgc.Detail is null
+            ? $"WGC {wgc.Failure}（HRESULT=0x{wgc.HResult:X8}）"
+            : $"WGC {wgc.Failure}（HRESULT=0x{wgc.HResult:X8}）：{wgc.Detail}";
+
+    /// <summary>整条链失败原因：PrintWindow 侧结论 + WGC 侧真实原因。</summary>
+    private static string ComposeWgcFailureDetail(bool printWindowTimedOut, string wgcPart)
+        => (printWindowTimedOut
+                ? $"PrintWindow 超过 {PrintWindowTimeoutMs}ms 且 WGC 回退失败"
+                : "PrintWindow 失败（返回假或纯黑）且 WGC 回退失败")
+           + "：" + wgcPart;
 
     /// <summary>
     /// 同步捕获入口（保持旧签名兼容，供启动预热用）：无受控期限，且与

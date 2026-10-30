@@ -32,35 +32,43 @@ public static class ScreenCapturer
     {
         var (x, y, width, height) = GetVirtualScreenRect();
 
-        var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-
-        // CAPTUREBLT：把分层窗口（桌面歌词、桌宠等 per-pixel alpha 窗口）也抓进画面。
-        // 注意不能走 Graphics.CopyFromScreen——它校验枚举值、拒绝 CaptureBlt 组合
-        // （InvalidEnumArgumentException，这正是上一版 F1 崩溃的元凶），必须原生 BitBlt。
+        // 先取屏幕 DC：失败时不应先建 bitmap（否则 throw 前漏一张 2560×1600 的位图）
         var hdcScreen = PInvoke.GetDC(default);
         if (hdcScreen.IsNull)
             throw new InvalidOperationException("GetDC(null) 失败，无法抓屏");
 
         try
         {
-            using var graphics = Graphics.FromImage(bitmap);
-            var hdcDest = new HDC(graphics.GetHdc());
+            var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
             try
             {
-                _ = PInvoke.BitBlt(
-                    hdcDest, 0, 0, width, height, hdcScreen, x, y,
-                    (ROP_CODE)(ROP_SRCCOPY | ROP_CAPTUREBLT));
+                // CAPTUREBLT：把分层窗口（桌面歌词、桌宠等 per-pixel alpha 窗口）也抓进画面。
+                // 注意不能走 Graphics.CopyFromScreen——它校验枚举值、拒绝 CaptureBlt 组合
+                // （InvalidEnumArgumentException，这正是上一版 F1 崩溃的元凶），必须原生 BitBlt。
+                using var graphics = Graphics.FromImage(bitmap);
+                var hdcDest = new HDC(graphics.GetHdc());
+                try
+                {
+                    _ = PInvoke.BitBlt(
+                        hdcDest, 0, 0, width, height, hdcScreen, x, y,
+                        (ROP_CODE)(ROP_SRCCOPY | ROP_CAPTUREBLT));
+                }
+                finally
+                {
+                    graphics.ReleaseHdc(hdcDest);
+                }
             }
-            finally
+            catch
             {
-                graphics.ReleaseHdc(hdcDest);
+                bitmap.Dispose();
+                throw;
             }
+
+            return (bitmap, new WindowRect(x, y, width, height));
         }
         finally
         {
             _ = PInvoke.ReleaseDC(default, hdcScreen);
         }
-
-        return (bitmap, new WindowRect(x, y, width, height));
     }
 }

@@ -21,12 +21,77 @@ public sealed class CaptureService
     private CaptureOverlayWindow? _overlay;
     private bool _isCapturing;
     private nint _currentMonitor;
+    private readonly object _sessionGate = new();
+    private Guid _captureSessionId;
 
     private CaptureService()
     {
     }
 
     public bool IsCapturing => _isCapturing;
+
+    /// <summary>当前这次取景的会话身份；新截图开始后旧身份自动失效（A05）。</summary>
+    public Guid CurrentCaptureSessionId
+    {
+        get
+        {
+            lock (_sessionGate)
+                return _captureSessionId;
+        }
+    }
+
+    /// <summary>await 之后写内容/历史/剪贴板/OCR 之前先校验：不是最新会话就丢弃（A05）。</summary>
+    public bool IsCurrentCaptureSession(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+            return false;
+
+        lock (_sessionGate)
+            return _captureSessionId == sessionId;
+    }
+
+    /// <summary>取消/放弃一次取景：让该会话所有晚到结果失效（A03/A05）。</summary>
+    public void InvalidateCaptureSession(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+            return;
+
+        lock (_sessionGate)
+        {
+            if (_captureSessionId != sessionId)
+                return;
+            _captureSessionId = Guid.Empty;
+        }
+
+        App.Log($"Capture: session {sessionId:N} invalidated");
+    }
+
+    /// <summary>
+    /// 取景收尾的唯一漏斗（P-04b）：清 _isCapturing、注销取景期全局 Esc、通知 WGC 池。
+    /// 幂等；session 为 Guid.Empty 表示启动期失败（尚未发会话号）。不清 _captureSessionId：
+    /// 确认成功后的编码/剪贴板/历史仍要用它校验晚到（A05）。
+    /// </summary>
+    internal void EndCaptureSession(Guid sessionId, string reason)
+    {
+        bool wasCapturing;
+        lock (_sessionGate)
+        {
+            wasCapturing = _isCapturing;
+            _isCapturing = false;
+        }
+
+        var sessionText = sessionId == Guid.Empty ? "<none>" : sessionId.ToString("N");
+        if (!wasCapturing)
+        {
+            App.Log($"Capture: session {sessionText} finish ignored (not capturing, reason={reason})");
+            return;
+        }
+
+        Hotkey?.EndCaptureMode();
+        if (_currentMonitor != 0)
+            WgcWindowCapture.NotifyOverlayClosed(_currentMonitor);
+        App.Log($"Capture: session {sessionText} finished reason={reason}");
+    }
 
     /// <summary>由 MainWindow 注入：用于取景期间接管全局 Esc。</summary>
     public HotkeyService? Hotkey { get; set; }
@@ -40,13 +105,8 @@ public sealed class CaptureService
         try
         {
             _overlay = new CaptureOverlayWindow();
-            _overlay.Dismissed += () =>
-            {
-                _isCapturing = false;
-                Hotkey?.EndCaptureMode();
-                if (_currentMonitor != 0)
-                    WgcWindowCapture.NotifyOverlayClosed(_currentMonitor);
-            };
+            // 收尾统一走 CaptureOverlayWindow.FinishCaptureSession → EndCaptureSession（P-04b）；
+            // Dismissed 只作为窗口层通知，不再在这里另设清零点。
             _overlay.WarmUpHidden();
             App.Log("Capture: overlay pre-created");
         }
@@ -62,10 +122,16 @@ public sealed class CaptureService
         App.Log("Capture: start");
         if (_isCapturing)
         {
-            App.Log("Capture: already capturing, cancel");
+            var activeSession = CurrentCaptureSessionId;
+            var activeText = activeSession == Guid.Empty ? "<none>" : activeSession.ToString("N");
+            App.Log($"Capture: already capturing, cancel session={activeText}");
             _overlay?.Cancel();
             return;
         }
+
+        // 冻结图的 owner：交给取景窗（Prepare）之前归本方法，交接后归 overlay（A10/P-09b）
+        Bitmap? frozen = null;
+        var frozenHandedOff = false;
 
         try
         {
@@ -80,7 +146,8 @@ public sealed class CaptureService
 
             var pool = WgcWindowCapture.EnsureMonitorPool(hMonitor);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var (frozen, frozenBlack) = await CaptureMonitorBestAsync(hMonitor, monitor);
+            var (captured, frozenBlack) = await CaptureMonitorBestAsync(hMonitor, monitor);
+            frozen = captured;
             if (frozen is null)
             {
                 App.Log("Capture: 所有采集引擎均失败");
@@ -95,21 +162,33 @@ public sealed class CaptureService
 
             EnsureOverlay();
             if (_overlay is null)
-            {
-                frozen.Dispose();
-                return;
-            }
+                return;   // frozen 由 finally 释放
 
+            // 每次真正开始取景发一个会话身份：之后所有 await 回来的写入都拿它比对（A05）
+            var sessionId = Guid.NewGuid();
             _isCapturing = true;
+            lock (_sessionGate)
+                _captureSessionId = sessionId;
             _overlay.Prepare(frozen, monitor, windows);
+            // Prepare 第一件事就是把 frozen 挂成 overlay 的 _full（CaptureOverlayWindow.xaml.cs:226-227），
+            // 从这一步起释放责任归取景窗，本方法不得再 Dispose。
+            frozenHandedOff = true;
             Hotkey?.BeginCaptureMode();
-            App.Log("Capture: overlay shown");
+            App.Log($"Capture: overlay shown session={sessionId:N}");
         }
         catch (Exception ex)
         {
-            _isCapturing = false;
+            // 启动期失败也走同一漏斗：清 _isCapturing 并注销可能已注册的取景期 Esc。
+            EndCaptureSession(CurrentCaptureSessionId, "start-failed");
             App.Log($"Capture: 异常 {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             throw;
+        }
+        finally
+        {
+            // 未交接给取景窗的 frozen 一律在本方法释放；已交接的由 overlay 的 Dismiss/FinishCaptureSession
+            // 释放，避免与 P-04 的取消路径重复 Dispose。
+            if (!frozenHandedOff)
+                frozen?.Dispose();
         }
     }
 
@@ -155,26 +234,51 @@ public sealed class CaptureService
         }
 
         var fallback = CaptureMonitorByBitBlt(monitor);
-        if (IsNearlyBlack(fallback))
+        // fallback 的 owner 只在本方法内：作为返回值交出前，任何出口都不能丢下它（A10/P-09b）
+        var fallbackOwned = true;
+        try
         {
-            // 部分全屏游戏对 CAPTUREBLT 返回黑屏，普通 BitBlt 反而能拿到画面
-            App.Log("Capture: CAPTUREBLT 黑屏，尝试普通 BitBlt");
-            fallback.Dispose();
-            fallback = CaptureMonitorByBitBlt(monitor, includeLayered: false);
-        }
+            if (IsNearlyBlack(fallback))
+            {
+                // 部分全屏游戏对 CAPTUREBLT 返回黑屏，普通 BitBlt 反而能拿到画面
+                App.Log("Capture: CAPTUREBLT 黑屏，尝试普通 BitBlt");
+                fallback.Dispose();
+                fallbackOwned = false;
+                fallback = CaptureMonitorByBitBlt(monitor, includeLayered: false);
+                fallbackOwned = true;
+            }
 
-        if (!IsNearlyBlack(fallback))
+            if (!IsNearlyBlack(fallback))
+            {
+                App.Log($"Capture: engine=BitBlt {fallback.Width}×{fallback.Height}");
+                fallbackOwned = false;
+                return (fallback, false);
+            }
+
+            // 最后一招：全屏游戏通常是一个"窗口"，用 WGC 窗口捕获（OBS 游戏/窗口捕获同路线）
+            var foregroundResult = await CaptureForegroundWindowAsync(monitor);
+            if (foregroundResult is not null)
+            {
+                // 前台 WGC 帧接管：BitBlt 兜底图不再需要，由本函数 finally 释放 (A10/P-09b)
+                try
+                {
+                    return (foregroundResult, IsNearlyBlack(foregroundResult));
+                }
+                catch
+                {
+                    foregroundResult.Dispose();
+                    throw;
+                }
+            }
+
+            fallbackOwned = false;
+            return (fallback, true);
+        }
+        finally
         {
-            App.Log($"Capture: engine=BitBlt {fallback.Width}×{fallback.Height}");
-            return (fallback, false);
+            if (fallbackOwned)
+                fallback.Dispose();
         }
-
-        // 最后一招：全屏游戏通常是一个"窗口"，用 WGC 窗口捕获（OBS 游戏/窗口捕获同路线）
-        var foregroundResult = await CaptureForegroundWindowAsync(monitor);
-        if (foregroundResult is not null)
-            return (foregroundResult, IsNearlyBlack(foregroundResult));
-
-        return (fallback, true);
     }
 
     private static async Task<Bitmap?> CaptureForegroundWindowAsync(WindowRect monitor)

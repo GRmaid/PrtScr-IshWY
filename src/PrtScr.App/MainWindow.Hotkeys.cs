@@ -54,8 +54,13 @@ public sealed partial class MainWindow
         Services.EscOverPinHook.ScreenshotPressed += () =>
         {
             // 钩子侧 EvaluateScreenshotHotkey 已经 claim 过；这里再 claim 会被 300ms 去重挡掉。
-            App.Log("Hotkey: 键盘钩子捕获截图键");
-            DispatcherQueue.TryEnqueue(OnHotkeyPressed);
+            // 订阅者本身已在线程池上（EscOverPinHook.RaiseDeferred），日志仍随动作一起进 UI 队列，
+            // 绝不在热键投递路径上写盘。
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                App.Log("Hotkey: 键盘钩子捕获截图键");
+                OnHotkeyPressed();
+            });
         };
 
         _hotkey.Start(vk, mods);

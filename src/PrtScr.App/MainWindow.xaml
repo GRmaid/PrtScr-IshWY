@@ -1132,6 +1132,15 @@
                             SmallChange="1"
                             SpinButtonPlacementMode="Inline"
                             ValueChanged="HistoryLimit_ValueChanged" />
+                        <Button
+                            x:Name="PruneHistoryNowButton"
+                            Content="立即清理…"
+                            HorizontalAlignment="Left"
+                            Click="PruneHistoryNow_Click" />
+                        <TextBlock
+                            Text="修改保留张数只影响以后新截的图，已有截图不会被删除；点「立即清理…」才会按当前配额删除超出的旧截图，删除前会先列出张数与分类。"
+                            Style="{StaticResource HintTextStyle}"
+                            TextWrapping="Wrap" />
                         <ToggleSwitch
                             x:Name="HistoryPinCropToggle"
                             Header="贴图裁剪结果也写入历史（分类：贴图裁剪）"
@@ -1242,9 +1251,9 @@
                             IsClosable="False"
                             Severity="Informational"
                             Title="OCR 引擎状态"
-                            Message="检测中…" />
+                            Message="尚未检测（关闭 Umi 时不会自动探测）" />
                         <TextBlock
-                            Text="Windows OCR 是默认引擎、零依赖；Umi-OCR（PaddleOCR）精度更高，默认关闭。打开上方开关后，检测到本机 1224 端口在线才会使用，没安装则自动回退 Windows OCR。"
+                            Text="Windows OCR 是默认引擎、零依赖；Umi-OCR（PaddleOCR）精度更高，默认关闭。关闭时程序不会连接 Umi-OCR；打开开关后，点「测试 Umi-OCR 连接」做单次检测，在线才会在识别时优先使用，未连接则自动回退 Windows OCR。"
                             Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
 

@@ -16,6 +16,7 @@ namespace PrtScr.App.Services;
 ///    连续超时还会把钩子静默摘掉——一次 2560×1600 截图期间就可能发生。日志改为无锁队列 +
 ///    专用写线程，回调只做记账和投递。
 /// 2) RegisterHotKey 兜底通道先命中，说明钩子漏了这次按键：请求钩子线程重装，自愈。
+/// 3) 三个热键事件一律经 <see cref="RaiseDeferred"/> 投到线程池，订阅者永远不在钩子回调线程上执行。
 /// </summary>
 internal static unsafe class EscOverPinHook
 {
@@ -46,6 +47,7 @@ internal static unsafe class EscOverPinHook
 
     private static nint _hook;
     private static uint _hookThreadId;
+    private static int _hookManagedThreadId;
     private static Thread? _hookThread;
     private static readonly object InstallLock = new();
     private static readonly ManualResetEventSlim InstallDone = new(false);
@@ -64,13 +66,13 @@ internal static unsafe class EscOverPinHook
     private static readonly AutoResetEvent LogSignal = new(false);
     private static Thread? _logThread;
 
-    /// <summary>全局键盘钩子捕获到全屏截图热键（在钩子线程上触发，订阅方自行切线程）。</summary>
+    /// <summary>全局键盘钩子捕获到全屏截图热键（经 RaiseDeferred 投递到线程池，订阅方自行切线程）。</summary>
     public static event Action? FullScreenPressed;
 
-    /// <summary>主截图热键的钩子通道（游戏吞键时 RegisterHotKey 收不到）。</summary>
+    /// <summary>主截图热键的钩子通道（游戏吞键时 RegisterHotKey 收不到）；同样经 RaiseDeferred 投递。</summary>
     public static event Action? ScreenshotPressed;
 
-    /// <summary>切换截图模式热键的钩子通道。</summary>
+    /// <summary>切换截图模式热键的钩子通道；同样经 RaiseDeferred 投递。</summary>
     public static event Action? ModeSwitchPressed;
 
     public static void SetFullScreenKey(int virtualKey, int modifiers = 0)
@@ -260,6 +262,35 @@ internal static unsafe class EscOverPinHook
         }
     }
 
+    /// <summary>当前线程是否为低级键盘钩子线程：该线程上不允许写盘、抢锁或等 UI。</summary>
+    internal static bool IsHookThread =>
+        Volatile.Read(ref _hookManagedThreadId) == Environment.CurrentManagedThreadId;
+
+    /// <summary>给 <see cref="App.Log"/> 在钩子线程上兜底：只入无锁队列，由 HookLog 线程落盘。</summary>
+    internal static void LogDeferred(string line) => HookLog(line);
+
+    /// <summary>
+    /// 把热键事件投递到线程池：低级钩子回调只做判定与投递，订阅者的日志/UI 调度都不占回调时间。
+    /// </summary>
+    private static void RaiseDeferred(Action? handler)
+    {
+        if (handler is null)
+            return;
+
+        ThreadPool.QueueUserWorkItem(static state =>
+        {
+            try
+            {
+                ((Action)state!).Invoke();
+            }
+            catch (Exception ex)
+            {
+                // 已在普通线程池线程上，可以安全入日志队列；绝不能把异常带回钩子线程
+                HookLog($"Hook: 热键订阅者异常 {ex.GetType().Name}: {ex.Message}");
+            }
+        }, handler);
+    }
+
     private static void HookLog(string line)
     {
         // 极端情况下宁可丢日志，也不能让回调阻塞在写盘/锁上
@@ -273,6 +304,7 @@ internal static unsafe class EscOverPinHook
     private static void HookThreadMain()
     {
         _hookThreadId = GetCurrentThreadId();
+        _hookManagedThreadId = Environment.CurrentManagedThreadId;
         _hook = InstallHookRaw();
 
         HookLog($"Hook: install esc-over-pin = {_hook != 0} (tid={Environment.CurrentManagedThreadId})");
@@ -457,7 +489,7 @@ internal static unsafe class EscOverPinHook
         if (TryClaimScreenshotHotkey())
         {
             HookLog($"Hook: screenshot key vk=0x{_screenshotVk:X} mods={_screenshotMods} pressed");
-            ScreenshotPressed?.Invoke();
+            RaiseDeferred(ScreenshotPressed);
         }
     }
 
@@ -472,7 +504,7 @@ internal static unsafe class EscOverPinHook
         if (TryClaimModeSwitchHotkey())
         {
             HookLog($"Hook: mode key vk=0x{_modeVk:X} mods={_modeMods} pressed");
-            ModeSwitchPressed?.Invoke();
+            RaiseDeferred(ModeSwitchPressed);
         }
     }
 
@@ -483,7 +515,7 @@ internal static unsafe class EscOverPinHook
             if (TryClaimFullScreenHotkey())
             {
                 HookLog($"Hook: fullscreen key vk=0x{_fullScreenVk:X} mods={_fullScreenMods} pressed");
-                FullScreenPressed?.Invoke();
+                RaiseDeferred(FullScreenPressed);
             }
 
             return;

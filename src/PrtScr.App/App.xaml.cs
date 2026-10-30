@@ -242,6 +242,14 @@ public partial class App : Application
 
     public static void Log(string message)
     {
+        // 低级键盘钩子回调必须立刻返回：钩子线程上的任何日志都转给无锁队列，
+        // 由 EscOverPinHook 的日志线程落盘，绝不在这里抢锁/建目录/写文件。
+        if (EscOverPinHook.IsHookThread)
+        {
+            EscOverPinHook.LogDeferred(message);
+            return;
+        }
+
         try
         {
             lock (LogLock)
