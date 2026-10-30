@@ -24,7 +24,7 @@
 
 ## 下载与运行
 
-当前最新版本：**v1.3.0**。从 [Releases](https://github.com/GRmaid/PrtScr-IshWY/releases/latest) 下载 `IshWY-1.3.0-win-x64.zip`，解压后双击 `IshWY.exe`，程序驻留托盘。
+当前最新版本：**v1.3.1**。从 [Releases](https://github.com/GRmaid/PrtScr-IshWY/releases/latest) 下载 `IshWY-1.3.1-win-x64.zip`，解压后双击 `IshWY.exe`，程序驻留托盘。
 
 - 系统：Windows 10 2004（build 19041）或更高，x64；发布包 self-contained，源码构建需要 .NET 10 SDK。
 - 数据：配置 `data/config.json`、日志 `data/logs/app.log`、历史 `data/history/`；退出在托盘菜单。
@@ -89,10 +89,10 @@ dotnet test PrtScr.sln -c Debug
 ## 打包便携版
 
 ```powershell
-pwsh scripts/publish.ps1 -Version 1.3.0
+pwsh scripts/publish.ps1 -Version 1.3.1
 ```
 
-产物为 `artifacts/IshWY-1.3.0-win-x64/` 与同名 zip。脚本会检查 `IshWY.pri`、`.xbf` 并默认执行一次 `--smoke`；无交互桌面的 CI 可加 `-SkipSmoke`。
+产物为 `artifacts/IshWY-1.3.1-win-x64/` 与同名 zip。脚本会检查 `IshWY.pri`、`.xbf` 并默认执行一次 `--smoke`；无交互桌面的 CI 可加 `-SkipSmoke`。
 
 ## 内存与体积
 

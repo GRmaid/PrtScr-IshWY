@@ -83,3 +83,15 @@
 - 21:07 环境：默认 bin/x64/Debug 原地重建失败（8 错误 / 40 警告），因主人 20:27 启动的 IshWY.exe（PID 48348）锁住 bin 下 dll；不改默认 bin，改为把 efd4028 的可用构建放 .tmp/out-a-final/（主人关掉实例后再原地重建，或直接跑该目录 IshWY.exe）。
 
 - 21:07 更正：本日 22:00 之后的若干条目时间戳由代理估算（写日志时未取系统时钟），真实整改工作时段为 20:19–21:07；条目内容与先后顺序有效，时间以本行与 21:03/21:05/21:07 三条为准。今后写时间戳前先执行 date。
+- 21:12 设计：task-19 B-1 交付 `Record/plans/B1-capture-session-design.md`（五节齐备，14 个状态变量写/读/线程表、CaptureResult 所有权、8 状态机 8 条不变量、迁移三步判据、12 行结果矩阵、8 项未决）；四项待拍板（session 不持有 overlay、快捷全屏另立 P-14b、历史元数据另立单、是否新建 Capture.Tests）。
+- 21:24 环境：主人关闭运行实例（`Get-Process IshWY` = NOT RUNNING）→ 默认 bin 阻塞解除。
+- 21:26 环境：`dotnet build PrtScr.sln -c Debug` 原地重建成功——0 警告 0 错误 25.21s；`src/PrtScr.App/bin/x64/Debug/net10.0-windows10.0.22621.0/win-x64/IshWY.dll` 970752 字节、`IshWY.exe` 455168，UTC 2026-10-30T13:25:54Z；`data/` 保留 232 文件 126,109,645 字节（config.json 1679 字节 mtime 20:27、history、logs）；`strings -el IshWY.dll` 命中 4 处 P-04b 日志标记（already capturing, cancel session= / finished reason= / finish ignored）⇒ 构建含 `efd4028` 全部改动。
+- 21:26 待验收：交主人按 7 条清单实测 `efd4028`（重点：取景中连按两次 F1 仍能截图、Esc 后再按 F1 不被吞）；通过后拍板 B 批次四项（session 不持有 overlay / 快捷全屏另立 P-14b / 历史元数据另立单 / 是否新建 Capture.Tests）。
+- 21:44 验收：主人回「全过」——七条实测（标注 Ctrl+C、裁剪不含工具栏不拉伸、管理器复制、取景中连按两次 F1、Esc 后 F1、卡死窗口约 2s、配额不删旧图）全部通过 ⇒ A 批次放行确认。
+- 21:44 发布准备：v1.3.1 版本号——`src/PrtScr.App/PrtScr.App.csproj` `<Version>` 1.3.0→1.3.1；`README.md` 三处（当前最新版本 v1.3.1 + `IshWY-1.3.1-win-x64.zip` 下载名、打包示例命令、产物目录名）。README 第 8 行主人致谢 v1.3.0 的原文未动。
+- 21:46 门禁：整包 build 0 错 0 警 30.42s（OutDir .tmp/out-v131）、Core.Tests 89/89 84ms、format rc=0。
+- 21:48 打包：`pwsh scripts/publish.ps1 -Version 1.3.1 -SkipSmoke` 退出 0——`artifacts/IshWY-1.3.1-win-x64/` 131 文件 77,817,294 字节（74.2 MB），`IshWY.pri` 2,231,656 字节 + 9 个 .xbf，PDB 0、winmd 0、`Microsoft.UI.Xaml.Phone.dll` 在；zip `artifacts/IshWY-1.3.1-win-x64.zip` 31,161,751 字节 sha256 `9a1ce092797dedea26354a5129fef213e18bd9d16b5171194e2c644aeefd2445`。trim 分析警告 IL2026/IL2104 为既有（JSON 反射与第三方库），不阻断。
+- 21:49 冒烟：解压到 `.tmp/smoke-131/` 跑 `--smoke` 退出 0，但日志为「已有实例，已请求其显示设置窗，本进程退出」——主人实例（PID 24184）仍在运行，属假成功，不计入放行；须主人关闭实例后重跑，验收主窗创建与五热键 register=0x1。
+- 21:50 验收（冒烟重跑）：主人关闭实例后解压 `.tmp/smoke-131b/` 跑 `--smoke` 退出 0；日志有 `MainWindow: ctor start` → `window created` → `window activated`、五条热键 `register=0x1`（screenshot/fullscreen/pin/ocr/mode）、`OnLaunched: smoke exiting`；进程退出后无残留 ⇒ 启动门禁通过。
+- 21:51 事故与修复：该次冒烟在便携副本里跑，`Startup: 已更新登录启动路径` 把 HKCU Run 的 IshWY 值改成了 `.tmp\smoke-131b\...`；已用 `Set-ItemProperty` 恢复为 `src/PrtScr.App/bin/x64/Debug/net10.0-windows10.0.22621.0/win-x64/IshWY.exe --startup`，并删除 `.tmp/smoke-131*`。教训：冒烟若在副本里跑，必须在配置里先关开机自启，或跑完显式恢复 Run 键。
+- 21:52 决策（主人）：直到整改目标全部完成之前不考虑发布——不打 tag、不建 GitHub Release；版本号 1.3.1 先随代码留在 main，最终发版版本号届时重定。
