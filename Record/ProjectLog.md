@@ -74,6 +74,12 @@
 
 - 23:05 复核：task-14 App 层结论——会话闸门通过、双重释放通过、钩子语义通过、Wgc* 未接线非缺陷；但判 1 项阻断：取景中再按 F1/Esc 致 _isCapturing 永久为真、Esc 热键残留（A03 遗留未闭环，P-04 只做晚到丢弃）。
 - 23:07 派单：新建 task-18 P-04b（唯一收尾漏斗 + ConfirmAsync 局部 owned 标志 + Dismiss 不早退 + 补 session 日志）→ 待 maid-impl 完成 task-16 后接；P-12 行为检查表追加该场景。
-- 23:18 事故：误用 tools.write 传空字符串占位，把 Record/plans/2026-10-28-整改总纲.md（176 行）截断为空；用 git show HEAD 版打底 + 补回 §11 续两节恢复为 197 行 / 14 个二级节。教训：不用空内容占位，长文本追加用全文重写。
-- 23:20 校准：P-04b 日志关键字定稿并发 maid-check，P-12 报告 G1 行（2.4 表 :159 + 待确认 #2）改为可判别判据。
-- 23:26 派单：task-19 B-1 设计（maid-check）进行中；task-18 P-04b 代码改完、构建绿，Core.Tests/format 与报告在跑。
+- [时间戳为估算] 事故：误用 tools.write 传空字符串占位，把 Record/plans/2026-10-28-整改总纲.md（176 行）截断为空；用 git show HEAD 版打底 + 补回 §11 续两节恢复为 197 行 / 14 个二级节。教训：不用空内容占位，长文本追加用全文重写。
+- [时间戳为估算] 校准：P-04b 日志关键字定稿并发 maid-check，P-12 报告 G1 行（2.4 表 :159 + 待确认 #2）改为可判别判据。
+- [时间戳为估算] 派单：task-19 B-1 设计（maid-check）进行中；task-18 P-04b 代码改完、构建绿，Core.Tests/format 与报告在跑。
+
+- 21:03 验收：task-18 P-04b 通过（grep 证明 _isCapturing 唯一清零 :80、FinishCaptureSession/Dismiss 全部带 session+reason、无裸 Dismiss()），lead 在冻结树复跑三门禁——build 0 错 0 警 14.38s（OutDir .tmp/out-a-final）、Core.Tests 89/89 87ms、format rc=0 → A 批次放行。
+- 21:05 提交：efd4028（18 文件 +1473/-304 + 16 份报告），已推送 origin/main（9c81858..efd4028）。工作树仅 .tmp/ 与 大佬修改材料/ 未跟踪。
+- 21:07 环境：默认 bin/x64/Debug 原地重建失败（8 错误 / 40 警告），因主人 20:27 启动的 IshWY.exe（PID 48348）锁住 bin 下 dll；不改默认 bin，改为把 efd4028 的可用构建放 .tmp/out-a-final/（主人关掉实例后再原地重建，或直接跑该目录 IshWY.exe）。
+
+- 21:07 更正：本日 22:00 之后的若干条目时间戳由代理估算（写日志时未取系统时钟），真实整改工作时段为 20:19–21:07；条目内容与先后顺序有效，时间以本行与 21:03/21:05/21:07 三条为准。今后写时间戳前先执行 date。
