@@ -124,6 +124,7 @@ public sealed partial class OcrResultWindow : Window
             // 主动丢掉识别文本，让大段结果随窗口一起回收，而不是等 GC 猜
             TextOutput.Text = "";
             StatusText.Text = "";
+            CopyStatusText.Text = "";
             EngineText.Text = "";
 
             // 把焦点还给打开 OCR 的窗口（通常是贴图），否则 Esc 会"失灵"
@@ -159,7 +160,7 @@ public sealed partial class OcrResultWindow : Window
         }
 
         _originalText = TextOutput.Text;
-        StatusText.Text = _baseStatus;
+        AnnounceStatus(_baseStatus);
         UpdateCopyButton();
     }
 
@@ -167,11 +168,19 @@ public sealed partial class OcrResultWindow : Window
     private void UpdateCopyButton() =>
         CopyButton.IsEnabled = !_copying && TextOutput.IsEnabled && !string.IsNullOrWhiteSpace(TextOutput.Text);
 
-    /// <summary>复制结果是异步反馈，通知读屏软件播报状态变化。</summary>
+    /// <summary>识别完成等窗口状态变化，通知读屏软件播报（复制反馈走 AnnounceCopyStatus）。</summary>
     private void AnnounceStatus(string text)
     {
         StatusText.Text = text;
         Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(StatusText)
+            ?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
+    }
+
+    /// <summary>复制结果只写独立的状态行，避免覆盖「识别完成 · 用时」。</summary>
+    private void AnnounceCopyStatus(string text)
+    {
+        CopyStatusText.Text = text;
+        Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(CopyStatusText)
             ?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
     }
 
@@ -210,7 +219,7 @@ public sealed partial class OcrResultWindow : Window
 
         _copying = true;
         UpdateCopyButton();
-        AnnounceStatus("正在复制…");
+        AnnounceCopyStatus("正在复制…");
 
         bool ok;
         try
@@ -228,11 +237,11 @@ public sealed partial class OcrResultWindow : Window
 
         UpdateCopyButton();
         if (!ok)
-            AnnounceStatus("复制失败：剪贴板可能被其他程序占用，请稍后再试");
+            AnnounceCopyStatus("复制失败：剪贴板可能被其他程序占用，请稍后再试");
         else if (TextOutput.Text != text)
-            AnnounceStatus("已复制点击时的文本；之后的修改还没有复制");
+            AnnounceCopyStatus("已复制点击时的文本；之后的修改还没有复制");
         else
-            AnnounceStatus($"已复制到剪贴板（{text.Length} 个字符）");
+            AnnounceCopyStatus($"已复制到剪贴板（{text.Length} 个字符）");
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)

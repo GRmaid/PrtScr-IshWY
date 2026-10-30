@@ -19,7 +19,13 @@
                 Text="识别完成"
                 TextWrapping="Wrap"
                 AutomationProperties.LiveSetting="Polite" />
-            <TextBlock x:Name="EngineText" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+            <TextBlock x:Name="EngineText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock
+                x:Name="CopyStatusText"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap"
+                AutomationProperties.LiveSetting="Polite" />
         </StackPanel>
 
         <TextBox

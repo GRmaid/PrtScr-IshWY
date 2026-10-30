@@ -277,8 +277,7 @@ public sealed partial class HistoryWindow : Window
         var filteredCount = FilterItems(_selectedCategoryKey).Count();
         var shown = _items.Count;
 
-        SubtitleText.Text = $"按截图模式 / 进程分类，每类最多 {CaptureHistoryService.PerCategoryLimit} 张；"
-            + "仅保存在本机 data\\history。";
+        SubtitleText.Text = $"每类最多 {CaptureHistoryService.PerCategoryLimit} 张 · 仅存本机";
 
         EmptyText.Text = _allItems.Count == 0
             ? "还没有截图历史。按截图热键截一张图，或检查“保存截图历史”是否已打开。"

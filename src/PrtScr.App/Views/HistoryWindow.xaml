@@ -26,13 +26,16 @@
             <TextBlock
                 x:Name="SubtitleText"
                 FontSize="12"
-                Opacity="0.6"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap"
-                Text="仅保存在本机 data\history。" />
+                MaxLines="1"
+                TextTrimming="CharacterEllipsis"
+                Text="每类最多 30 张 · 仅存本机"
+                ToolTipService.ToolTip="按截图模式 / 进程分类；每类保留张数可在设置 → 截图历史里调整，图片只保存在本机 data\history。" />
             <TextBlock
                 Margin="0,2,0,0"
                 FontSize="12"
-                Opacity="0.62"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap"
                 Text="左键选中；右键进入多选，之后左键勾选/取消；点空白处或 Esc 退出。" />
         </StackPanel>
@@ -68,7 +71,7 @@
                                 Text="{x:Bind CountText}"
                                 Margin="8,0,0,0"
                                 FontSize="12"
-                                Opacity="0.6" />
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
@@ -84,7 +87,7 @@
                 <TextBlock
                     x:Name="ScopeText"
                     FontSize="12"
-                    Opacity="0.75"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextWrapping="Wrap" />
 
                 <GridView
@@ -142,7 +145,7 @@
                                     <TextBlock
                                         Text="{x:Bind Detail}"
                                         FontSize="11"
-                                        Opacity="0.6"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                                 <Border
@@ -180,7 +183,7 @@
                     TextWrapping="Wrap"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Opacity="0.6"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Visibility="Collapsed" />
 
                 <ProgressRing
@@ -209,7 +212,7 @@
                 <TextBlock
                     x:Name="ActionHintText"
                     FontSize="12"
-                    Opacity="0.62"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextTrimming="CharacterEllipsis"
                     Text="选中截图后可复制、贴图、标注或另存为；多选时另存为会批量保存。删除与清空会先确认，确认后不可恢复。" />
                 <TextBlock
@@ -217,7 +220,7 @@
                     Grid.Column="1"
                     MaxWidth="360"
                     FontSize="12"
-                    Opacity="0.65"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     VerticalAlignment="Center"
                     TextTrimming="CharacterEllipsis" />
             </Grid>
@@ -266,12 +269,14 @@
                         Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
                     <Button
                         Content="删除…"
+                        AutomationProperties.Name="删除选中的截图（会先确认，不可恢复）"
                         Click="Delete_Click"
                         Style="{StaticResource DangerButtonStyle}"
                         MinWidth="0"
                         Padding="10,6" />
                     <Button
                         Content="清空分类…"
+                        AutomationProperties.Name="清空当前分类的全部截图（会先确认，不可恢复）"
                         Click="Clear_Click"
                         Style="{StaticResource DangerButtonStyle}"
                         MinWidth="0"

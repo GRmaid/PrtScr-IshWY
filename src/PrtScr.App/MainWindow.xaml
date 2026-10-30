@@ -172,7 +172,7 @@
                             <TextBlock Text="实践小梅IshWY" FontSize="32" FontWeight="SemiBold" />
                             <TextBlock
                                 Text="Ishmael is watching you · 分窗口截屏 · 窗口内容捕获 · 贴图 · OCR"
-                                Opacity="0.6"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
@@ -354,11 +354,11 @@
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Text="操作" FontSize="12" Opacity="0.55" />
-                                <TextBlock Grid.Column="1" Text="当前组合键" FontSize="12" Opacity="0.55" />
-                                <TextBlock Grid.Column="2" Text="修改" FontSize="12" Opacity="0.55" />
-                                <TextBlock Grid.Column="3" Text="删除" FontSize="12" Opacity="0.55" />
-                                <TextBlock Grid.Column="4" Text="重置" FontSize="12" Opacity="0.55" />
+                                <TextBlock Text="操作" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Grid.Column="1" Text="当前组合键" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Grid.Column="2" Text="修改" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Grid.Column="3" Text="删除" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Grid.Column="4" Text="重置" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                                 <TextBlock Grid.Row="1" Text="截图" VerticalAlignment="Center" />
                                 <TextBlock
@@ -675,9 +675,9 @@
                                     <Grid>
                                         <TextBlock Text="截图" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsScreenshotHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="按当前档位：常规取景冻屏框选，快捷全屏直接截整屏。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="按当前档位：常规取景冻屏框选，快捷全屏直接截整屏。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource SettingsCardStyle}">
@@ -685,9 +685,9 @@
                                     <Grid>
                                         <TextBlock Text="全屏截图" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsFullHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="整屏直接进剪贴板，不打开取景器。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="整屏直接进剪贴板，不打开取景器。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource SettingsCardStyle}">
@@ -695,9 +695,9 @@
                                     <Grid>
                                         <TextBlock Text="贴图" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsPinHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="把剪贴板里的图片钉在桌面上。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="把剪贴板里的图片钉在桌面上。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SettingsCardStyle}">
@@ -705,9 +705,9 @@
                                     <Grid>
                                         <TextBlock Text="文字识别" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsOcrHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="识别剪贴板或取景选区里的文字。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="识别剪贴板或取景选区里的文字。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource SettingsCardStyle}">
@@ -715,9 +715,9 @@
                                     <Grid>
                                         <TextBlock Text="上一个窗口" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsWindowPrevHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="取景中切到前一个窗口候选。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="取景中切到前一个窗口候选。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource SettingsCardStyle}">
@@ -725,9 +725,9 @@
                                     <Grid>
                                         <TextBlock Text="下一个窗口" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsWindowNextHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="取景中切到后一个窗口候选。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="取景中切到后一个窗口候选。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Row="3" Grid.Column="0" Style="{StaticResource SettingsCardStyle}">
@@ -735,71 +735,101 @@
                                     <Grid>
                                         <TextBlock Text="切换截图档位" FontWeight="SemiBold" />
                                         <TextBlock x:Name="SettingsModeHotkeyText" HorizontalAlignment="Right"
-                                                   FontFamily="Consolas" FontSize="12" Opacity="0.7" />
+                                                   FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </Grid>
-                                    <TextBlock Text="在常规取景与快捷全屏之间切换（只影响本次运行）。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    <TextBlock Text="在常规取景与快捷全屏之间切换（只影响本次运行）。" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <TextBlock Text="完整快捷键目录" Style="{StaticResource SectionTitleStyle}" />
-                        <Border Style="{StaticResource SettingsCardStyle}">
-                            <Grid ColumnSpacing="12" RowSpacing="7">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="72" />
-                                    <ColumnDefinition Width="170" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                        <TextBlock Text="取景、贴图与历史内固定键" Style="{StaticResource SectionTitleStyle}" />
+                        <Grid ColumnSpacing="10" RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                                <TextBlock Text="范围" FontSize="12" Opacity="0.55" />
-                                <TextBlock Grid.Column="1" Text="按键" FontSize="12" Opacity="0.55" />
-                                <TextBlock Grid.Column="2" Text="动作" FontSize="12" Opacity="0.55" />
+                            <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource SettingsCardStyle}" VerticalAlignment="Top">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="取景器" FontWeight="SemiBold" />
+                                    <Grid ColumnSpacing="10" RowSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Tab" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="1" Text="在窗口截图与常规截图之间切换" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="1" Text="滚轮 / 回车" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" Text="切换窗口候选 / 直接截取当前窗口" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="2" Text="O / Ctrl+S" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" Text="识别选区文字 / 选区另存为" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="3" Text="Ctrl+C" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" Text="无选区复制指针色值；有选区复制图片" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="4" Text="Esc / 右键" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" Text="取消取景（不可改键）" FontSize="12" TextWrapping="Wrap" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
 
-                                <TextBlock Grid.Row="1" Text="取景器" FontWeight="SemiBold" />
-                                <TextBlock Grid.Row="1" Grid.Column="1" Text="Tab" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="1" Grid.Column="2" Text="在窗口截图与常规截图之间切换" TextWrapping="Wrap" />
+                            <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource SettingsCardStyle}" VerticalAlignment="Top">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="贴图与裁剪" FontWeight="SemiBold" />
+                                    <Grid ColumnSpacing="10" RowSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Ctrl+Z / Ctrl+S" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="1" Text="撤销标注 / 另存为" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="1" Text="回车 / Esc" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" Text="完成标注或裁剪贴图 / 退出当前状态" FontSize="12" TextWrapping="Wrap" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
 
-                                <TextBlock Grid.Row="2" Grid.Column="1" Text="滚轮 / 回车" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="2" Grid.Column="2" Text="切换窗口候选 / 直接截取当前窗口" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="3" Grid.Column="1" Text="O / Ctrl+S" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="3" Grid.Column="2" Text="识别选区文字 / 选区另存为" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="4" Grid.Column="1" Text="Ctrl+C" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="4" Grid.Column="2" Text="无选区复制指针色值；有选区复制图片" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="5" Grid.Column="1" Text="Esc / 鼠标右键" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="5" Grid.Column="2" Text="取消取景（始终可用，不可改键）" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="6" Text="贴图 / 裁剪" FontWeight="SemiBold" />
-                                <TextBlock Grid.Row="6" Grid.Column="1" Text="Ctrl+Z / Ctrl+S" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="6" Grid.Column="2" Text="撤销标注 / 另存为" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="7" Grid.Column="1" Text="回车 / Esc" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="7" Grid.Column="2" Text="完成标注或裁剪贴图 / 退出当前状态" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="8" Text="截图历史" FontWeight="SemiBold" />
-                                <TextBlock Grid.Row="8" Grid.Column="1" Text="双击 / 右键 / Ctrl+A / Delete" FontFamily="Consolas" TextWrapping="Wrap" />
-                                <TextBlock Grid.Row="8" Grid.Column="2" Text="直接贴图 / 进入多选 / 全选 / 删除选中（先确认）" TextWrapping="Wrap" />
-
-                                <TextBlock Grid.Row="9" Grid.Column="1" Text="Esc" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="9" Grid.Column="2" Text="先退出多选；再按一次关闭历史窗" TextWrapping="Wrap" />
-                            </Grid>
-                        </Border>
+                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource SettingsCardStyle}" VerticalAlignment="Top">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="截图历史" FontWeight="SemiBold" />
+                                    <Grid ColumnSpacing="10" RowSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="双击 / 右键" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="1" Text="直接贴图 / 进入多选" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="1" Text="Ctrl+A" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" Text="全选当前列表" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="2" Text="Delete" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" Text="删除选中（先确认）" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Row="3" Text="Esc" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" Text="先退出多选；再按一次关闭历史窗" FontSize="12" TextWrapping="Wrap" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
                         <TextBlock
-                            Text="全局组合键可在上表修改；取景器与贴图内的按键是固定语义，Esc 与鼠标右键始终作为兜底退出。"
+                            Text="全局组合键可在上表修改；这里是取景器、贴图与截图历史内部的固定按键，Esc 与鼠标右键始终作为兜底退出。"
                             Style="{StaticResource HintTextStyle}" />
                     </StackPanel>
 
@@ -1151,6 +1181,7 @@
                             <Button
                                 x:Name="ClearHistoryButton"
                                 Content="清空全部历史…"
+                                AutomationProperties.Name="清空全部截图历史（会先确认，不可恢复）"
                                 Style="{StaticResource DangerButtonStyle}"
                                 Click="ClearHistory_Click" />
                         </StackPanel>

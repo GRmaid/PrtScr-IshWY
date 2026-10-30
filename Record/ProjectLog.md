@@ -117,3 +117,5 @@
 - 22:46 提交 B 批次：7985f6c「feat(capture,edit): B 批次收口」，56 文件 +5806/−1062（19 M + 2 D + 31 A，含 16 份新报告、5 份计划稿）；已推送 origin/main（6eff7c0..7985f6c）。工作树只剩未跟踪 .tmp/ 与 大佬修改材料/。
 - 22:46 重建默认 bin：无运行实例，dotnet build PrtScr.sln -c Debug → 0 警告 0 错误 16.82s；IshWY.dll 966144 字节、22:46；UTF-16LE 校验命中「采集失败，请重试」「独占全屏游戏」「已保留编辑内容」「close discarded」「本次来源」。
 - 22:47 待主人实测 B 批次（关窗确认、操作级撤销、全屏三态、F1 连按、WGC 并发），通过后进 C 阶段实现（W-1…W-6）与 B 余项（P-14c 实现、P-14b' 方案 A）。
+- 22:55 验收（主人）B 批次六项手测全过（关窗改用右键菜单「关闭贴图」入口实测）；发版仍冻结。
+- 22:56 派单 C 阶段三单：task-38 C-W1/W3/W4/W5 → maid-impl（MainWindow.xaml/HistoryWindow.xaml(.cs)/PinManagerWindow.xaml/OcrResultWindow.xaml）、task-39 C-W2/W6 → maid-check（OcrResultWindow.xaml.cs/PinCropWindow.cs）、task-40 C 复核 → maid-capture（blocked_by 38/39，只读+报告）。并发 3/3、编制 3/5。按文件簇切分，四份 xaml 零重叠。

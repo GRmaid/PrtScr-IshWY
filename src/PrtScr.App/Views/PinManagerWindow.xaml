@@ -27,7 +27,7 @@
                 <TextBlock
                     x:Name="SubtitleText"
                     FontSize="12"
-                    Opacity="0.62"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextWrapping="Wrap"
                     Text="所有贴图都在这里；被隐藏或点击穿透的贴图可以从这里恢复。" />
             </StackPanel>
@@ -44,6 +44,7 @@
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
                 <Button
                     Content="全部关闭"
+                    AutomationProperties.Name="关闭全部贴图窗口（不删除图片文件）"
                     Click="CloseAll_Click"
                     Style="{StaticResource DangerButtonStyle}" />
             </StackPanel>
@@ -110,7 +111,7 @@
                                     <TextBlock
                                         Text="{x:Bind Detail}"
                                         FontSize="11"
-                                        Opacity="0.62"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         TextTrimming="CharacterEllipsis" />
                                     <TextBlock
                                         Text="{x:Bind StateText}"
@@ -136,10 +137,38 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0" Content="复制" Padding="4,3" MinWidth="0" FontSize="11" Click="CopyCard_Click" />
-                                <Button Grid.Column="1" Content="另存" Padding="4,3" MinWidth="0" FontSize="11" Click="SaveCard_Click" />
-                                <Button Grid.Column="2" Content="识别" Padding="4,3" MinWidth="0" FontSize="11" Click="OcrCard_Click" />
-                                <Button Grid.Column="3" Content="关闭" Padding="4,3" MinWidth="0" FontSize="11" Click="CloseCard_Click" />
+                                <Button
+                                    Grid.Column="0"
+                                    Content="复制"
+                                    Padding="4,3"
+                                    MinWidth="0"
+                                    FontSize="11"
+                                    AutomationProperties.Name="{x:Bind CopyCaption}"
+                                    Click="CopyCard_Click" />
+                                <Button
+                                    Grid.Column="1"
+                                    Content="另存"
+                                    Padding="4,3"
+                                    MinWidth="0"
+                                    FontSize="11"
+                                    AutomationProperties.Name="{x:Bind SaveCaption}"
+                                    Click="SaveCard_Click" />
+                                <Button
+                                    Grid.Column="2"
+                                    Content="识别"
+                                    Padding="4,3"
+                                    MinWidth="0"
+                                    FontSize="11"
+                                    AutomationProperties.Name="{x:Bind OcrCaption}"
+                                    Click="OcrCard_Click" />
+                                <Button
+                                    Grid.Column="3"
+                                    Content="关闭"
+                                    Padding="4,3"
+                                    MinWidth="0"
+                                    FontSize="11"
+                                    AutomationProperties.Name="{x:Bind CloseCaption}"
+                                    Click="CloseCard_Click" />
                             </Grid>
                         </Grid>
                     </DataTemplate>
@@ -155,7 +184,7 @@
                 <TextBlock Text="还没有贴图" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
                 <TextBlock
                     Text="按 Alt + S 从剪贴板贴图，或从截图历史里贴一张。"
-                    Opacity="0.62"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     HorizontalAlignment="Center" />
             </StackPanel>
         </Grid>
@@ -164,7 +193,7 @@
             Grid.Row="2"
             Text="单击卡片把贴图置顶并闪烁提示；锁定后仍可右键标注、裁剪、识别和另存为。点击穿透的贴图只能从这里恢复。"
             FontSize="11"
-            Opacity="0.58"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             TextWrapping="Wrap" />
     </Grid>
 </Window>

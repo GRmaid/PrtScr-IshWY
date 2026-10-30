@@ -405,7 +405,7 @@ public sealed partial class PinCropWindow : Window
         MetaChip.Margin = new Thickness(mx, my, 0, 0);
 
         ActionBar.Visibility = Visibility.Visible;
-        HudHintText.Text = "Enter 贴图 · O 识别 · Ctrl+S 保存";
+        HudHintText.Text = "Enter 贴图 · O 识别 · Ctrl+S 保存 · Esc 退出";
     }
 
     private void Pin_Click(object sender, RoutedEventArgs e) => Complete(PinCropAction.Pin);
