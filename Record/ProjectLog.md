@@ -119,3 +119,8 @@
 - 22:47 待主人实测 B 批次（关窗确认、操作级撤销、全屏三态、F1 连按、WGC 并发），通过后进 C 阶段实现（W-1…W-6）与 B 余项（P-14c 实现、P-14b' 方案 A）。
 - 22:55 验收（主人）B 批次六项手测全过（关窗改用右键菜单「关闭贴图」入口实测）；发版仍冻结。
 - 22:56 派单 C 阶段三单：task-38 C-W1/W3/W4/W5 → maid-impl（MainWindow.xaml/HistoryWindow.xaml(.cs)/PinManagerWindow.xaml/OcrResultWindow.xaml）、task-39 C-W2/W6 → maid-check（OcrResultWindow.xaml.cs/PinCropWindow.cs）、task-40 C 复核 → maid-capture（blocked_by 38/39，只读+报告）。并发 3/3、编制 3/5。按文件簇切分，四份 xaml 零重叠。
+- 23:03 验收 task-38（C-W1/W3/W4/W5，maid-impl rev5）与 task-39（C-W2/W6，maid-check rev3）：lead 抽检判据全过——四份 XAML 文字类 Opacity 归零（只剩 MainWindow.xaml:89 背景图 0.25 功能位）、AutomationProperties.Name 命中 27/2/5、完整快捷键目录 0 命中、HistoryWindow MaxLines=1/Trimming 7 处、Settings*HotkeyText 仍 7 张、PinCardView 4 个逐卡名属性、HistoryWindow.xaml.cs 含「每类最多」。裁定：task-39 三项待拍板按实现保留（复制反馈不随编辑清空、构造期播报一次、位置在标题下第三行），记已知行为；W-5 采用方案 A 结构判据（PrintScreen/F1 文本层不可比）。
+- 23:03 冻结树门禁（lead 自跑）：build-guard cfinal 整包 0 警 0 错 13.89s、EXIT=0；Core.Tests 268/268（64ms）；format rc=0。
+- 23:03 提交 C 批次：99ecf96「feat(ui): C 批次视觉收口」，11 文件 +426/−101（含两份报告）；已推 origin/main（58eed3b..99ecf96）。
+- 23:03 task-40 C 独立复核仍未做（maid-capture，pending）——主人要求本轮收工，复核顺延到下一轮开工第一件事；默认 bin 未重建（IshWY 22:49 启动的实例 PID 18676 占用 bin/x64/Debug），C 批视觉需下次关实例后重建才可实测。
+- 23:03 收工：A/B/C 三批已提交推送（86d3541 → 9c81858 → 6eff7c0 → 7985f6c → 58eed3b → 99ecf96）；遗留 C 复核 task-40、B 余项 P-14c 历史元数据与 P-14b' 快捷全屏、D 阶段功能路线；发版继续冻结。
