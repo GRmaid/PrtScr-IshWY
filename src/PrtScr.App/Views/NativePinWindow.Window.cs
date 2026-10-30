@@ -350,9 +350,7 @@ public sealed unsafe partial class NativePinWindow
                     return default;
 
                 case WM_CLOSE:
-                    PinSnapGuide.Hide();
-                    App.Log($"Pin: WM_CLOSE (edit={self._editMode})");
-                    _ = PInvoke.DestroyWindow(hwnd);
+                    self.TryClosePinWindow("wm-close");
                     return default;
 
                 case WM_DESTROY:

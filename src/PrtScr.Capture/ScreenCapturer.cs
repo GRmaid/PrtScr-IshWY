@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using PrtScr.Interop;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -49,9 +51,17 @@ public static class ScreenCapturer
                 var hdcDest = new HDC(graphics.GetHdc());
                 try
                 {
-                    _ = PInvoke.BitBlt(
-                        hdcDest, 0, 0, width, height, hdcScreen, x, y,
-                        (ROP_CODE)(ROP_SRCCOPY | ROP_CAPTUREBLT));
+                    var rop = includeLayered
+                        ? (ROP_CODE)(ROP_SRCCOPY | ROP_CAPTUREBLT)
+                        : (ROP_CODE)ROP_SRCCOPY;
+                    var succeeded = PInvoke.BitBlt(
+                        hdcDest, 0, 0, width, height, hdcScreen, x, y, rop);
+                    if (!succeeded)
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            $"BitBlt 失败（{width}×{height} @ {x},{y}，includeLayered={includeLayered}）");
+                    }
                 }
                 finally
                 {

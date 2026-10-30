@@ -338,6 +338,14 @@ public static class WgcWindowCapture
     private static readonly Dictionary<nint, MonitorPool> _monitorPools = new();
 
     /// <summary>
+    /// D3D11 immediate context 不是线程安全的：窗口捕获在线程池线程，显示器常驻池拷贝在 UI 线程，
+    /// 两条 CopyFrameToBitmap 可能同时调用 CopyResource/Map/Unmap。此锁只覆盖同一帧的
+    /// CopyResource → Map → 像素拷贝 → Unmap 区间；Bitmap 分配与 LockBits 留在锁外。
+    /// 锁序：_contextLock 是叶子锁，持锁期间不获取 _poolLock/_deviceLock/FrameLock，也不 await。
+    /// </summary>
+    private static readonly object _contextLock = new();
+
+    /// <summary>
     /// 确保某显示器的常驻捕获会话已启动（幂等）。会话常驻后 F1 时不再启停会话——
     /// 这正是“按下热键全屏爆闪”的根治（合成器通路只在启动时切换一次）。
     /// </summary>
@@ -398,10 +406,27 @@ public static class WgcWindowCapture
 
             session.StartCapture();
 
+            var alreadyRegistered = false;
             lock (_poolLock)
             {
-                _monitorPools[hMonitor] = state;
+                if (_monitorPools.ContainsKey(hMonitor))
+                {
+                    alreadyRegistered = true;
+                }
+                else
+                {
+                    _monitorPools[hMonitor] = state;
+                }
             }
+
+            if (alreadyRegistered)
+            {
+                // 另一个线程在本线程创建期间已完成注册：本次新建的 session/pool/item
+                // 由 finally 逆序释放，复用已注册的常驻池，避免同一 HMONITOR 出现两条会话。
+                Log?.Invoke($"WGC: 并发首调 HMONITOR=0x{hMonitor:X}，复用已注册的常驻池");
+                return true;
+            }
+
             registered = true;
             return true;
         }
@@ -797,53 +822,79 @@ public static class WgcWindowCapture
 
                 try
                 {
-                    var deviceContext = (ID3D11DeviceContext*)context;
-                    deviceContext->CopyResource((ID3D11Resource*)staging, (ID3D11Resource*)texturePtr);
+                    var width = (int)desc.Width;
+                    var height = (int)desc.Height;
 
-                    var mapped = new D3D11_MAPPED_SUBRESOURCE();
-                    deviceContext->Map((ID3D11Resource*)staging, 0, D3D11_MAP.D3D11_MAP_READ, 0, &mapped);
-                    if (mapped.pData is null)
-                        return null;
-
+                    // Bitmap 分配与 LockBits 放在 context 锁外；锁内只做同一帧的
+                    // CopyResource → Map → 像素拷贝 → Unmap，避免长时间占用 UI 线程。
+                    var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+                    BitmapData data;
                     try
                     {
-                        var width = (int)desc.Width;
-                        var height = (int)desc.Height;
-                        var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+                        data = bitmap.LockBits(
+                            new Rectangle(0, 0, width, height),
+                            ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                    }
+                    catch
+                    {
+                        bitmap.Dispose();
+                        throw;
+                    }
+
+                    var mapFailed = false;
+                    try
+                    {
                         try
                         {
-                            var data = bitmap.LockBits(
-                                new Rectangle(0, 0, width, height),
-                                ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-                            try
+                            var deviceContext = (ID3D11DeviceContext*)context;
+                            var mapped = new D3D11_MAPPED_SUBRESOURCE();
+                            lock (_contextLock)
                             {
-                                var source = (byte*)mapped.pData;
-                                var target = (byte*)data.Scan0;
-                                for (var y = 0; y < height; y++)
+                                deviceContext->CopyResource((ID3D11Resource*)staging, (ID3D11Resource*)texturePtr);
+                                deviceContext->Map((ID3D11Resource*)staging, 0, D3D11_MAP.D3D11_MAP_READ, 0, &mapped);
+                                try
                                 {
-                                    Buffer.MemoryCopy(
-                                        source + (nint)y * mapped.RowPitch,
-                                        target + (nint)y * data.Stride,
-                                        data.Stride, (nint)width * 4);
+                                    if (mapped.pData is null)
+                                    {
+                                        mapFailed = true;
+                                    }
+                                    else
+                                    {
+                                        var source = (byte*)mapped.pData;
+                                        var target = (byte*)data.Scan0;
+                                        for (var y = 0; y < height; y++)
+                                        {
+                                            Buffer.MemoryCopy(
+                                                source + (nint)y * mapped.RowPitch,
+                                                target + (nint)y * data.Stride,
+                                                data.Stride, (nint)width * 4);
+                                        }
+                                    }
+                                }
+                                finally
+                                {
+                                    deviceContext->Unmap((ID3D11Resource*)staging, 0);
                                 }
                             }
-                            finally
-                            {
-                                bitmap.UnlockBits(data);
-                            }
                         }
-                        catch
+                        finally
                         {
-                            bitmap.Dispose();
-                            throw;
+                            bitmap.UnlockBits(data);
                         }
-
-                        return bitmap;
                     }
-                    finally
+                    catch
                     {
-                        deviceContext->Unmap((ID3D11Resource*)staging, 0);
+                        bitmap.Dispose();
+                        throw;
                     }
+
+                    if (mapFailed)
+                    {
+                        bitmap.Dispose();
+                        return null;
+                    }
+
+                    return bitmap;
                 }
                 finally
                 {

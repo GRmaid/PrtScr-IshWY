@@ -447,6 +447,7 @@ public sealed unsafe partial class NativePinWindow
             _pngBytes = bytes;
             _pixelWidth = image.Width;
             _pixelHeight = image.Height;
+            _publishedRevision = _publishedRevision.Next();
 
             _zoom = ComputeInitialZoom();
             _winW = Math.Max(16, (int)Math.Round(_pixelWidth * _zoom));
@@ -485,22 +486,6 @@ internal static class PinClipboardHelper
         queue.TryEnqueue(async () =>
         {
             await PrtScr.App.Services.OcrUiService.RecognizeAndShowAsync(pngBytes, ownerHwnd);
-        });
-    }
-
-    public static void OpenEditor(byte[] pngBytes, int pixelWidth, int pixelHeight, DispatcherQueue queue,
-        Windows.Graphics.RectInt32 anchor)
-    {
-        queue.TryEnqueue(() =>
-        {
-            try
-            {
-                AnnotationWindow.Open(pngBytes, pixelWidth, pixelHeight, anchor);
-            }
-            catch (Exception ex)
-            {
-                App.Log($"打开标注编辑器失败: {ex}");
-            }
         });
     }
 

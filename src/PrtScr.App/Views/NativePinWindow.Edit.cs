@@ -58,11 +58,8 @@ public sealed unsafe partial class NativePinWindow
     }
 
     private volatile bool _editMode;
-    private readonly List<Annotation> _annotations = new();
-    private Annotation? _draft;
     private int _toolId;
     private uint _colorArgb = 0xFFFF3B30;
-    private int _numberCounter;
     private int _textSize = 18;
     private Bitmap? _baseScaled;
     private readonly List<(int Id, Rectangle Rect)> _toolbarButtons = new();
@@ -123,10 +120,8 @@ public sealed unsafe partial class NativePinWindow
         if (_pngBytes.Length == 0)
             return;
 
+        BeginEditDocument();
         _editMode = true;
-        _annotations.Clear();
-        _numberCounter = 0;
-        _draft = null;
         _toolId = 0;
 
         // 图标固定大小：只跟随系统 DPI，不随贴图缩放
@@ -202,8 +197,7 @@ public sealed unsafe partial class NativePinWindow
             _svBitmap = null;
             _svHue = -1;
         }
-        _draft = null;
-        _annotations.Clear();
+        EndEditDocument();
         _baseScaled?.Dispose();
         _baseScaled = null;
         _toolbarButtons.Clear();

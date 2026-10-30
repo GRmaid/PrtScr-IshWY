@@ -36,9 +36,9 @@ public sealed partial class MainWindow
             // 先直接抓：WGC/DXGI 在大多数窗口化、无边框全屏下不需要抢焦点。
             // 只有首帧失败或疑似黑屏（独占全屏）才短暂切前台，避免每次按热键都闪一下、游戏音频中断。
             var result = await Services.CaptureService.CaptureFullScreenPngAsync();
-            if (result.Png is null || result.LikelyBlack)
+            if (result.Png is null || result.Status != Services.CaptureService.QuickCaptureStatus.Success)
             {
-                App.Log($"QuickCapture: 首帧不可用 black={result.LikelyBlack}，短暂切前台后重试");
+                App.Log($"QuickCapture: 首帧不可用 status={result.Status}，短暂切前台后重试");
                 bypass = await Services.FullscreenBypass.BeginAsync();
                 await Task.Delay(150);
                 result = await Services.CaptureService.CaptureFullScreenPngAsync();
@@ -46,18 +46,19 @@ public sealed partial class MainWindow
 
             var activated = bypass?.Activated ?? false;
 
-            if (result.Png is null)
+            if (result.Png is null || result.Status != Services.CaptureService.QuickCaptureStatus.Success)
             {
-                SetStatus("全屏截图失败");
-                App.Log($"QuickCapture: 失败，无图像 (bypass={activated})");
-                ToastService.ShowCaptureFailure();
-                return;
-            }
+                if (result.Status == Services.CaptureService.QuickCaptureStatus.LikelyBlack)
+                {
+                    SetStatus("当前画面像是独占全屏游戏，Windows 无法截取");
+                    App.Log($"QuickCapture: 两次都是黑屏 (bypass={activated})");
+                }
+                else
+                {
+                    SetStatus("采集失败，请重试");
+                    App.Log($"QuickCapture: 失败，无图像 (bypass={activated})");
+                }
 
-            if (result.LikelyBlack)
-            {
-                SetStatus("当前画面像是独占全屏游戏，Windows 无法截取");
-                App.Log($"QuickCapture: 两次都是黑屏 (bypass={activated})");
                 ToastService.ShowCaptureFailure();
                 return;
             }

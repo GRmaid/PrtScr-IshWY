@@ -24,21 +24,19 @@ namespace PrtScr.App.Views;
 /// <summary>冻屏取景覆盖窗：键盘/确认/取消、裁剪与保存流程。</summary>
 public sealed partial class CaptureOverlayWindow
 {
-    /// <summary>本次取图的真实内容来源（A02）：只有窗口本体捕获才算窗口，屏幕裁切一律算屏幕。</summary>
-    private enum CaptureContentOrigin
-    {
-        Screen,
-        Window,
-    }
-
-    /// <summary>取图成功的结果：位图、来源、历史分类与降级提示同源，避免再靠模式/目标猜测来源（A02）。</summary>
+    /// <summary>
+    /// 取图成功的结果：位图、来源、历史分类、引擎与降级提示同源，避免再靠模式/目标猜测来源（A02）。
+    /// P-14b：来源直接用 Core 的 CaptureOrigin（Window/Normal/Screen），引擎用于 CaptureResult 日志。
+    /// </summary>
     private readonly record struct SelectionCapture(
         Bitmap Bitmap,
-        CaptureContentOrigin Origin,
+        CaptureOrigin Origin,
         HistoryCaptureMode Mode,
         string ProcessName,
         string WindowTitle,
-        string? Notice);
+        string? Notice,
+        CaptureEngine Engine,
+        bool PrintWindowTimedOut);
 
     private enum CaptureOutcomeStatus
     {
@@ -53,13 +51,17 @@ public sealed partial class CaptureOverlayWindow
     private readonly record struct CaptureOutcome(
         CaptureOutcomeStatus Status,
         SelectionCapture? Capture,
-        string? Detail)
+        string? Detail,
+        CaptureFailure Failure = CaptureFailure.None)
     {
         public static CaptureOutcome Success(SelectionCapture capture)
             => new(CaptureOutcomeStatus.Succeeded, capture, capture.Notice);
 
-        public static CaptureOutcome Abort(CaptureOutcomeStatus status, string? detail)
-            => new(status, null, detail);
+        public static CaptureOutcome Abort(
+            CaptureOutcomeStatus status,
+            string? detail,
+            CaptureFailure failure = CaptureFailure.None)
+            => new(status, null, detail, failure);
     }
 
     /// <summary>低级键盘钩子回调（钩子线程）：只切回 UI 线程，绝不做其他事。</summary>
@@ -196,12 +198,21 @@ public sealed partial class CaptureOverlayWindow
     /// </summary>
     private void FinishCaptureSession(Guid session, string reason)
     {
-        if (_sessionFinished)
+        // 第一道闸门（F1）：只认会话槽的归属。取消路径会先清 _captureSessionId，
+        // 但不会释放 _lastSessionId，因此正常取消仍放行；旧会话晚到时 _lastSessionId
+        // 已经是新会话，必须在触碰 _full / 幂等位之前返回，否则会清掉新会话的冻结图。
+        if (!CaptureService.Instance.IsOwnedCaptureSession(session))
+        {
+            App.Log($"Overlay: session {SessionText(session)} finish ignored (stale session, current={SessionText(CaptureService.Instance.CurrentCaptureSessionId)}, reason={reason})");
+            return;
+        }
+
+        if (_currentSessionFinished)
         {
             App.Log($"Overlay: session {SessionText(session)} finish ignored (already finished, reason={reason})");
             return;
         }
-        _sessionFinished = true;
+        _currentSessionFinished = true;
 
         var before = GC.GetTotalMemory(false);
         try
@@ -303,10 +314,10 @@ public sealed partial class CaptureOverlayWindow
         {
             var screenOnly = CropFullScreenSelection();
             return screenOnly is null
-                ? CaptureOutcome.Abort(CaptureOutcomeStatus.Failed, "没有可用的选区")
+                ? CaptureOutcome.Abort(CaptureOutcomeStatus.Failed, "没有可用的选区", CaptureFailure.InvalidTarget)
                 : CaptureOutcome.Success(new SelectionCapture(
-                    screenOnly, CaptureContentOrigin.Screen, HistoryCaptureMode.Normal,
-                    string.Empty, string.Empty, null));
+                    screenOnly, CaptureOrigin.Normal, HistoryCaptureMode.Normal,
+                    string.Empty, string.Empty, null, CaptureEngine.Fallback, false));
         }
 
         string? degradeReason = null;
@@ -318,7 +329,7 @@ public sealed partial class CaptureOverlayWindow
             if (!CanContinue(session))
             {
                 result.Bitmap?.Dispose();
-                return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消");
+                return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消", CaptureFailure.Canceled);
             }
 
             if (result.Bitmap is { } fullWindow)
@@ -330,8 +341,9 @@ public sealed partial class CaptureOverlayWindow
                     {
                         App.Log($"Capture: 窗口局部成功 source={result.Source} timedOut={result.PrintWindowTimedOut}");
                         return CaptureOutcome.Success(new SelectionCapture(
-                            cropped, CaptureContentOrigin.Window, HistoryCaptureMode.Window,
-                            sub.ProcessName, sub.Title, result.PrintWindowTimedOut ? TimedOutNotice() : null));
+                            cropped, CaptureOrigin.Window, HistoryCaptureMode.Window,
+                            sub.ProcessName, sub.Title, result.PrintWindowTimedOut ? TimedOutNotice() : null,
+                            MapEngine(result.Source), result.PrintWindowTimedOut));
                     }
                 }
 
@@ -360,15 +372,16 @@ public sealed partial class CaptureOverlayWindow
             if (!CanContinue(session))
             {
                 result.Bitmap?.Dispose();
-                return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消");
+                return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消", CaptureFailure.Canceled);
             }
 
             if (result.Bitmap is { } windowBitmap)
             {
                 App.Log($"Capture: 窗口捕获成功 source={result.Source} timedOut={result.PrintWindowTimedOut}");
                 return CaptureOutcome.Success(new SelectionCapture(
-                    windowBitmap, CaptureContentOrigin.Window, HistoryCaptureMode.Window,
-                    win.ProcessName, win.Title, result.PrintWindowTimedOut ? TimedOutNotice() : null));
+                    windowBitmap, CaptureOrigin.Window, HistoryCaptureMode.Window,
+                    win.ProcessName, win.Title, result.PrintWindowTimedOut ? TimedOutNotice() : null,
+                    MapEngine(result.Source), result.PrintWindowTimedOut));
             }
 
             var abort = ToAbort(result, "窗口");
@@ -380,11 +393,11 @@ public sealed partial class CaptureOverlayWindow
 
         // 窗口内容拿不到：改用屏幕区域裁切，来源必须是屏幕、历史按常规，禁止再按窗口落历史（A02）
         if (!CanContinue(session))
-            return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消");
+            return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消", CaptureFailure.Canceled);
 
         var fallback = CropFullScreenSelection();
         if (fallback is null)
-            return CaptureOutcome.Abort(CaptureOutcomeStatus.Failed, "没有可用的选区");
+            return CaptureOutcome.Abort(CaptureOutcomeStatus.Failed, "没有可用的选区", CaptureFailure.InvalidTarget);
 
         var reason = degradeReason;
         if (reason is null)
@@ -392,21 +405,33 @@ public sealed partial class CaptureOverlayWindow
             // 窗口模式下自由拖拽、没命中任何窗口：本来裁的就是屏幕，不是失败降级，不提示
             App.Log("Capture: 无窗口目标，按屏幕区域裁切");
             return CaptureOutcome.Success(new SelectionCapture(
-                fallback, CaptureContentOrigin.Screen, HistoryCaptureMode.Normal,
-                string.Empty, string.Empty, null));
+                fallback, CaptureOrigin.Normal, HistoryCaptureMode.Normal,
+                string.Empty, string.Empty, null, CaptureEngine.Fallback, false));
         }
 
         App.Log($"Capture: 窗口捕获降级为屏幕区域裁切：{reason}");
         return CaptureOutcome.Success(new SelectionCapture(
-            fallback, CaptureContentOrigin.Screen, HistoryCaptureMode.Normal,
-            string.Empty, string.Empty, $"窗口捕获失败，已按常规截图保存（{reason}）"));
+            fallback, CaptureOrigin.Screen, HistoryCaptureMode.Normal,
+            string.Empty, string.Empty, $"窗口捕获失败，已按常规截图保存（{reason}）",
+            CaptureEngine.Fallback, false));
     }
 
     /// <summary>await 之后继续取图前的会话校验：会话已被新截图替换或已被取消都算结束（A05）。</summary>
-    private bool CanContinue(Guid session) => IsCurrentSession(session) && !_sessionFinished;
+    private bool CanContinue(Guid session) => IsCurrentSession(session) && !_currentSessionFinished;
 
     /// <summary>PrintWindow 超期但 WGC 取到窗口内容：来源仍是窗口，但要提示降级（P-07 契约）。</summary>
     private static string TimedOutNotice() => "窗口响应较慢，已改用 WGC 抓取窗口内容";
+
+    /// <summary>窗口捕获来源 → 会话结果的引擎标记（P-14b）。</summary>
+    private static CaptureEngine MapEngine(WindowCaptureSource source)
+    {
+        return source switch
+        {
+            WindowCaptureSource.PrintWindow => CaptureEngine.PrintWindow,
+            WindowCaptureSource.Wgc => CaptureEngine.Wgc,
+            _ => CaptureEngine.Fallback,
+        };
+    }
 
     /// <summary>把窗口捕获的失败原因分成「可报错终止（Busy/超时/取消）」与「可屏幕降级」两类（A02）。</summary>
     private CaptureOutcome? ToAbort(WindowCaptureResult result, string where)
@@ -415,13 +440,15 @@ public sealed partial class CaptureOverlayWindow
         {
             case WindowCaptureFailure.Busy:
                 App.Log($"Capture: {where}捕获遇到 Busy，不降级");
-                return CaptureOutcome.Abort(CaptureOutcomeStatus.Busy, "该窗口上一张截图还在处理中，请稍后重试");
+                return CaptureOutcome.Abort(
+                    CaptureOutcomeStatus.Busy, "该窗口上一张截图还在处理中，请稍后重试", CaptureFailure.Busy);
             case WindowCaptureFailure.Canceled:
                 App.Log($"Capture: {where}捕获已取消");
-                return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消");
+                return CaptureOutcome.Abort(CaptureOutcomeStatus.Canceled, "取景已取消", CaptureFailure.Canceled);
             case WindowCaptureFailure.Timeout:
                 App.Log($"Capture: {where}捕获超时且 WGC 失败 detail={result.Detail}");
-                return CaptureOutcome.Abort(CaptureOutcomeStatus.Timeout, "窗口响应超时，本次未截图；请稍后重试");
+                return CaptureOutcome.Abort(
+                    CaptureOutcomeStatus.Timeout, "窗口响应超时，本次未截图；请稍后重试", CaptureFailure.Timeout);
             default:
                 return null;
         }
@@ -451,6 +478,7 @@ public sealed partial class CaptureOverlayWindow
         Bitmap? captured = null;
         try
         {
+            CaptureService.Instance.BeginCaptureAttempt(session, "ocr");
             var outcome = await CaptureSelectionAsync(session);
             if (!CanContinue(session))
             {
@@ -462,11 +490,18 @@ public sealed partial class CaptureOverlayWindow
             if (outcome.Capture is not { } selection)
             {
                 if (outcome.Status != CaptureOutcomeStatus.Canceled)
+                {
+                    CaptureService.Instance.MarkCaptureAttemptFailed(
+                        session, outcome.Failure, outcome.Detail);
                     ShowCopyToast(outcome.Detail ?? "识别失败，请重试");
+                }
+
                 return;
             }
 
             captured = selection.Bitmap;
+            CaptureService.Instance.MarkCaptureAttemptSucceeded(
+                session, selection.Origin, selection.Engine, selection.PrintWindowTimedOut);
             using var ms = new MemoryStream();
             captured.Save(ms, ImageFormat.Png);
             var bytes = ms.ToArray();
@@ -483,6 +518,8 @@ public sealed partial class CaptureOverlayWindow
         }
         catch (Exception ex)
         {
+            // 取图后、Dismiss 前的异常把槽位从提交退回取景，主人可以直接重试。
+            CaptureService.Instance.ResetCaptureAttempt(session, "ocr-exception");
             App.Log($"OCR 选区失败: {ex}");
         }
         finally
@@ -544,6 +581,8 @@ public sealed partial class CaptureOverlayWindow
             return;
         }
 
+        CaptureService.Instance.BeginCaptureAttempt(session, "confirm");
+
         Bitmap? captured = null;
         var ended = false;
         var keepOverlay = false;
@@ -574,6 +613,8 @@ public sealed partial class CaptureOverlayWindow
                 }
 
                 // Busy / 超时 / 失败：不静默降级、不落历史、不写剪贴板，恢复取景窗让主人直接重试
+                CaptureService.Instance.MarkCaptureAttemptFailed(
+                    session, outcome.Failure, outcome.Detail);
                 var message = outcome.Detail ?? "截图失败，请重试";
                 App.Log($"Capture: session {session:N} 取图失败 status={outcome.Status}：{message}");
                 keepOverlay = RestoreOverlayAfterCaptureFailure(message);
@@ -581,15 +622,17 @@ public sealed partial class CaptureOverlayWindow
             }
 
             captured = selection.Bitmap;
+            CaptureService.Instance.MarkCaptureAttemptSucceeded(
+                session, selection.Origin, selection.Engine, selection.PrintWindowTimedOut);
 
             // 图已经拿到，冻结缓冲可以释放，取景服务也立即进入空闲状态；
             // 后面的编码/剪贴板/历史都在后台，不挡下一次热键。
             FinishCaptureSession(session, "confirm-success");
             ended = true;
 
-            App.Log(selection.Origin == CaptureContentOrigin.Screen
+            App.Log(selection.Origin == CaptureOrigin.Screen
                 ? $"Capture: 本次来源=屏幕（历史按常规） notice={selection.Notice}"
-                : $"Capture: 本次来源=窗口 process={selection.ProcessName} notice={selection.Notice}");
+                : $"Capture: 本次来源={selection.Origin} process={selection.ProcessName} notice={selection.Notice}");
 
             var bytes = await Task.Run(() => EncodePng(captured));
 
@@ -681,6 +724,7 @@ public sealed partial class CaptureOverlayWindow
 
         // 另存有文件对话框这个长等待：从一开头记住会话，回来先确认还是同一次取景（A05）
         var session = CurrentSessionId();
+        CaptureService.Instance.BeginCaptureAttempt(session, "save");
         _saving = true;
         // 文件选择器会抢前台：期间暂停取景器按键，避免 Esc/Tab/回车被钩子当成取景操作。
         _keysSuspended = true;
@@ -699,11 +743,18 @@ public sealed partial class CaptureOverlayWindow
             if (outcome.Capture is not { } selection)
             {
                 if (outcome.Status != CaptureOutcomeStatus.Canceled)
+                {
+                    CaptureService.Instance.MarkCaptureAttemptFailed(
+                        session, outcome.Failure, outcome.Detail);
                     ShowCopyToast(outcome.Detail ?? "另存失败，请重试");
+                }
+
                 return;
             }
 
             captured = selection.Bitmap;
+            CaptureService.Instance.MarkCaptureAttemptSucceeded(
+                session, selection.Origin, selection.Engine, selection.PrintWindowTimedOut);
             using var ms = new MemoryStream();
             captured.Save(ms, ImageFormat.Png);
             var bytes = ms.ToArray();
@@ -720,6 +771,8 @@ public sealed partial class CaptureOverlayWindow
 
             if (path is null)
             {
+                // 文件对话框取消不算截取失败：槽位退回 Selecting，主人可继续取景或另存。
+                CaptureService.Instance.ResetCaptureAttempt(session, "save-dialog-canceled");
                 FocusSink.Focus(FocusState.Programmatic);
                 return;
             }
@@ -752,6 +805,7 @@ public sealed partial class CaptureOverlayWindow
         }
         catch (Exception ex)
         {
+            CaptureService.Instance.ResetCaptureAttempt(session, "save-exception");
             App.Log($"另存为失败: {ex}");
             ToastService.ShowCaptureFailure();
         }
@@ -774,7 +828,7 @@ public sealed partial class CaptureOverlayWindow
     /// </summary>
     private bool RestoreOverlayAfterCaptureFailure(string message)
     {
-        if (_sessionFinished)
+        if (_currentSessionFinished)
             return false;
 
         try

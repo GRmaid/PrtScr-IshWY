@@ -97,7 +97,8 @@ public sealed partial class CaptureOverlayWindow : Window
     private volatile bool _closed;
     private bool _saving;
     private bool _confirming;
-    private bool _sessionFinished;
+    // 本会话是否已收尾：Prepare 时复位；旧会话由 FinishCaptureSession 的归属闸门挡住，不会污染这里。
+    private bool _currentSessionFinished;
     private volatile bool _keysSuspended;   // 文件另存对话框打开时暂停取景器按键
     private PrtScr.App.Services.KeyInterceptor? _keys;
 
@@ -259,7 +260,7 @@ public sealed partial class CaptureOverlayWindow : Window
     {
         _closed = false;
         _confirming = false;
-        _sessionFinished = false;
+        _currentSessionFinished = false;
         _dragging = false;
         _dragMoved = false;
         _movingSelection = false;

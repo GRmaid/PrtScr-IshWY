@@ -197,7 +197,7 @@ public sealed unsafe partial class NativePinWindow
                 SetOpacity(0.25);
                 break;
             case PinMenuWindow.CmdClose:
-                _ = PInvoke.DestroyWindow(_hwnd);
+                TryClosePinWindow("menu");
                 break;
         }
     }

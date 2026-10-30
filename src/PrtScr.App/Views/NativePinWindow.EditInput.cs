@@ -66,14 +66,15 @@ public sealed unsafe partial class NativePinWindow
 
         if (_toolId == 5)
         {
-            _annotations.Add(new Annotation
+            var annotation = new Annotation
             {
                 Tool = AnnotationTool.Number,
-                Number = ++_numberCounter,
+                Number = _numberCounter,
                 Color = _colorArgb,
                 Size = (float)(16 / scale),
-            });
-            _annotations[^1].Points.Add(source);
+            };
+            annotation.Points.Add(source);
+            AddAnnotation(annotation);
             RenderEditMode();
             return;
         }
@@ -81,35 +82,28 @@ public sealed unsafe partial class NativePinWindow
         _editDragging = true;
         _ = PInvoke.SetCapture(_hwnd);
 
-        switch (_toolId)
-        {
-
-            case 4:   // 马赛克
-                _draft = new Annotation
+        var draft = _toolId == 4
+            ? new Annotation   // 马赛克
+            {
+                Tool = AnnotationTool.Mosaic,
+                Color = _colorArgb,
+                Size = (float)(10 / scale),
+            }
+            : new Annotation
+            {
+                Tool = _toolId switch
                 {
-                    Tool = AnnotationTool.Mosaic,
-                    Color = _colorArgb,
-                    Size = (float)(10 / scale),
-                };
-                break;
+                    1 => AnnotationTool.Arrow,
+                    2 => AnnotationTool.Pen,
+                    _ => AnnotationTool.Rectangle,
+                },
+                Color = _colorArgb,
+                Size = (float)(3 / scale),
+            };
 
-            default:
-                _draft = new Annotation
-                {
-                    Tool = _toolId switch
-                    {
-                        1 => AnnotationTool.Arrow,
-                        2 => AnnotationTool.Pen,
-                        _ => AnnotationTool.Rectangle,
-                    },
-                    Color = _colorArgb,
-                    Size = (float)(3 / scale),
-                };
-                break;
-        }
-
-        _draft.Points.Add(source);
-        _draft.Points.Add(source);
+        draft.Points.Add(source);
+        draft.Points.Add(source);
+        SetDraft(draft);
         RenderEditMode();
     }
 
@@ -122,7 +116,8 @@ public sealed unsafe partial class NativePinWindow
             return;
         }
 
-        if (!_editDragging || _draft is null)
+        var draft = _draft;
+        if (!_editDragging || draft is null)
             return;
 
         var (x, y) = ClientPoint(lParam);
@@ -130,15 +125,15 @@ public sealed unsafe partial class NativePinWindow
         var scale = EditScale;
         var p = new PointD(x / scale, imgY / scale);
 
-        if (_draft.Tool == AnnotationTool.Pen)
+        if (draft.Tool == AnnotationTool.Pen)
         {
-            var last = _draft.Points[^1];
+            var last = draft.Points[^1];
             if (Math.Abs(p.X - last.X) + Math.Abs(p.Y - last.Y) > 0.5)
-                _draft.Points.Add(p);
+                draft.Points.Add(p);
         }
         else
         {
-            _draft.Points[^1] = p;
+            draft.Points[^1] = p;
         }
 
         RenderEditMode();
@@ -214,18 +209,19 @@ public sealed unsafe partial class NativePinWindow
 
         _editDragging = false;
         _ = PInvoke.ReleaseCapture();
-        if (_draft is null)
+        var draft = _draft;
+        if (draft is null)
             return;
 
-        var dx = Math.Abs(_draft.End.X - _draft.Start.X);
-        var dy = Math.Abs(_draft.End.Y - _draft.Start.Y);
-        var keep = _draft.Tool == AnnotationTool.Pen
-            ? _draft.Points.Count >= 2
+        var dx = Math.Abs(draft.End.X - draft.Start.X);
+        var dy = Math.Abs(draft.End.Y - draft.Start.Y);
+        var keep = draft.Tool == AnnotationTool.Pen
+            ? draft.Points.Count >= 2
             : dx > 1 || dy > 1;
 
         if (keep)
-            _annotations.Add(_draft);
-        _draft = null;
+            AddAnnotation(draft);
+        SetDraft(null);
         RenderEditMode();
     }
 

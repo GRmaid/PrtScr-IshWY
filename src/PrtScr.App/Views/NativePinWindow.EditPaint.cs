@@ -148,13 +148,6 @@ public sealed unsafe partial class NativePinWindow
             Math.Clamp((int)((b + m) * 255), 0, 255));
     }
 
-    private void UndoEdit()
-    {
-        if (_annotations.Count > 0)
-            _annotations.RemoveAt(_annotations.Count - 1);
-        RenderEditMode();
-    }
-
     private int _colorArgbColorId()
     {
         for (var i = 0; i < QuickColors.Length; i++)

@@ -34,14 +34,11 @@ public sealed unsafe partial class NativePinWindow
                 AdjustTextSize(TextSizeStep);
                 return;
             case 20:
-                if (_annotations.Count > 0)
+                if (CanUndo)
                     UndoEdit();
                 return;
             case 21:
-                if (_annotations.Count == 0)
-                    return;
-                _annotations.Clear();
-                _numberCounter = 0;
+                ClearAnnotations();
                 break;
             case 22:
                 ApplyEdit();
@@ -90,9 +87,20 @@ public sealed unsafe partial class NativePinWindow
             return;
         }
 
+        // 唯一的提交点：Core 推进版本号并清空未提交状态；失败时文档原样保留。
+        var committed = _document?.TryCommit(bytes);
+        if (committed is null)
+        {
+            RebuildBaseScaled();
+            ShowHint("标注提交失败，已保留编辑内容，请重试", 2600);
+            App.Log("Pin: edit apply aborted (commit failed)");
+            return;
+        }
+
         _pngBytes = bytes;
+        _publishedRevision = committed.Base.Revision;
         PinClipboardHelper.Copy(bytes, _uiQueue, PostCopyResult);
-        App.Log("Pin: edit applied & copied");
+        App.Log($"Pin: edit applied & copied rev={_publishedRevision.Value}");
 
         ExitEditMode(apply: true);
         // 标注会改写 _pngBytes，管理器缩略图与复制/另存都要拿到新图。
@@ -219,7 +227,7 @@ public sealed unsafe partial class NativePinWindow
                 Size = (float)(_textSize / scale),
             };
             annotation.Points.Add(_editTextPosition);
-            _annotations.Add(annotation);
+            AddAnnotation(annotation);
         }
 
         DestroyTextEditor();

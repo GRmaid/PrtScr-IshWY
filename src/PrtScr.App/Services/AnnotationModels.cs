@@ -1,3 +1,5 @@
+using PrtScr.Core.Edit;
+
 namespace PrtScr.App.Services;
 
 public enum AnnotationTool
@@ -25,7 +27,7 @@ public struct PointD
 /// <summary>
 /// 一条标注。所有坐标都是**原始图片像素**，与屏幕缩放无关。
 /// </summary>
-public sealed class Annotation
+public sealed class Annotation : IEditNumbered
 {
     public AnnotationTool Tool { get; init; }
 

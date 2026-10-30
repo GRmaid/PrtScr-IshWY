@@ -223,7 +223,13 @@ public sealed unsafe partial class NativePinWindow
 
                 case ToolbarItemKind.Command:
                     {
-                        var disabled = item.Id is 20 or 21 && _annotations.Count == 0;
+                        // 撤销看撤销栈（清空后可撤销），清空看画布是否还有标注。
+                        var disabled = item.Id switch
+                        {
+                            20 => !CanUndo,
+                            21 => _annotations.Count == 0,
+                            _ => false,
+                        };
                         var complete = item.Id == 22;
                         if (complete)
                             FillRoundedRectangle(graphics, activeBrush, rect, 5 * scale);

@@ -92,7 +92,7 @@ public sealed unsafe partial class NativePinWindow
                 break;
 
             case PinCommand.Close:
-                _ = PInvoke.DestroyWindow(_hwnd);
+                TryClosePinWindow("command");
                 break;
         }
     }
