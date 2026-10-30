@@ -112,3 +112,8 @@
 - 21:53 B 批次开工：总纲 §11 续记「冒烟口径/发布冻结/B 四项拍板/B 第一批三单」；派 task-20 P-14a → maid-impl（Core 类型与结果矩阵）、task-21 P-13a → maid-check（EditDocument 设计）、task-22 B-3 → maid-capture（采集层并发审计）；并发 3/3，编制不变 3/5。
 - 22:28 C 阶段勘察：UI 建议校正版严重滞后于 HEAD 69616cc——P0-1/3/4/5 已实现、P0-2 半实现、P0-6 仅剩副标题折行；照文档重做会返工 → 派 C1-A 验证表（task-34）与 C1-B 决策清单（task-35），实现类 C1-C/D/E 待决策后派
 - 22:28 拍板：接受 P-13c 泛型 EditDocument<TAnnotation> 与「可见序列+撤销历史」拆分（Core 不得依赖 App 类型），追记写入 Record/plans/B1-editdocument-design.md；步骤 2 接线立 task-33（Annotation:IEditNumbered + NativePinWindow 改走 Core，Core.Tests 必须仍 268）
+- 22:44 验收 task-29（F1，maid-capture rev5）：两层归属闸门落地——CaptureService.IsOwnedCaptureSession(:78)（Guid.Empty 放行）+ CaptureOverlayWindow.Capture.cs FinishCaptureSession 入口 :204-208 先挡；_sessionFinished 改名 _currentSessionFinished 收窄为「本会话」，Prepare :263 复位。全屏三态 QuickCaptureStatus{Success,LikelyBlack,AllEnginesFailed}（CaptureService.cs:633-638），CaptureMonitorBestAsync 用 sawFrame 区分「看过帧但全黑」与「一帧未得」(:557)，MainWindow.Capture.cs 三态分流 :39/:49/:51/:58，失败态不写历史不写剪贴板。lead 抽检五条保护日志关键字命中数 1/2/2/1/1。
+- 22:45 冻结树门禁（lead 自跑，不采信自评）：build-guard tag=bfinal 整包 0 警告 0 错误 15.65s、EXIT=0；Core.Tests 268/268（74ms）；dotnet format whitespace rc=0。
+- 22:46 提交 B 批次：7985f6c「feat(capture,edit): B 批次收口」，56 文件 +5806/−1062（19 M + 2 D + 31 A，含 16 份新报告、5 份计划稿）；已推送 origin/main（6eff7c0..7985f6c）。工作树只剩未跟踪 .tmp/ 与 大佬修改材料/。
+- 22:46 重建默认 bin：无运行实例，dotnet build PrtScr.sln -c Debug → 0 警告 0 错误 16.82s；IshWY.dll 966144 字节、22:46；UTF-16LE 校验命中「采集失败，请重试」「独占全屏游戏」「已保留编辑内容」「close discarded」「本次来源」。
+- 22:47 待主人实测 B 批次（关窗确认、操作级撤销、全屏三态、F1 连按、WGC 并发），通过后进 C 阶段实现（W-1…W-6）与 B 余项（P-14c 实现、P-14b' 方案 A）。
