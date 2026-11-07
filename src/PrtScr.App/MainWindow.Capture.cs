@@ -65,7 +65,7 @@ public sealed partial class MainWindow
 
             var copyTask = Services.ClipboardService.SetImageAsync(result.Png);
             var historyTask = await Services.CaptureHistoryService.Instance.AddAsync(
-                result.Png, HistoryCaptureMode.Normal);
+                result.Png, HistoryCaptureMode.Normal, meta: HistoryCaptureMeta.ScreenQuick);
             var ok = await copyTask;
 
             SetStatus(ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）");

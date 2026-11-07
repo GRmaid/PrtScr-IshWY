@@ -645,7 +645,12 @@ public sealed partial class CaptureOverlayWindow
 
             var copyTask = ClipboardService.SetImageAsync(bytes);
             var historyTask = CaptureHistoryService.Instance.AddAsync(
-                bytes, selection.Mode, selection.ProcessName, selection.WindowTitle);
+                bytes,
+                selection.Mode,
+                selection.ProcessName,
+                selection.WindowTitle,
+                HistoryCaptureMeta.FromCapture(
+                    selection.Origin, selection.Engine, selection.PrintWindowTimedOut, selection.Notice));
             await Task.WhenAll(copyTask, historyTask);
 
             var ok = copyTask.Result;
@@ -780,7 +785,12 @@ public sealed partial class CaptureOverlayWindow
             // 另存为不是“只写文件”：保存成功后仍要进剪贴板和截图历史，保持与回车确认一致
             var copyTask = ClipboardService.SetImageAsync(bytes);
             var historyTask = CaptureHistoryService.Instance.AddAsync(
-                bytes, selection.Mode, selection.ProcessName, selection.WindowTitle);
+                bytes,
+                selection.Mode,
+                selection.ProcessName,
+                selection.WindowTitle,
+                HistoryCaptureMeta.FromCapture(
+                    selection.Origin, selection.Engine, selection.PrintWindowTimedOut, selection.Notice));
             await Task.WhenAll(copyTask, historyTask);
 
             if (!IsCurrentSession(session))

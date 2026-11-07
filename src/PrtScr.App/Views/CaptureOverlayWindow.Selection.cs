@@ -257,10 +257,13 @@ public sealed partial class CaptureOverlayWindow
 
     private void HandleReleased(PointerRoutedEventArgs e)
     {
+        // 先幂等释放指针捕获，再判断是否处于拖拽：历史上有路径会在拖拽中清掉 _dragging，
+        // 若提前 return 就会漏掉释放，窗口一直抓着指针。
+        Layer.ReleasePointerCapture(e.Pointer);
+
         if (!_dragging)
             return;
 
-        Layer.ReleasePointerCapture(e.Pointer);
         _dragging = false;
 
         // 焦点拉回锚点，保证 Esc/回车/Tab 随时可用

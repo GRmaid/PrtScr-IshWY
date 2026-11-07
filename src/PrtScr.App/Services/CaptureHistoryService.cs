@@ -1,6 +1,4 @@
 using System.IO;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace PrtScr.App.Services;
 
@@ -11,15 +9,8 @@ namespace PrtScr.App.Services;
 /// </summary>
 public sealed class CaptureHistoryService
 {
-    private const int MetadataVersion = 1;
     private const string FullTag = "full";
     private const string ShotTag = "shot";
-
-    private static readonly JsonSerializerOptions MetadataJson = new()
-    {
-        WriteIndented = false,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
 
     private readonly object _sync = new();
 
@@ -71,7 +62,8 @@ public sealed class CaptureHistoryService
         byte[] pngBytes,
         HistoryCaptureMode mode,
         string? processName = null,
-        string? windowTitle = null)
+        string? windowTitle = null,
+        HistoryCaptureMeta? meta = null)
     {
         if (!App.Config.Current.SaveHistory)
             return null;
@@ -98,7 +90,7 @@ public sealed class CaptureHistoryService
             // 元数据失败时 PNG 仍然保留，读取时按早期截图归类，不阻断主流程。
             try
             {
-                await WriteMetadataAsync(path, mode, processName, windowTitle, now);
+                await WriteMetadataAsync(path, mode, processName, windowTitle, now, meta);
             }
             catch (Exception ex)
             {
@@ -313,19 +305,29 @@ public sealed class CaptureHistoryService
     };
 
     private static async Task WriteMetadataAsync(
-        string pngPath, HistoryCaptureMode mode, string? processName, string? windowTitle, DateTime capturedAt)
+        string pngPath,
+        HistoryCaptureMode mode,
+        string? processName,
+        string? windowTitle,
+        DateTime capturedAt,
+        HistoryCaptureMeta? meta)
     {
         var metadata = new HistoryMetadata
         {
-            Version = MetadataVersion,
+            Version = HistoryMetadata.CurrentVersion,
             Mode = mode.ToString(),
             ProcessName = NormalizeProcessName(processName),
             WindowTitle = windowTitle?.Trim() ?? "",
             CapturedAt = capturedAt,
+            Source = meta?.Source,
+            Engine = meta?.Engine,
+            FallbackReason = meta?.FallbackReason,
+            PrintWindowTimedOut = meta?.PrintWindowTimedOut ?? false,
+            SessionId = meta?.SessionId,
         };
         var path = MetadataPath(pngPath);
         var temp = path + ".tmp";
-        await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(metadata, MetadataJson));
+        await File.WriteAllTextAsync(temp, HistoryMetadata.Serialize(metadata));
         File.Move(temp, path, overwrite: true);
     }
 
@@ -366,7 +368,7 @@ public sealed class CaptureHistoryService
             if (!File.Exists(path))
                 return null;
 
-            return JsonSerializer.Deserialize<HistoryMetadata>(File.ReadAllText(path));
+            return HistoryMetadata.Deserialize(File.ReadAllText(path));
         }
         catch (Exception ex)
         {
@@ -440,23 +442,6 @@ public sealed class CaptureHistoryService
         }
     }
 
-    private sealed class HistoryMetadata
-    {
-        [JsonPropertyName("version")]
-        public int Version { get; set; }
-
-        [JsonPropertyName("mode")]
-        public string Mode { get; set; } = "";
-
-        [JsonPropertyName("processName")]
-        public string? ProcessName { get; set; }
-
-        [JsonPropertyName("windowTitle")]
-        public string? WindowTitle { get; set; }
-
-        [JsonPropertyName("capturedAt")]
-        public DateTime CapturedAt { get; set; }
-    }
 }
 
 /// <summary>「立即清理」预演中的一个分类：按配额将删除多少张、保留多少张。</summary>

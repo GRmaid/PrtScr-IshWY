@@ -262,7 +262,7 @@ public sealed unsafe partial class NativePinWindow
 
         MemoryProbe.Log("crop-encoded");
         if (App.Config.Current.HistoryPinCrop)
-            _ = CaptureHistoryService.Instance.AddAsync(bytes, HistoryCaptureMode.PinCrop);
+            _ = CaptureHistoryService.Instance.AddAsync(bytes, HistoryCaptureMode.PinCrop, meta: null);
 
         var hwnd = (nint)_hwnd.Value;
         _uiQueue.TryEnqueue(() =>

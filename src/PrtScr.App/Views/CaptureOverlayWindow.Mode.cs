@@ -29,6 +29,19 @@ public sealed partial class CaptureOverlayWindow
     {
         try
         {
+            if (_closed)
+                return;
+
+            // 拖拽中（框选 / 移动 / 缩放）按 Tab：忽略本次切换，保留指针捕获与选区跟随，
+            // 否则选区会冻结在原地、松手后还可能残留捕获。三条 Tab 入口
+            // （低级钩子 / FocusSink / KeyInterceptor）都走这里，守卫加一处即全覆盖。
+            if (_dragging)
+            {
+                App.Log("Overlay: mode switch ignored (dragging)");
+                ShowCopyToast("松开鼠标后再按 Tab 切换模式");
+                return;
+            }
+
             var hadSelection = _hasSelection;
             var previousSelection = _selection;
             var previousMode = _captureMode;
