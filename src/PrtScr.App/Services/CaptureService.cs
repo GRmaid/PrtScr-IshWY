@@ -15,342 +15,171 @@ namespace PrtScr.App.Services;
 /// 截图会话协调者：热键 → 冻结全屏 → 打开取景覆盖窗 →（窗口内交互）→ 剪贴板。
 /// v1 一次只取鼠标所在的那块显示器（微信同款行为）；跨显示器选区在 M7 完善。
 /// </summary>
-public sealed class CaptureService
+public sealed partial class CaptureService
 {
     public static CaptureService Instance { get; } = new();
 
     private CaptureOverlayWindow? _overlay;
-    private bool _isCapturing;
     private nint _currentMonitor;
-    private readonly object _sessionGate = new();
-    private Guid _captureSessionId;
+    private Task? _overlayStartTask;
+    private Task? _shutdownWait;
 
-    // P-14b：会话单槽状态机。_captureSessionId 仍只表示“有效性”（A05，取消/新截图即失效）；
-    // _lastSessionId 表示状态槽属于哪一次取景——取消后仍要为它写终态与结果行。
-    private Guid _lastSessionId;
-    private CaptureSessionState _captureState = CaptureSessionState.Idle;
-    private CaptureOrigin _sessionOrigin = CaptureOrigin.None;
-    private CaptureEngine _sessionEngine = CaptureEngine.None;
-    private CaptureFailure _sessionFailure = CaptureFailure.None;
-    private bool _sessionPrintWindowTimedOut;
-    private string? _sessionDetail;
+    // P-14b′：活动/Current/Owner/元数据/预留/退出只有一个真源；CTS 与运行中 Task 只作资源/等待句柄。
+    private readonly CaptureSessionCoordinator _coordinator = new(SafeLog);
 
     private CaptureService()
     {
     }
 
-    public bool IsCapturing => _isCapturing;
+    /// <summary>取景器（Overlay）是否占用会话槽；Quick 占槽不算，供 UI 决策。</summary>
+    public bool IsOverlayCapturing
+    {
+        get
+        {
+            var snapshot = _coordinator.Snapshot();
+            return snapshot.Active && snapshot.OwnerKind == CaptureSessionKind.Overlay;
+        }
+    }
+
+    /// <summary>会话槽是否忙：有活动会话或取景预留（已结束的最近身份不算忙）。</summary>
+    public bool IsCaptureBusy => _coordinator.IsBusy;
+
+    /// <summary>旧入口兼容：旧语义只表示取景器在截图。Quick 占槽时不置位；新 UI 请按需改用 IsOverlayCapturing / IsCaptureBusy。</summary>
+    public bool IsCapturing => IsOverlayCapturing;
 
     /// <summary>当前会话槽的状态（P-14b）；没有活动会话时为 Idle。</summary>
-    public CaptureSessionState CurrentCaptureSessionState
-    {
-        get
-        {
-            lock (_sessionGate)
-                return _captureState;
-        }
-    }
+    public CaptureSessionState CurrentCaptureSessionState => _coordinator.State;
 
     /// <summary>当前这次取景的会话身份；新截图开始后旧身份自动失效（A05）。</summary>
-    public Guid CurrentCaptureSessionId
-    {
-        get
-        {
-            lock (_sessionGate)
-                return _captureSessionId;
-        }
-    }
+    public Guid CurrentCaptureSessionId => _coordinator.CurrentSessionId;
 
     /// <summary>await 之后写内容/历史/剪贴板/OCR 之前先校验：不是最新会话就丢弃（A05）。</summary>
-    public bool IsCurrentCaptureSession(Guid sessionId)
-    {
-        if (sessionId == Guid.Empty)
-            return false;
+    public bool IsCurrentCaptureSession(Guid sessionId) => _coordinator.IsCurrent(sessionId);
 
-        lock (_sessionGate)
-            return _captureSessionId == sessionId;
-    }
-
-    /// <summary>
-    /// 会话槽归属判定（F1）：取消只让 _captureSessionId 失效，不释放 _lastSessionId；
-    /// Guid.Empty 是启动期失败，按原语义放行。旧会话晚到时 _lastSessionId 已是新会话，故返回 false。
-    /// </summary>
-    internal bool IsOwnedCaptureSession(Guid sessionId)
-    {
-        if (sessionId == Guid.Empty)
-            return true;
-
-        lock (_sessionGate)
-            return sessionId == _lastSessionId;
-    }
+    /// <summary>会话槽归属判定（F1）：取消只让 Current 失效，Owner 保留到下一次 Begin。</summary>
+    internal bool IsOwnedCaptureSession(Guid sessionId) => _coordinator.IsOwner(sessionId);
 
     /// <summary>取消/放弃一次取景：让该会话所有晚到结果失效（A03/A05）。</summary>
-    public void InvalidateCaptureSession(Guid sessionId)
-    {
-        if (sessionId == Guid.Empty)
-            return;
+    public void InvalidateCaptureSession(Guid sessionId) => _coordinator.Invalidate(sessionId);
 
-        lock (_sessionGate)
-        {
-            if (_captureSessionId != sessionId)
-                return;
-            _captureSessionId = Guid.Empty;
-            // 取消只是“身份失效”，终态与结果仍由 EndCaptureSession 统一写出（P-14b）。
-            if (_lastSessionId == sessionId && CaptureRules.IsActive(_captureState))
-                _sessionFailure = CaptureFailure.Canceled;
-        }
+    /// <summary>取景收尾的唯一漏斗：Core 统一写 finished → state → result；仅活动 Overlay 收尾才拆取景期 Esc/通知 WGC。</summary>
+    internal void EndCaptureSession(Guid sessionId, string reason) => EndSession(sessionId, reason);
 
-        App.Log($"Capture: session {sessionId:N} invalidated");
-    }
-
-    /// <summary>
-    /// 取景收尾的唯一漏斗（P-04b）：清 _isCapturing、注销取景期全局 Esc、通知 WGC 池。
-    /// 幂等；session 为 Guid.Empty 表示启动期失败（尚未发会话号）。不清 _captureSessionId：
-    /// 确认成功后的编码/剪贴板/历史仍要用它校验晚到（A05）。
-    /// 旧会话晚到的 Finish 若不属于 _lastSessionId，只记 stale 日志并返回，不清新会话状态（F1）。
-    /// </summary>
-    internal void EndCaptureSession(Guid sessionId, string reason)
-    {
-        bool wasCapturing;
-        bool stale;
-        Guid lastSessionId;
-        lock (_sessionGate)
-        {
-            wasCapturing = _isCapturing;
-            lastSessionId = _lastSessionId;
-            // 旧会话晚到的 Finish 不得清掉新会话的状态（F1）。Guid.Empty 是启动期失败，
-            // 没有会话归属，仍按原语义收尾。
-            stale = wasCapturing && sessionId != Guid.Empty && sessionId != lastSessionId;
-            if (!stale)
-                _isCapturing = false;
-        }
-
-        var sessionText = SessionText(sessionId);
-        if (!wasCapturing)
-        {
-            App.Log($"Capture: session {sessionText} finish ignored (not capturing, reason={reason})");
-            return;
-        }
-
-        if (stale)
-        {
-            App.Log($"Capture: session {sessionText} finish ignored (stale session, current={SessionText(lastSessionId)}, reason={reason})");
-            return;
-        }
-
-        string? stateLog = null;
-        string? resultLog = null;
-        lock (_sessionGate)
-        {
-            if (sessionId != Guid.Empty && sessionId == _lastSessionId)
-            {
-                var endReason = ParseEndReason(reason);
-                var from = _captureState;
-                var decision = CaptureRules.TerminateDecision(from, endReason);
-                if (decision == CaptureTerminateDecision.Allowed)
-                {
-                    var terminal = TerminalStateFor(reason);
-                    _captureState = terminal;
-                    stateLog = $"Capture: session {sessionText} state {from} -> {terminal} (terminate:{reason})";
-                    resultLog = FormatResultLog(BuildResultLocked(sessionId), terminal, reason);
-                }
-                else
-                {
-                    stateLog = $"Capture: session {sessionText} terminate {decision} (state={from}, reason={reason})";
-                }
-
-                // 终态是这次会话的结论；槽位随即释放，下一次取景重新从 Idle→Preparing（不是状态迁移边）。
-                _captureState = CaptureSessionState.Idle;
-            }
-            else if (sessionId != Guid.Empty)
-            {
-                stateLog = $"Capture: session {sessionText} finish while slot={SessionText(_lastSessionId)} reason={reason}";
-            }
-        }
-
-        Hotkey?.EndCaptureMode();
-        if (_currentMonitor != 0)
-            WgcWindowCapture.NotifyOverlayClosed(_currentMonitor);
-        App.Log($"Capture: session {sessionText} finished reason={reason}");
-        if (stateLog is not null)
-            App.Log(stateLog);
-        if (resultLog is not null)
-            App.Log(resultLog);
-    }
-
-    /// <summary>
-    /// 开始一次取景的会话槽（P-14b）：Idle → Preparing。只由 StartCaptureAsync 在引擎取到冻结帧后调用，
-    /// 这样启动期失败仍能走 reason=start-failed 的收尾（此时状态为 Idle，CaptureRules 允许）。
-    /// </summary>
-    internal void BeginCaptureSession(Guid sessionId)
-    {
-        string log;
-        lock (_sessionGate)
-        {
-            _lastSessionId = sessionId;
-            _sessionOrigin = CaptureOrigin.None;
-            _sessionEngine = CaptureEngine.None;
-            _sessionFailure = CaptureFailure.None;
-            _sessionPrintWindowTimedOut = false;
-            _sessionDetail = null;
-
-            var from = _captureState;
-            if (CaptureRules.CanTransition(from, CaptureSessionState.Preparing))
-            {
-                _captureState = CaptureSessionState.Preparing;
-                log = $"Capture: session {SessionText(sessionId)} state {from} -> {CaptureSessionState.Preparing} (begin)";
-            }
-            else
-            {
-                // EndCaptureSession 已释放槽位；万一异常路径残留旧状态，仍以新会话为准并留下证据。
-                _captureState = CaptureSessionState.Preparing;
-                log = $"Capture: session {SessionText(sessionId)} state {from} -> {CaptureSessionState.Preparing} forced (begin)";
-            }
-        }
-
-        App.Log(log);
-    }
+    internal void BeginCaptureSession(Guid sessionId) => _coordinator.Begin(sessionId, CaptureSessionKind.Overlay);
 
     /// <summary>取景窗已准备好：Preparing → Selecting。</summary>
     internal void MarkCapturePrepared(Guid sessionId)
-    {
-        TransitionSession(sessionId, CaptureSessionState.Selecting, "prepared");
-    }
+        => _coordinator.TryTransition(sessionId, CaptureSessionState.Selecting, "prepared");
 
     /// <summary>一次取图动作开始：Selecting → Capturing（失败后恢复取景、再次确认时可重复）。</summary>
     internal void BeginCaptureAttempt(Guid sessionId, string trigger)
-    {
-        TransitionSession(sessionId, CaptureSessionState.Capturing, $"attempt:{trigger}");
-    }
+        => _coordinator.TryTransition(sessionId, CaptureSessionState.Capturing, $"attempt:{trigger}");
 
-    /// <summary>取图成功：记录来源/引擎/超时标记，Capturing → Committing，并写一条结果日志。</summary>
+    /// <summary>取图成功：记录来源/引擎/超时标记，Capturing → Committing，并写结果日志。</summary>
     internal void MarkCaptureAttemptSucceeded(
         Guid sessionId,
         CaptureOrigin origin,
         CaptureEngine engine,
         bool printWindowTimedOut)
-    {
-        lock (_sessionGate)
-        {
-            if (sessionId == Guid.Empty || sessionId != _lastSessionId)
-                return;
-            _sessionOrigin = origin;
-            _sessionEngine = engine;
-            _sessionPrintWindowTimedOut = printWindowTimedOut;
-            _sessionFailure = CaptureFailure.None;
-            _sessionDetail = null;
-        }
+        => _coordinator.TryMarkSucceeded(sessionId, origin, engine, printWindowTimedOut);
 
-        TransitionSession(sessionId, CaptureSessionState.Committing, "attempt-success");
-
-        string? resultLog = null;
-        lock (_sessionGate)
-        {
-            if (sessionId == _lastSessionId)
-                resultLog = FormatResultLog(BuildResultLocked(sessionId), _captureState, "attempt-success");
-        }
-
-        if (resultLog is not null)
-            App.Log(resultLog);
-    }
-
-    /// <summary>取图失败：记录失败分类与原因，写结果日志后 Capturing → Selecting（允许主人直接重试）。</summary>
+    /// <summary>取图失败：记录失败分类与原因，写结果日志后 Capturing/Committing → Selecting（允许主人直接重试）。</summary>
     internal void MarkCaptureAttemptFailed(Guid sessionId, CaptureFailure failure, string? detail)
-    {
-        string? resultLog = null;
-        lock (_sessionGate)
-        {
-            if (sessionId == Guid.Empty || sessionId != _lastSessionId)
-                return;
-            _sessionFailure = failure;
-            _sessionDetail = detail;
-            _sessionPrintWindowTimedOut = false;
-            resultLog = FormatResultLog(BuildResultLocked(sessionId), _captureState, $"attempt-failed:{failure}");
-        }
-
-        if (resultLog is not null)
-            App.Log(resultLog);
-
-        TransitionSession(sessionId, CaptureSessionState.Selecting, $"attempt-failed:{failure}");
-    }
+        => _coordinator.TryMarkFailed(sessionId, failure, detail);
 
     /// <summary>提交阶段回到取景（另存对话框取消、编码/保存异常）：Committing → Selecting。</summary>
     internal void ResetCaptureAttempt(Guid sessionId, string context)
+        => _coordinator.TryTransition(sessionId, CaptureSessionState.Selecting, context);
+
+    /// <summary>
+    /// 退出第一步（UI 退出在 await 之前同步调用）：永久封口、取消未 latch 的预提交会话并释放取景预留。
+    /// 只做同步纯规则与取消令牌，不等任何线程；等待预算由 <see cref="ShutdownAsync"/> 统一承担。
+    /// </summary>
+    public void BeginShutdown()
     {
-        TransitionSession(sessionId, CaptureSessionState.Selecting, context);
+        if (!_coordinator.BeginShutdown())
+            return;
+
+        var snapshot = _coordinator.Snapshot();
+        SafeLog($"Capture: shutdown begin (owner={SessionText(snapshot.OwnerSessionId)}, kind={snapshot.OwnerKind}, latched={snapshot.CommitLatched})");
+
+        if (snapshot.Active && !snapshot.CommitLatched && snapshot.OwnerSessionId != Guid.Empty)
+            EndSession(snapshot.OwnerSessionId, "cancel");
+
+        CancelQuickWork();
+    }
+
+    /// <summary>
+    /// 等待本轮新增长任务收尾，合计最多 <see cref="CaptureSessionCoordinator.ShutdownGrace"/>，只等待一次。
+    /// 不等待底层不可控的 native 抓取线程（它们晚到由各自的一次性后继释放）。
+    /// </summary>
+    public Task ShutdownAsync() => _shutdownWait ??= WaitForOwnedWorkAsync();
+
+    private async Task WaitForOwnedWorkAsync()
+    {
+        var pending = new List<Task>(2);
+        if (_quickTask is not null)
+            pending.Add(_quickTask);
+        if (_overlayStartTask is not null && !_overlayStartTask.IsCompleted)
+            pending.Add(_overlayStartTask);
+
+        if (pending.Count == 0)
+            return;
+
+        var all = Task.WhenAll(pending);
+        var winner = await Task.WhenAny(all, Task.Delay(CaptureSessionCoordinator.ShutdownGrace));
+        if (ReferenceEquals(winner, all))
+        {
+            try
+            {
+                await all;
+            }
+            catch (Exception ex)
+            {
+                App.Log($"Capture: shutdown observed pending failure {ex.GetType().Name}: {ex.Message}");
+            }
+
+            return;
+        }
+
+        App.Log($"Capture: shutdown wait grace {CaptureSessionCoordinator.ShutdownGrace.TotalMilliseconds:0}ms elapsed");
+    }
+
+    /// <summary>收尾漏斗；返回 Core 的终态快照（Active 是释放前事实）。被忽略/stale 返回 null。</summary>
+    private CaptureSessionSnapshot? EndSession(Guid sessionId, string reason)
+    {
+        var terminal = _coordinator.End(sessionId, reason);
+        if (terminal is null)
+            return null;
+
+        // 只对真正收尾的活动 Overlay 拆取景期 Esc 并通知 WGC 池；Quick 与 stale 收尾不触碰。
+        if (terminal.OwnerKind == CaptureSessionKind.Overlay)
+        {
+            Hotkey?.EndCaptureMode();
+            if (_currentMonitor != 0)
+                WgcWindowCapture.NotifyOverlayClosed(_currentMonitor);
+        }
+
+        return terminal;
     }
 
     private static string SessionText(Guid sessionId)
-    {
-        return sessionId == Guid.Empty ? "<none>" : sessionId.ToString("N");
-    }
+        => sessionId == Guid.Empty ? "<none>" : sessionId.ToString("N");
 
-    private static CaptureEndReason ParseEndReason(string reason)
+    /// <summary>
+    /// 服务日志入口：当前状态机日志在 Core 侧 Flush 时不捕异常，清理路径（退出/预留释放）也夹着日志，
+    /// 日志自身失败绝不能破坏会话/预留/退出协调状态。
+    /// </summary>
+    private static void SafeLog(string line)
     {
-        return reason switch
+        try
         {
-            "cancel" => CaptureEndReason.Cancel,
-            "confirm-success" => CaptureEndReason.ConfirmSuccess,
-            "confirm-end" => CaptureEndReason.ConfirmEnd,
-            "ocr" => CaptureEndReason.Ocr,
-            "save" => CaptureEndReason.Save,
-            "start-failed" => CaptureEndReason.StartFailed,
-            _ => CaptureEndReason.None,
-        };
-    }
-
-    private static CaptureSessionState TerminalStateFor(string reason)
-    {
-        return reason switch
-        {
-            "cancel" => CaptureSessionState.Canceled,
-            "confirm-success" or "ocr" or "save" => CaptureSessionState.Completed,
-            _ => CaptureSessionState.Failed,
-        };
-    }
-
-    private CaptureResult BuildResultLocked(Guid sessionId)
-    {
-        return new CaptureResult(
-            sessionId,
-            _sessionOrigin,
-            _sessionEngine,
-            _sessionFailure,
-            _sessionPrintWindowTimedOut,
-            0,
-            _sessionDetail);
-    }
-
-    private static string FormatResultLog(CaptureResult result, CaptureSessionState state, string reason)
-    {
-        var notice = string.IsNullOrWhiteSpace(result.Notice)
-            ? "-"
-            : result.Notice.Replace('\r', ' ').Replace('\n', ' ');
-        return $"Capture: session {SessionText(result.SessionId)} result state={state} origin={result.Origin} engine={result.Engine} failure={result.Failure} timedOut={result.PrintWindowTimedOut} success={result.IsSuccess} canceled={result.IsCanceled} history={result.HistoryMode} notice=\"{notice}\" reason={reason}";
-    }
-
-    private void TransitionSession(Guid sessionId, CaptureSessionState to, string context)
-    {
-        string? log = null;
-        lock (_sessionGate)
-        {
-            if (sessionId == Guid.Empty || sessionId != _lastSessionId)
-                return;
-
-            var from = _captureState;
-            if (CaptureRules.CanTransition(from, to))
-            {
-                _captureState = to;
-                log = $"Capture: session {SessionText(sessionId)} state {from} -> {to} ({context})";
-            }
-            else
-            {
-                log = $"Capture: session {SessionText(sessionId)} state {from} -> {to} rejected ({context})";
-            }
+            App.Log(line);
         }
-
-        if (log is not null)
-            App.Log(log);
+        catch
+        {
+            // 日志失败只丢这一行，不影响协调状态。
+        }
     }
 
     /// <summary>由 MainWindow 注入：用于取景期间接管全局 Esc。</summary>
@@ -376,63 +205,145 @@ public sealed class CaptureService
         }
     }
 
-    /// <summary>在 UI 线程调用。若已在截图中，热键视为“取消”。</summary>
-    public async Task StartCaptureAsync()
+    /// <summary>
+    /// 在 UI 线程调用。仅代表真正的取景（Overlay）意图：活动取景按旧文案取消；
+    /// 未 latch 的 Quick 才被抢占。取景预留与 Begin 都在首个 await 之前完成。
+    /// </summary>
+    public Task StartCaptureAsync()
+    {
+        var task = StartOverlayCoreAsync();
+        _overlayStartTask = task;
+        return task;
+    }
+
+    private async Task StartOverlayCoreAsync()
     {
         App.Log("Capture: start");
-        if (_isCapturing)
+
+        var snapshot = _coordinator.Snapshot();
+        if (snapshot.Active && snapshot.OwnerKind == CaptureSessionKind.Overlay)
         {
-            var activeSession = CurrentCaptureSessionId;
-            var activeText = activeSession == Guid.Empty ? "<none>" : activeSession.ToString("N");
+            var activeText = snapshot.CurrentSessionId == Guid.Empty ? "<none>" : snapshot.CurrentSessionId.ToString("N");
             App.Log($"Capture: already capturing, cancel session={activeText}");
-            _overlay?.Cancel();
+
+            if (snapshot.State == CaptureSessionState.Preparing)
+            {
+                // Preparing 还没交给 Overlay：只取消旧会话会让新 Preparing 永远忙，必须失效本代并 End。
+                if (snapshot.CurrentSessionId != Guid.Empty)
+                    _coordinator.Invalidate(snapshot.CurrentSessionId);
+                EndSession(snapshot.OwnerSessionId, "cancel");
+            }
+            else
+            {
+                _overlay?.Cancel();
+            }
+
             return;
         }
 
-        // 冻结图的 owner：交给取景窗（Prepare）之前归本方法，交接后归 overlay（A10/P-09b）
+        // 预留段：TryReserveOverlay 成功到 Begin 消费预留之间，任何异常（取消回调 AggregateException、
+        // 服务日志、Core Flush 日志）都不得让本次预留泄漏；finally 必须按本代准确的 reservationId+generation 释放。
+        var reservationId = Guid.Empty;
+        long reservationGeneration = 0;
+        var reservationConsumed = false;
+        var sessionId = Guid.Empty;
         Bitmap? frozen = null;
         var frozenHandedOff = false;
 
         try
         {
+            if (snapshot.Active && snapshot.OwnerKind == CaptureSessionKind.Quick)
+            {
+                // Quick 已 latch = 不可逆写入已开始，取景只忽略、不排队。
+                if (snapshot.CommitLatched)
+                {
+                    App.Log($"Capture: overlay start ignored (quick commit latched, session={SessionText(snapshot.OwnerSessionId)})");
+                    return;
+                }
+
+                if (!_coordinator.TryReserveOverlay(out reservationId, out var preemptedQuickId))
+                {
+                    App.Log($"Capture: overlay reservation denied (quick session={SessionText(snapshot.OwnerSessionId)})");
+                    return;
+                }
+
+                reservationGeneration = _coordinator.OverlayReservationGeneration;
+
+                // Core 已在同一同步边界内失效并按 cancel 收尾旧 Quick；这里只让仍在等待的采集脱身。
+                // 取消回调抛异常也不能让预留/退出清理丢失：CancelQuickWork 自吞全部异常。
+                CancelQuickWork();
+                App.Log($"Capture: overlay preempted quick session={SessionText(preemptedQuickId)}");
+            }
+            else
+            {
+                if (!_coordinator.TryReserveOverlay(out reservationId, out _))
+                {
+                    App.Log("Capture: overlay reservation denied (busy or shutting down)");
+                    return;
+                }
+
+                reservationGeneration = _coordinator.OverlayReservationGeneration;
+            }
+
+            sessionId = Guid.NewGuid();
+            if (_coordinator.Begin(sessionId, CaptureSessionKind.Overlay, reservationId) is null)
+            {
+                App.Log($"Capture: overlay begin denied session={SessionText(sessionId)}");
+                return;   // 预留由 finally 按本次代际释放
+            }
+
+            reservationConsumed = true;
+            _currentMonitor = 0;
+
             // 冻结画面走常驻 WGC 池：零会话启停（根治按下瞬间的全屏爆闪），
             // 只需从池里舀最新一帧，~10ms；失败回退 BitBlt。
             var (hMonitor, monitor) = GetCursorMonitor();
             if (monitor.Width <= 0 || monitor.Height <= 0)
             {
                 App.Log("Capture: monitor rect invalid, abort");
+                EndSession(sessionId, "start-failed");
                 return;
             }
 
             var pool = WgcWindowCapture.EnsureMonitorPool(hMonitor);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var (captured, captureStatus) = await CaptureMonitorBestAsync(hMonitor, monitor);
+            var (captured, captureStatus, captureEngine, printWindowTimedOut) = await CaptureMonitorBestAsync(hMonitor, monitor);
             frozen = captured;
             if (frozen is null)
             {
-                App.Log("Capture: 所有采集引擎均失败");
+                App.Log($"Capture: 所有采集引擎均失败 status={captureStatus}");
+                EndSession(sessionId, "start-failed");
                 return;
             }
-            DrawCursorIfEnabled(frozen, monitor);
-            App.Log($"Capture: frozen {sw.ElapsedMilliseconds}ms pool={pool} status={captureStatus}");
-            _currentMonitor = hMonitor;
 
-            // 窗口枚举不碰 UI，与抓屏并行跑，别占用亮窗前的关键路径
+            // await 回来先核当前代际/owner 再交接冻结帧；被取消/抢占/退出封口时只释放，不发成功。
+            if (!_coordinator.IsCurrent(sessionId))
+            {
+                App.Log($"Capture: session {SessionText(sessionId)} frozen frame discarded (not current)");
+                return;
+            }
+
+            _currentMonitor = hMonitor;
+            DrawCursorIfEnabled(frozen, monitor);
+            App.Log($"Capture: frozen {sw.ElapsedMilliseconds}ms pool={pool} status={captureStatus} engine={captureEngine} timedOut={printWindowTimedOut}");
+
+            // 窗口枚举不碰 UI，与抓屏并行跑，别占用亮窗前的关键路径。
             var windows = await Task.Run(() => WindowEnumerator.EnumerateVisibleWindows());
+            if (!_coordinator.IsCurrent(sessionId))
+            {
+                App.Log($"Capture: session {SessionText(sessionId)} window list discarded (not current)");
+                return;
+            }
 
             EnsureOverlay();
             if (_overlay is null)
-                return;   // frozen 由 finally 释放
+            {
+                EndSession(sessionId, "start-failed");
+                return;
+            }
 
-            // 每次真正开始取景发一个会话身份：之后所有 await 回来的写入都拿它比对（A05）
-            var sessionId = Guid.NewGuid();
-            _isCapturing = true;
-            lock (_sessionGate)
-                _captureSessionId = sessionId;
-            BeginCaptureSession(sessionId);
             _overlay.Prepare(frozen, monitor, windows);
-            // Prepare 第一件事就是把 frozen 挂成 overlay 的 _full（CaptureOverlayWindow.xaml.cs:226-227），
-            // 从这一步起释放责任归取景窗，本方法不得再 Dispose。
+            // Prepare 第一件事就是把 frozen 挂成 overlay 的 _full；从这一步起释放责任归取景窗。
             frozenHandedOff = true;
             MarkCapturePrepared(sessionId);
             Hotkey?.BeginCaptureMode();
@@ -440,15 +351,17 @@ public sealed class CaptureService
         }
         catch (Exception ex)
         {
-            // 启动期失败也走同一漏斗：清 _isCapturing 并注销可能已注册的取景期 Esc。
-            EndCaptureSession(CurrentCaptureSessionId, "start-failed");
+            // Begin 已生效之后才出错：End 只作用本代局部 Guid，绝不按全局 Current 清新槽/新代。
+            if (reservationConsumed && sessionId != Guid.Empty)
+                EndSession(sessionId, "start-failed");
             App.Log($"Capture: 异常 {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             throw;
         }
         finally
         {
-            // 未交接给取景窗的 frozen 一律在本方法释放；已交接的由 overlay 的 Dismiss/FinishCaptureSession
-            // 释放，避免与 P-04 的取消路径重复 Dispose。
+            if (!reservationConsumed && reservationId != Guid.Empty)
+                _coordinator.ReleaseOverlayReservation(reservationId, reservationGeneration);
+
             if (!frozenHandedOff)
                 frozen?.Dispose();
         }
@@ -457,10 +370,11 @@ public sealed class CaptureService
     /// <summary>
     /// 显示器采集：WGC 常驻池优先；若拿到疑似黑屏（游戏全屏常见）→ 回退 BitBlt。
     /// </summary>
-    private static async Task<(Bitmap? Bitmap, QuickCaptureStatus Status)> CaptureMonitorBestAsync(nint hMonitor, WindowRect monitor)
+    private static async Task<(Bitmap? Bitmap, QuickCaptureStatus Status, CaptureEngine Engine, bool PrintWindowTimedOut)> CaptureMonitorBestAsync(nint hMonitor, WindowRect monitor)
     {
         // 三态：看到过帧但全黑 => LikelyBlack；一个帧都没拿到 => AllEnginesFailed。
         var sawFrame = false;
+        var foregroundTimedOut = false;
         Bitmap? wgc = null;
         try
         {
@@ -477,7 +391,7 @@ public sealed class CaptureService
             if (!IsNearlyBlack(wgc))
             {
                 App.Log($"Capture: engine=WGC {wgc.Width}×{wgc.Height}");
-                return (wgc, QuickCaptureStatus.Success);
+                return (wgc, QuickCaptureStatus.Success, CaptureEngine.Wgc, false);
             }
 
             App.Log("Capture: WGC 帧疑似黑屏，回退 DXGI");
@@ -492,7 +406,7 @@ public sealed class CaptureService
             if (!IsNearlyBlack(dxgi))
             {
                 App.Log($"Capture: engine=DXGI {dxgi.Width}×{dxgi.Height}");
-                return (dxgi, QuickCaptureStatus.Success);
+                return (dxgi, QuickCaptureStatus.Success, CaptureEngine.Dxgi, false);
             }
 
             App.Log("Capture: DXGI 帧疑似黑屏，回退 BitBlt");
@@ -522,39 +436,49 @@ public sealed class CaptureService
             {
                 App.Log($"Capture: engine=BitBlt {fallback.Width}×{fallback.Height}");
                 fallbackOwned = false;
-                return (fallback, QuickCaptureStatus.Success);
+                return (fallback, QuickCaptureStatus.Success, CaptureEngine.BitBlt, false);
             }
 
-            // 最后一招：全屏游戏通常是一个"窗口"，用 WGC 窗口捕获（OBS 游戏/窗口捕获同路线）
-            var foregroundResult = await CaptureForegroundWindowAsync(monitor);
-            if (foregroundResult is not null)
+            // 最后一招：全屏游戏通常是一个"窗口"，用窗口捕获（PrintWindow 优先、WGC 回退）。
+            var foreground = await CaptureForegroundWindowAsync(monitor);
+            if (foreground is not null)
             {
-                sawFrame = true;
-                bool foregroundBlack;
-                try
+                if (foreground.Bitmap is not null)
                 {
-                    foregroundBlack = IsNearlyBlack(foregroundResult);
+                    sawFrame = true;
+                    var foregroundEngine = MapWindowCaptureSource(foreground.Source);
+                    bool foregroundBlack;
+                    try
+                    {
+                        foregroundBlack = IsNearlyBlack(foreground.Bitmap);
+                    }
+                    catch
+                    {
+                        foreground.Bitmap.Dispose();
+                        throw;
+                    }
+
+                    if (!foregroundBlack)
+                    {
+                        App.Log($"Capture: engine={foregroundEngine} {foreground.Bitmap.Width}×{foreground.Bitmap.Height} timedOut={foreground.PrintWindowTimedOut}");
+                        return (foreground.Bitmap, QuickCaptureStatus.Success, foregroundEngine, foreground.PrintWindowTimedOut);
+                    }
+
+                    App.Log("Capture: 前台窗口帧疑似黑屏，丢弃");
+                    foreground.Bitmap.Dispose();
                 }
-                catch
+                else
                 {
-                    foregroundResult.Dispose();
-                    throw;
+                    App.Log($"Capture: 前台窗口捕获失败 source={foreground.Source} failure={foreground.Failure} timedOut={foreground.PrintWindowTimedOut} detail={foreground.Detail}");
                 }
 
-                if (!foregroundBlack)
-                {
-                    App.Log($"Capture: engine=ForegroundWGC {foregroundResult.Width}×{foregroundResult.Height}");
-                    return (foregroundResult, QuickCaptureStatus.Success);
-                }
-
-                App.Log("Capture: 前台窗口 WGC 帧疑似黑屏，丢弃");
-                foregroundResult.Dispose();
+                foregroundTimedOut = foreground.PrintWindowTimedOut;
             }
 
             // B-3b：不再把全黑 BitBlt/窗口帧当成功交出去。无可用帧由上层走失败提示，
             // 避免黑图进入取景、历史与剪贴板。
             App.Log("Capture: 所有采集引擎均失败或返回疑似黑屏");
-            return (null, sawFrame ? QuickCaptureStatus.LikelyBlack : QuickCaptureStatus.AllEnginesFailed);
+            return (null, sawFrame ? QuickCaptureStatus.LikelyBlack : QuickCaptureStatus.AllEnginesFailed, CaptureEngine.None, foregroundTimedOut);
         }
         finally
         {
@@ -563,7 +487,7 @@ public sealed class CaptureService
         }
     }
 
-    private static async Task<Bitmap?> CaptureForegroundWindowAsync(WindowRect monitor)
+    private static async Task<WindowCaptureResult?> CaptureForegroundWindowAsync(WindowRect monitor)
     {
         try
         {
@@ -584,11 +508,11 @@ public sealed class CaptureService
                 new WindowRect(rect.left, rect.top, width, height),
                 false, false, false, false, false);
 
-            var bitmap = await WindowCapture.CaptureAsync(info);
-            if (bitmap is not null)
-                App.Log($"Capture: 前景窗口捕获 {bitmap.Width}×{bitmap.Height}");
-
-            return bitmap;
+            // 必须用详细入口：旧 CaptureAsync 只剩 Bitmap，真实来源（PrintWindow/WGC）与超期事实会丢。
+            var result = await WindowCapture.CaptureDetailedAsync(info);
+            if (result.Bitmap is not null)
+                App.Log($"Capture: 前景窗口捕获 source={result.Source} {result.Bitmap.Width}×{result.Bitmap.Height} timedOut={result.PrintWindowTimedOut}");
+            return result;
         }
         catch (Exception ex)
         {
@@ -596,6 +520,15 @@ public sealed class CaptureService
             return null;
         }
     }
+
+    /// <summary>窗口捕获实际来源映射到结果引擎；Source 只有 PrintWindow/Wgc/None，未知按 Fallback，绝不猜 Screen。</summary>
+    private static CaptureEngine MapWindowCaptureSource(WindowCaptureSource source)
+        => source switch
+        {
+            WindowCaptureSource.PrintWindow => CaptureEngine.PrintWindow,
+            WindowCaptureSource.Wgc => CaptureEngine.Wgc,
+            _ => CaptureEngine.Fallback,
+        };
 
     /// <summary>BitBlt 兜底：把虚拟屏截图裁出显示器区域（显示器本地坐标）。失败返回 null 并记日志。</summary>
     private static Bitmap? CaptureMonitorByBitBlt(WindowRect monitor, bool includeLayered = true)
@@ -648,10 +581,10 @@ public sealed class CaptureService
                 return new QuickCaptureResult(null, QuickCaptureStatus.AllEnginesFailed);
 
             WgcWindowCapture.EnsureMonitorPool(hMonitor);
-            var (bitmap, status) = await CaptureMonitorBestAsync(hMonitor, monitor);
+            var (bitmap, status, engine, printWindowTimedOut) = await CaptureMonitorBestAsync(hMonitor, monitor);
             if (bitmap is null)
             {
-                App.Log($"QuickCapture: 无可用帧 status={status}");
+                App.Log($"QuickCapture: 无可用帧 status={status} engine={engine} timedOut={printWindowTimedOut}");
                 return new QuickCaptureResult(null, status);
             }
 

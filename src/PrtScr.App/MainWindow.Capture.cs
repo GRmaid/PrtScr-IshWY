@@ -7,6 +7,7 @@ using Windows.System;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PrtScr.App.Services;
+using PrtScr.Core;
 using System.Diagnostics;
 using System.IO;
 using Windows.ApplicationModel.DataTransfer;
@@ -21,71 +22,73 @@ public sealed partial class MainWindow
 {
     private async void OnFullScreenPressed()
     {
-        // 钩子通道和 RegisterHotKey 兜底可能在几百毫秒内重复命中同一次按键，
-        // 上一次采集没结束时直接丢弃，避免并发抢前台/并发写剪贴板
-        if (Interlocked.Exchange(ref _quickCaptureBusy, 1) != 0)
+        // 退出封口开始后，已经完成 Task.Delay 的延时回调仍可能晚到；这里只记日志，不再发起采集。
+        if (Volatile.Read(ref _exitStarted) != 0)
         {
-            App.Log("QuickCapture: 上一次还没结束，忽略本次触发");
+            App.Log("QuickCapture: 退出已开始，忽略晚到的全屏回调");
             return;
         }
 
         App.Log("QuickCapture: hotkey pressed");
-        Services.FullscreenBypass? bypass = null;
         try
         {
-            // 先直接抓：WGC/DXGI 在大多数窗口化、无边框全屏下不需要抢焦点。
-            // 只有首帧失败或疑似黑屏（独占全屏）才短暂切前台，避免每次按热键都闪一下、游戏音频中断。
-            var result = await Services.CaptureService.CaptureFullScreenPngAsync();
-            if (result.Png is null || result.Status != Services.CaptureService.QuickCaptureStatus.Success)
+            // 取图、旁路、剪贴板与历史全部由服务的 Quick 会话统一仲裁；UI 只 await 一次，再按结局更新状态。
+            var outcome = await Services.CaptureService.Instance.StartQuickCaptureAsync();
+            var failure = outcome.CaptureResult.Failure;
+
+            if (outcome.Disposition == QuickCaptureDisposition.Ignored)
             {
-                App.Log($"QuickCapture: 首帧不可用 status={result.Status}，短暂切前台后重试");
-                bypass = await Services.FullscreenBypass.BeginAsync();
-                await Task.Delay(150);
-                result = await Services.CaptureService.CaptureFullScreenPngAsync();
+                App.Log($"QuickCapture: 忽略（槽忙/latch/退出封口）status={outcome.Status} bytes={outcome.PngBytes} bypass={outcome.BypassActivated} failure={failure} detail={outcome.CaptureResult.Detail}");
+                return;
             }
 
-            var activated = bypass?.Activated ?? false;
-
-            if (result.Png is null || result.Status != Services.CaptureService.QuickCaptureStatus.Success)
+            // 取消（含采集终态为 Canceled）不提示：用户已主动取消或退出封口，不打扰。
+            if (outcome.Disposition == QuickCaptureDisposition.Canceled || failure == CaptureFailure.Canceled)
             {
-                if (result.Status == Services.CaptureService.QuickCaptureStatus.LikelyBlack)
+                App.Log($"QuickCapture: 取消 status={outcome.Status} bytes={outcome.PngBytes} bypass={outcome.BypassActivated} failure={failure} detail={outcome.CaptureResult.Detail}");
+                return;
+            }
+
+            if (outcome.Disposition == QuickCaptureDisposition.Failed)
+            {
+                if (outcome.Status == Services.CaptureService.QuickCaptureStatus.LikelyBlack)
                 {
                     SetStatus("当前画面像是独占全屏游戏，Windows 无法截取");
-                    App.Log($"QuickCapture: 两次都是黑屏 (bypass={activated})");
+                    App.Log($"QuickCapture: 两次都是黑屏 (bypass={outcome.BypassActivated})");
                 }
                 else
                 {
                     SetStatus("采集失败，请重试");
-                    App.Log($"QuickCapture: 失败，无图像 (bypass={activated})");
+                    App.Log($"QuickCapture: 失败，无图像 (bypass={outcome.BypassActivated})");
                 }
 
                 ToastService.ShowCaptureFailure();
                 return;
             }
 
-            var copyTask = Services.ClipboardService.SetImageAsync(result.Png);
-            var historyTask = await Services.CaptureHistoryService.Instance.AddAsync(
-                result.Png, HistoryCaptureMode.Normal, meta: HistoryCaptureMeta.ScreenQuick);
-            var ok = await copyTask;
-
-            SetStatus(ok ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）");
-            if (ok)
-                ToastService.ShowCaptureSuccess();
-            else
+            // Success 只表示图像采集完成并已尝试提交：复制/历史仍可能失败。
+            var copied = outcome.Copied;
+            SetStatus(copied ? "全屏截图已复制到剪贴板" : "全屏截图复制失败（剪贴板被占用）");
+            if (!copied)
+            {
                 ToastService.ShowCaptureFailure();
-            App.Log($"QuickCapture: 完成 {result.Png.Length / 1024}KB copied={ok} bypass={activated} history={historyTask is not null}");
-            if (historyTask is { } savedPath)
+            }
+            else if (failure == CaptureFailure.None)
+            {
+                ToastService.ShowCaptureSuccess();
+            }
+            // 图像已复制但附属步骤失败（如历史写入）时抑制成功提示，只留日志，不新增提示文案。
+
+            App.Log($"QuickCapture: 完成 {outcome.PngBytes / 1024}KB copied={copied} bypass={outcome.BypassActivated} historySaved={outcome.HistorySaved}");
+            if (outcome.HistoryPath is { } savedPath)
                 App.Log($"QuickCapture: history saved {savedPath}");
+            if (failure != CaptureFailure.None)
+                App.Log($"QuickCapture: result failure={failure} detail={outcome.CaptureResult.Detail}");
         }
         catch (Exception ex)
         {
             App.Log($"全屏截图异常: {ex}");
             ToastService.ShowCaptureFailure();
-        }
-        finally
-        {
-            bypass?.Dispose();
-            Volatile.Write(ref _quickCaptureBusy, 0);
         }
     }
 
@@ -114,6 +117,13 @@ public sealed partial class MainWindow
 
     private async void OnHotkeyPressed()
     {
+        // 退出封口开始后，晚到的热键回调不再发起新的取景/取消。
+        if (Volatile.Read(ref _exitStarted) != 0)
+        {
+            App.Log("Capture: 退出已开始，忽略晚到的截图热键回调");
+            return;
+        }
+
         // M1：唤起冻屏取景器。Dispatcher 回调里的异常会变成“暂存异常”直接杀进程，
         // 必须在这里兜住并写日志。
         try
@@ -127,7 +137,7 @@ public sealed partial class MainWindow
             }
 
             // 取景器已经打开时，热键仍然走原来的“再按一次取消”语义
-            if (Services.CaptureService.Instance.IsCapturing)
+            if (Services.CaptureService.Instance.IsOverlayCapturing)
             {
                 await Services.CaptureService.Instance.StartCaptureAsync();
                 return;
@@ -167,6 +177,13 @@ public sealed partial class MainWindow
     /// <summary>延时截图：先等待，期间用户可以打开菜单/悬停；到点后再走正常冻屏取景。</summary>
     private async Task StartDelayedCaptureAsync(int seconds)
     {
+        // 退出封口开始后，已完成的 Task.Delay 其后续仍可能晚到；这里只记日志，不再开新的延时。
+        if (Volatile.Read(ref _exitStarted) != 0)
+        {
+            App.Log("Delay: 退出已开始，忽略晚到的延时截图请求");
+            return;
+        }
+
         if (_delayCts is not null)
         {
             App.Log("Delay: 已有延时截图在进行，忽略新请求");

@@ -94,7 +94,10 @@ public sealed partial class CaptureOverlayWindow : Window
     private WindowInfo? _lastTipWindow; // 尺寸提示当前显示的窗口（避免每帧重设文本）
     private readonly List<WindowInfo> _hoverCandidates = new();   // 光标下按 Z 序排列的全部候选窗口（复用，零分配）
     private DateTimeOffset _lastPress;
-    private volatile bool _closed;
+    // 初始即视为已收尾：构造后的离屏预热（WarmUpHidden 的 Show/Hide）会触发 Activated，
+    // 若这里为 false，隐藏时会被当成取景失焦置成 escOnly 并残留，取景器之外 [ ] 被钩子吞掉。
+    // 真正开始取景由 Prepare → ResetSessionState() 置 false。
+    private volatile bool _closed = true;
     private bool _saving;
     private bool _confirming;
     // 本会话是否已收尾：Prepare 时复位；旧会话由 FinishCaptureSession 的归属闸门挡住，不会污染这里。

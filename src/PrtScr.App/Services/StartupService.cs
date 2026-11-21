@@ -42,6 +42,14 @@ internal static class StartupService
     public static bool TrySetEnabled(bool enabled, out string? error)
     {
         error = null;
+
+        // 硬防护：冒烟会话不允许写 HKCU Run，哪怕上层漏了判断也不碰系统启动项。
+        if (SmokeSession.IsRequested)
+        {
+            error = "smoke session";
+            return false;
+        }
+
         try
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
@@ -78,6 +86,9 @@ internal static class StartupService
     /// </summary>
     public static void RefreshIfEnabled()
     {
+        if (SmokeSession.IsRequested)
+            return;
+
         var registered = GetRegisteredCommand();
         if (string.IsNullOrWhiteSpace(registered))
             return;

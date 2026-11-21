@@ -129,6 +129,68 @@ public sealed class CaptureRulesTests
         Assert.Equal(expected, CaptureRules.EndReasonText(reason));
     }
 
+    [Fact]
+    public void CaptureEndReason_QuickReasonsKeepLegacyValues()
+    {
+        Assert.Equal(0, (int)CaptureEndReason.None);
+        Assert.Equal(1, (int)CaptureEndReason.Cancel);
+        Assert.Equal(2, (int)CaptureEndReason.ConfirmSuccess);
+        Assert.Equal(3, (int)CaptureEndReason.ConfirmEnd);
+        Assert.Equal(4, (int)CaptureEndReason.Ocr);
+        Assert.Equal(5, (int)CaptureEndReason.Save);
+        Assert.Equal(6, (int)CaptureEndReason.StartFailed);
+        Assert.Equal(7, (int)CaptureEndReason.QuickSuccess);
+        Assert.Equal(8, (int)CaptureEndReason.QuickFailed);
+    }
+
+    [Theory]
+    [InlineData(CaptureEndReason.QuickSuccess, "quick-success")]
+    [InlineData(CaptureEndReason.QuickFailed, "quick-failed")]
+    public void EndReasonText_QuickReasonsMatchLogContract(CaptureEndReason reason, string expected)
+    {
+        Assert.Equal(expected, CaptureRules.EndReasonText(reason));
+    }
+
+    [Theory]
+    [InlineData(CaptureEndReason.QuickSuccess)]
+    [InlineData(CaptureEndReason.QuickFailed)]
+    public void TerminateDecision_IdleRejectsQuickReasons(CaptureEndReason reason)
+    {
+        Assert.Equal(
+            CaptureTerminateDecision.Invalid,
+            CaptureRules.TerminateDecision(CaptureSessionState.Idle, reason));
+    }
+
+    [Theory]
+    [InlineData(CaptureSessionState.Preparing, CaptureEndReason.QuickSuccess)]
+    [InlineData(CaptureSessionState.Preparing, CaptureEndReason.QuickFailed)]
+    [InlineData(CaptureSessionState.Selecting, CaptureEndReason.QuickSuccess)]
+    [InlineData(CaptureSessionState.Selecting, CaptureEndReason.QuickFailed)]
+    [InlineData(CaptureSessionState.Capturing, CaptureEndReason.QuickSuccess)]
+    [InlineData(CaptureSessionState.Capturing, CaptureEndReason.QuickFailed)]
+    [InlineData(CaptureSessionState.Committing, CaptureEndReason.QuickSuccess)]
+    [InlineData(CaptureSessionState.Committing, CaptureEndReason.QuickFailed)]
+    public void TerminateDecision_ActiveStatesAllowQuickReasons(CaptureSessionState state, CaptureEndReason reason)
+    {
+        Assert.Equal(
+            CaptureTerminateDecision.Allowed,
+            CaptureRules.TerminateDecision(state, reason));
+    }
+
+    [Theory]
+    [InlineData(CaptureSessionState.Completed)]
+    [InlineData(CaptureSessionState.Canceled)]
+    [InlineData(CaptureSessionState.Failed)]
+    public void TerminateDecision_QuickReasonsOnTerminalStateAreIdempotentDuplicate(CaptureSessionState state)
+    {
+        CaptureEndReason[] quickReasons = [CaptureEndReason.QuickSuccess, CaptureEndReason.QuickFailed];
+
+        foreach (var reason in quickReasons)
+            Assert.Equal(
+                CaptureTerminateDecision.Duplicate,
+                CaptureRules.TerminateDecision(state, reason));
+    }
+
     [Theory]
     [InlineData(CaptureOrigin.Window, HistoryCaptureMode.Window)]
     [InlineData(CaptureOrigin.Normal, HistoryCaptureMode.Normal)]

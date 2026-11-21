@@ -14,7 +14,7 @@ namespace PrtScr.App.Services;
 /// 可靠性要点（2026-10-19 实测）：
 /// 1) 回调里绝不写日志文件。低级钩子回调超过 LowLevelHooksTimeout 时系统会跳过这次按键，
 ///    连续超时还会把钩子静默摘掉——一次 2560×1600 截图期间就可能发生。日志改为无锁队列 +
-///    专用写线程，回调只做记账和投递。
+///    专用写线程，回调只做判定和投递。
 /// 2) RegisterHotKey 兜底通道先命中，说明钩子漏了这次按键：请求钩子线程重装，自愈。
 /// 3) 三个热键事件一律经 <see cref="RaiseDeferred"/> 投到线程池，订阅者永远不在钩子回调线程上执行。
 /// </summary>
@@ -22,15 +22,8 @@ internal static unsafe class EscOverPinHook
 {
     private const int WH_KEYBOARD_LL = 13;
     private const uint WM_KEYDOWN = 0x0100;
-    private const uint WM_KEYUP = 0x0101;
     private const uint WM_SYSKEYDOWN = 0x0104;
-    private const uint WM_SYSKEYUP = 0x0105;
     private const uint WM_APP_REINSTALL_HOOK = 0x8000 + 21;
-
-    private static bool _ctrlDown;
-    private static bool _altDown;
-    private static bool _shiftDown;
-    private static bool _winDown;
 
     private static int _fullScreenVk = 0x71;   // F2
     private static int _fullScreenMods;
@@ -351,27 +344,16 @@ internal static unsafe class EscOverPinHook
 
     private static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
-    private static void TrackModifier(uint vk, bool down)
-    {
-        switch (vk)
-        {
-            case 0x11: case 0xA2: case 0xA3: _ctrlDown = down; break;   // Ctrl / L / R
-            case 0x12: case 0xA4: case 0xA5: _altDown = down; break;    // Alt / L / R
-            case 0x10: case 0xA0: case 0xA1: _shiftDown = down; break;  // Shift / L / R
-            case 0x5B: case 0x5C: _winDown = down; break;               // Win L / R
-        }
-    }
-
     /// <summary>
     /// 要求的修饰键必须都按住；**允许多按**（例如 Win 键状态卡住、用户顺手带 Alt），
     /// 精确相等会让一次卡键永久废掉热键。
     /// </summary>
     private static bool ModifiersDown(int mods)
     {
-        var ctrl = _ctrlDown || Down(0x11);
-        var alt = _altDown || Down(0x12);
-        var shift = _shiftDown || Down(0x10);
-        var win = _winDown || Down(0x5B) || Down(0x5C);
+        var ctrl = Down(0x11);
+        var alt = Down(0x12);
+        var shift = Down(0x10);
+        var win = Down(0x5B) || Down(0x5C);
 
         return ((mods & 2) == 0 || ctrl)
             && ((mods & 1) == 0 || alt)
@@ -383,10 +365,10 @@ internal static unsafe class EscOverPinHook
 
     private static string DescribeModifiers()
     {
-        var ctrl = _ctrlDown || Down(0x11);
-        var alt = _altDown || Down(0x12);
-        var shift = _shiftDown || Down(0x10);
-        var win = _winDown || Down(0x5B) || Down(0x5C);
+        var ctrl = Down(0x11);
+        var alt = Down(0x12);
+        var shift = Down(0x10);
+        var win = Down(0x5B) || Down(0x5C);
         return $"ctrl={ctrl} shift={shift} alt={alt} win={win}";
     }
 
@@ -401,10 +383,10 @@ internal static unsafe class EscOverPinHook
         if (handler is null || mode == 0)
             return false;
 
-        var ctrl = _ctrlDown || Down(0x11);
-        var alt = _altDown || Down(0x12);
-        var shift = _shiftDown || Down(0x10);
-        var win = _winDown || Down(0x5B) || Down(0x5C);
+        var ctrl = Down(0x11);
+        var alt = Down(0x12);
+        var shift = Down(0x10);
+        var win = Down(0x5B) || Down(0x5C);
 
         // Alt+Tab / Win+Tab / Ctrl+Tab 等系统组合键必须放行，否则取景时会切不走窗口。
         if (alt || win)
@@ -540,22 +522,20 @@ internal static unsafe class EscOverPinHook
                 var data = (KbdLlHookStruct*)lParam;
                 var msg = (uint)wParam;
                 var isDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;   // Alt 组合键走 SYSKEYDOWN
-                var isUp = msg == WM_KEYUP || msg == WM_SYSKEYUP;
 
-                if (isDown || isUp)
+                // 修饰键状态只认 GetAsyncKeyState：钩子被系统静默摘除或漏掉修饰键 keyup 时，
+                // 自记账会残留成“一直按住”，此后裸 A/D 就被当成 Alt+A / Alt+D 误触。
+                if (isDown)
                 {
-                    // 修饰键按下/抬起都要记账：LL 钩子里 GetAsyncKeyState 对合成按键不可靠
-                    TrackModifier(data->vkCode, isDown);
-
                     // 取景窗可见时优先走这条：窗口没拿到前台焦点也能收到 Tab/Esc/Enter/Ctrl+C。
-                    if (isDown && TryHandleOverlayKey((int)data->vkCode))
+                    if (TryHandleOverlayKey((int)data->vkCode))
                         return 1;
 
-                    if (isDown && data->vkCode == (uint)_fullScreenVk)
+                    if (data->vkCode == (uint)_fullScreenVk)
                         EvaluateFullScreenHotkey();
-                    if (isDown && data->vkCode == (uint)_screenshotVk)
+                    if (data->vkCode == (uint)_screenshotVk)
                         EvaluateScreenshotHotkey();
-                    if (isDown && data->vkCode == (uint)_modeVk)
+                    if (data->vkCode == (uint)_modeVk)
                         EvaluateModeHotkey();
                 }
             }

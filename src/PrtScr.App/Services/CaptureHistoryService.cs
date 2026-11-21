@@ -17,7 +17,8 @@ public sealed class CaptureHistoryService
     /// <summary>默认单例使用程序目录 data/history；测试可传入临时目录。</summary>
     public CaptureHistoryService(string? storageDirectory = null)
     {
-        StorageDirectory = storageDirectory ?? Path.Combine(AppContext.BaseDirectory, "data", "history");
+        // 冒烟时 DataRoot 是隔离根；正常启动仍是程序目录，行为不变。
+        StorageDirectory = storageDirectory ?? SmokeSession.HistoryDirectory;
     }
 
     public static CaptureHistoryService Instance { get; } = new();

@@ -51,6 +51,12 @@ public enum CaptureEndReason
 
     /// <summary>启动阶段失败收尾。</summary>
     StartFailed = 6,
+
+    /// <summary>快速截图成功收尾。</summary>
+    QuickSuccess = 7,
+
+    /// <summary>快速截图失败收尾。</summary>
+    QuickFailed = 8,
 }
 
 /// <summary>截图结果的实际来源：决定历史分类，也决定界面要不要提示降级。</summary>
@@ -216,6 +222,8 @@ public static partial class CaptureRules
         CaptureEndReason.Ocr => "ocr",
         CaptureEndReason.Save => "save",
         CaptureEndReason.StartFailed => "start-failed",
+        CaptureEndReason.QuickSuccess => "quick-success",
+        CaptureEndReason.QuickFailed => "quick-failed",
         _ => "",
     };
 

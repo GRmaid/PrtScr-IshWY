@@ -41,7 +41,7 @@ public sealed partial class MainWindow
         };
         _hotkey.CancelPressed += () => DispatcherQueue.TryEnqueue(() =>
         {
-            if (Services.CaptureService.Instance.IsCapturing)
+            if (Services.CaptureService.Instance.IsOverlayCapturing)
                 Services.CaptureService.Instance.CancelCurrent();
         });
 
@@ -168,7 +168,8 @@ public sealed partial class MainWindow
         config.FullHotkeyVk > 0 ? config.FullHotkeyVk :
         (int)HotkeyService.KeyNameToVirtualKey(config.FullScreenHotkeyKey);
 
-    private int _quickCaptureBusy;
+    /// <summary>退出漏斗的一次性封口：首个 Exit_Click 置位，此后晚到的截图/热键/延时回调只记日志。</summary>
+    private int _exitStarted;
 
 
     private void ResetTrayToolTip() =>

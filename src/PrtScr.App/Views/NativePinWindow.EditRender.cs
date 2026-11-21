@@ -244,9 +244,10 @@ public sealed unsafe partial class NativePinWindow
                                 23 => "取消",
                                 _ => "另存",
                             };
+                            // 「取消」只在有未保存标注时用危险色，平时与其它命令同为中性色，避免抢「完成」的视线。
                             var brush = disabled ? disabledBrush
                                 : complete ? whiteBrush
-                                : item.Id == 23 ? cancelBrush
+                                : item.Id == 23 && HasPendingAnnotations ? cancelBrush
                                 : commandBrush;
                             DrawCenteredText(graphics, label, commandFont, brush, rect);
                         }

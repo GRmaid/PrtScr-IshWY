@@ -56,14 +56,17 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         WindowAppearance.ApplyTitleBar(this, (FrameworkElement)Content);
 
-        // 设置窗 Esc = 收进托盘（与点关闭一致）
-        var interceptor = new Services.KeyInterceptor(WinRT.Interop.WindowNative.GetWindowHandle(this));
-        interceptor.KeyDown += vk =>
+        // 设置窗 Esc = 收进托盘（与点关闭一致）；冒烟不需要这个窗口局部钩子，也不该为它装未覆盖的副作用。
+        if (!SmokeSession.IsRequested)
         {
-            if (vk == 0x1B && !_clearHistoryBusy &&
-                Environment.TickCount64 - Services.OcrUiService.LastWindowClosedTick > 2500)
-                AppWindow.Hide();
-        };
+            var interceptor = new Services.KeyInterceptor(WinRT.Interop.WindowNative.GetWindowHandle(this));
+            interceptor.KeyDown += vk =>
+            {
+                if (vk == 0x1B && !_clearHistoryBusy &&
+                    Environment.TickCount64 - Services.OcrUiService.LastWindowClosedTick > 2500)
+                    AppWindow.Hide();
+            };
+        }
         // 860×990 是主人验收过的默认尺寸；小屏（如 1366×768）上夹到工作区内，避免底部被任务栏挡住。
         var workArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
             AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
@@ -77,24 +80,38 @@ public sealed partial class MainWindow : Window
             sender.Hide();
         };
 
-        InitTray();
         SettingsNav.SelectedItem = HomeNavItem;
         ((FrameworkElement)Content).Loaded += OnLoaded;
 
         ApplyBackgroundFromConfig();
-        InitHotkey();
-        InitFullHotkey();
-        InitPinOcrHotkeys();
-        InitModeHotkey();
-        InitWindowSwitchHotkeys();
-        SyncHotkeyTexts();
-        CaptureHistoryService.Instance.HistoryChanged += OnHistoryChanged;
-        PinService.HistoryRequested = ShowHistoryAbovePins;
+
+        // 冒烟只验证启动就绪，不创建托盘图标、全局热键与历史订阅（都属于系统能力副作用）。
+        if (!SmokeSession.IsRequested)
+        {
+            InitTray();
+            InitHotkey();
+            InitFullHotkey();
+            InitPinOcrHotkeys();
+            InitModeHotkey();
+            InitWindowSwitchHotkeys();
+            SyncHotkeyTexts();
+            CaptureHistoryService.Instance.HistoryChanged += OnHistoryChanged;
+            PinService.HistoryRequested = ShowHistoryAbovePins;
+        }
+
         AboutText.Text = $"{AppInfo.Name} v{typeof(App).Assembly.GetName().Version} · {AppInfo.Tagline} · 分窗口截屏截图工具";
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (SmokeSession.IsRequested)
+        {
+            // 主窗 Loaded 是第二项真实完成事件；第三项由 UI 队列实际执行回调来证明。
+            // 冒烟不预热、不建取景窗、不联网、不启动内存计时。
+            SmokeSession.NotifyMainWindowLoaded(DispatcherQueue);
+            return;
+        }
+
         OcrPreferUmiToggle.IsOn = App.Config.Current.PreferUmiOcr;
         UmiPortBox.Value = App.Config.Current.UmiOcrPort;
 

@@ -200,8 +200,25 @@ public sealed partial class MainWindow
     }
 
 
+    // 冒烟（--smoke）绝不创建托盘对象：H.NotifyIcon 的 TaskbarIcon 自己在 Loaded 里 ForceCreate，
+    // 只把元素留在可视树里挡不住；所以原 XAML 元素改为这里按需创建，冒烟根本不构造它。
+    private TaskbarIcon TrayIcon = null!;
+    private MenuFlyout TrayMenu = null!;
+    private MenuFlyoutItem TrayPinItem = null!;
+    private MenuFlyoutItem DelayCaptureItem = null!;
+    private MenuFlyoutItem CancelDelayItem = null!;
+
     private void InitTray()
     {
+        // 托盘对象本身的创建与入树属于 MainWindow 构造的一部分：失败必须抛给构造调用者，
+        // 由 App.OnLaunched 的既有关闭漏斗（ShowFatal + Exit）失败关闭，不能吞异常后继续启动。
+        // 否则五个托盘字段会停在 null!：OnLoaded 的 UpdateCaptureOptions 必 NRE（中断启动
+        // 初始化链），或延时截图在 try 外 NRE 让 _delayCts 永久非空、截图热键楔死。
+        // HEAD 由 InitializeComponent 构造托盘元素，同类失败也是从构造函数抛出的失败关闭。
+        CreateTrayIcon();
+
+        // 以下沿用 HEAD 的既有容错边界（原 try 内只有这五步）：ForceCreate、左右键命令、
+        // 提示复位与 Opening 日志失败只记日志，保留“托盘不可用但程序仍可启动”的降级。
         try
         {
             TrayIcon.ForceCreate();
@@ -215,6 +232,56 @@ public sealed partial class MainWindow
         {
             App.Log($"Tray: 初始化失败 {ex}");
         }
+    }
+
+    /// <summary>
+    /// 按原 XAML 的文本、顺序、事件与初始可见性重建托盘图标和右键菜单；只在正常模式调用。
+    /// 加进根 Grid 末尾，与原 XAML 的树位置一致（TaskbarIcon 的 Loaded 仍会再 ForceCreate）。
+    /// 菜单、菜单项、图标全部先在局部构造，入树成功后一次性发布到字段：任一环节抛异常时
+    /// 五个字段都还没发布，不会留下被后续代码当成有效值的半构造状态；异常不在此捕获，
+    /// 交由 MainWindow 的构造调用者按启动失败处理。
+    /// </summary>
+    private void CreateTrayIcon()
+    {
+        var menu = new MenuFlyout();
+        menu.Items.Add(TrayMenuItem("设置", ShowSettings_Click));
+        var pinItem = TrayMenuItem("从剪贴板贴图", PastePin_Click);
+        menu.Items.Add(pinItem);
+        menu.Items.Add(TrayMenuItem("从剪贴板识别文字", OcrClipboard_Click));
+        menu.Items.Add(TrayMenuItem("全屏截图到剪贴板", FullScreen_Click));
+        var delayItem = TrayMenuItem("延时截图", DelayCapture_Click);
+        menu.Items.Add(delayItem);
+        var cancelItem = TrayMenuItem("取消延时截图", CancelDelay_Click);
+        cancelItem.Visibility = Visibility.Collapsed;
+        menu.Items.Add(cancelItem);
+        menu.Items.Add(TrayMenuItem("截图历史…", History_Click));
+        menu.Items.Add(TrayMenuItem("屏幕贴图管理…", OpenPinManager_Click));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(TrayMenuItem("退出", Exit_Click));
+
+        var icon = new TaskbarIcon
+        {
+            ToolTipText = "实践小梅IshWY — 截图工具",
+            ContextMenuMode = ContextMenuMode.SecondWindow,
+            IconSource = new BitmapImage(new Uri("ms-appx:///Assets/app.ico")),
+            ContextFlyout = menu,
+        };
+
+        RootGrid.Children.Add(icon);
+
+        // 入树也成功后才发布字段；字段赋值本身不会抛异常，发布是原子的。
+        TrayMenu = menu;
+        TrayPinItem = pinItem;
+        DelayCaptureItem = delayItem;
+        CancelDelayItem = cancelItem;
+        TrayIcon = icon;
+    }
+
+    private static MenuFlyoutItem TrayMenuItem(string text, RoutedEventHandler click)
+    {
+        var item = new MenuFlyoutItem { Text = text };
+        item.Click += click;
+        return item;
     }
 
     /// <summary>--startup 静默启动：不显示设置窗，但把抓屏链路预热好。</summary>
@@ -318,7 +385,7 @@ public sealed partial class MainWindow
 
     private async void OnPinHotkeyPressed()
     {
-        if (Services.CaptureService.Instance.IsCapturing)
+        if (Services.CaptureService.Instance.IsOverlayCapturing)
             return;
         if (Interlocked.Exchange(ref _pinHotkeyBusy, 1) != 0)
             return;
@@ -349,7 +416,7 @@ public sealed partial class MainWindow
 
     private async void OnOcrHotkeyPressed()
     {
-        if (Services.CaptureService.Instance.IsCapturing)
+        if (Services.CaptureService.Instance.IsOverlayCapturing)
             return;
         if (Interlocked.Exchange(ref _ocrHotkeyBusy, 1) != 0)
             return;
@@ -379,13 +446,32 @@ public sealed partial class MainWindow
         }
     }
 
-    private void Exit_Click(object sender, RoutedEventArgs e)
+    private async void Exit_Click(object sender, RoutedEventArgs e)
     {
+        // 退出漏斗只进入一次；第二次点击直接返回，避免重复 Dispose/ExitProcess。
+        if (Interlocked.Exchange(ref _exitStarted, 1) != 0)
+            return;
+
         App.Log("Tray: exit clicked");
-        TrayIcon.Dispose();
-        _hotkey.Dispose();
-        // 同 --smoke：Application.Exit 不可靠，直接 Win32 终止
-        Windows.Win32.PInvoke.ExitProcess(0);
+        try
+        {
+            // 首个 await 前同步封口：服务开始拒绝新会话，并取消正在等待的延时截图。
+            Services.CaptureService.Instance.BeginShutdown();
+            _delayCts?.Cancel();
+            // 只等待服务自己的收尾；不额外加超时或重试。
+            await Services.CaptureService.Instance.ShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"Tray: exit shutdown failed {ex}");
+        }
+        finally
+        {
+            TrayIcon.Dispose();
+            _hotkey.Dispose();
+            // 同 --smoke：Application.Exit 不可靠，直接 Win32 终止
+            Windows.Win32.PInvoke.ExitProcess(0);
+        }
     }
 
 }

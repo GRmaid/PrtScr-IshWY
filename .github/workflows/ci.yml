@@ -1,14 +1,25 @@
 name: CI
 
+# 严格门禁（P11 方案 A）：CI 跑完整 gate，包含 smoke 与本次 ZIP 生成。
+# 不允许 -SkipSmoke / -NoZip：那两条路径只能得到 LIMITED，不能代表发布验收。
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  gate:
+    name: Gate (strict)
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,18 +27,18 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: 10.0.x
 
-      - name: Build (Debug)
-        run: dotnet build PrtScr.sln -c Debug --nologo
+      - name: Gate
+        shell: pwsh
+        run: ./scripts/gate.ps1 -Mode ci -Version 0.0.0-ci
 
-      - name: Run unit tests
-        run: dotnet test PrtScr.sln -c Debug --no-build --nologo
-
-      - name: Check formatting
-        run: dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore
-
-      # 便携发布是关键路径：未打包发布容易漏 PRI/XBF，这里用脚本校验发布产物。
-      # GitHub 托管 runner 没有交互桌面，WinUI 的 --smoke 不可靠，故跳过启动冒烟。
-      - name: Portable package check
-        run: pwsh -NoProfile -File scripts/publish.ps1 -Version 0.0.0-ci -SkipSmoke -NoZip
+      # 证据必须无条件上传，否则失败时恰恰看不到日志与 manifest（B5）。
+      - name: Upload gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prtscr-gate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/evidence
+          if-no-files-found: warn
+          retention-days: 14
