@@ -7,6 +7,7 @@
 - 接手纪律：已有仓库不 `git init`、不强迁目录；先跑基线再动代码，基线数字进 `Record/reports/00-handover-baseline.md`。
 - 测试纪律：任何代码单必须 build / test / format 三绿；新修复配回归测试；交互与性能验收由主人本人执行，不得用合成热键或后台 UIA 代测。
 - 发布纪律：未获主人验收不提交、不打 tag、不发布；Release 证据必须同 SHA 可复核。
+- WinUI 构建隔离：本仓库当前 WinUI 目标将 XBF 写入 OutputPath，主程序集写入 OutDir；只设置 OutDir 不能视为隔离。后续验证构建须连实际 OutputPath/中间产物一并隔离，并核对默认运行目录 DLL/XBF/PRI 前后哈希不变；运行目录只在无实例时成套整包重建，禁止只更新其中一类文件。本条是本地工作纪律纠正，不恢复暂缓的 P11。
 - 上下文：单子按半天切；片段做完先落盘；喊停时先落盘再开口。
 - 停手条件：验收判据缺失、主人改需求、或外部依赖（如运行中的 IshWY.exe 占用输出目录）阻塞。
 - 权威进度：`Record/ProjectLog.md`。DSH 的 memory_log 只记跨会话决策，不双写。

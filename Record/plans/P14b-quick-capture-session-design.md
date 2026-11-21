@@ -1,7 +1,8 @@
 # P-14b' 设计：快捷全屏并入 CaptureSession 会话模型
 
 > 基线：HEAD 69616cc + 工作树中 P-14b 未提交改动（task-23）。本文行号取自 2026-10-30 22:2x 的工作树；task-26/task-29 若再改 CaptureService.cs，实施前须按 grep 复核行号。
-> 范围：只做设计，不改源码、不改热键、不实现。
+> 范围：原稿只做设计；2026-11-08 仅派 A1 纯 Core 原因与测试，不代表 App 会话统一。
+> 当前执行覆盖：本稿行号/门禁/回退点已过时，以 Record/reports/P14b-20261108-contract-refresh.md、side-effect-audit.md 和总纲§8/§12为准。§5五项仍是建议，不视为用户批准。禁止仅 OutDir 隔离、禁止据本稿执行 git checkout/revert 丢弃现有未提交改动。
 
 ## 1. 现状：快捷全屏的完整调用链
 
@@ -149,20 +150,20 @@
 
 - 改 src/PrtScr.Core/CaptureSessionState.cs：CaptureEndReason 加 QuickSuccess/QuickFailed，EndReasonText 加 quick-success/quick-failed。
 - 改 src/PrtScr.App/Services/CaptureService.cs 的 CaptureMonitorBestAsync 返回 engine（调用方只有 StartCaptureAsync :382 与 CaptureFullScreenPngAsync :608）。
-- 判据：build-guard（tag p14bp1，OutDir=.tmp/out-p14bp1/）0 错 0 警；dotnet test src/PrtScr.Core.Tests/PrtScr.Core.Tests.csproj -c Debug 全过且总数 ≥206+5；dotnet format whitespace PrtScr.sln --verify-no-changes --no-restore rc=0；grep quick-success src/PrtScr.Core 命中 1 处。
-- 回退点：只 revert 上述 2 个源文件 + 1 个测试文件，不动 App 行为。
+- 当前判据：完整 solution Build 0 错 0 警；OutputPath/OutDir及各项目中间目录真实隔离，默认 bin/obj 前后守卫无变化；Core.Tests 以当前327基线逐例增加并全绿；全量 format whitespace 验证 rc=0。候选命令须经隔离预检再执行，不再使用旧 OutDir-only 命令。
+- 回退纪律：先保存本轮前后差异并识别既有未提交改动，仅定向撤销本轮新增；不得整文件 revert/checkout。当前 A1 写域只有 Core 原因与其测试两个文件，不含 App。
 
 ### 步骤 2：快捷全屏接会话（核心改动）
 
 - CaptureService 新增 StartQuickCaptureAsync/占槽/surface 参数；MainWindow.Capture.cs 改调并删内联逻辑；MainWindow.Hotkeys.cs 删 _quickCaptureBusy。
-- 判据：同上门禁（tag p14bp2）；grep _quickCaptureBusy src/PrtScr.App 为 0；grep StartQuickCaptureAsync 至少 2 处（定义+调用）；五条保护日志（invalidated / finish ignored / finished reason= / already capturing, cancel session= / dismiss while hidden）与 HEAD 逐字对比不变；Core.Tests ≥211。
-- 回退点：git checkout 步骤 2 触及的 3 个 App 文件，回到步骤 1 状态；步骤 1 的 Core 增量可保留（未被引用）。
+- 未来判据：同上隔离门禁；_quickCaptureBusy 移除、StartQuickCaptureAsync 定义及调用齐全；保护刷新报告列出的6串日志及 finished→state→result 顺序，与本轮修改前工作树逐字对比。测试总数按当轮有效基线增加，不使用过时≥211阈值。此步尚未派实现。
+- 回退纪律：只定向撤销该步已归档的增量，保留既有 P10/P11 等未提交工作；不得 git checkout 整文件。
 
 ### 步骤 3：收口与回归
 
 - 删除或变薄旧 CaptureFullScreenPngAsync（:599-633）；更新 Record/plans/B1-capture-session-design.md 与 P-14b/P-04b 报告中「漏斗只服务取景」的表述；补 F2/取景交错的手动验收记录。
-- 判据：同上门禁（tag p14bp3）；grep CaptureFullScreenPngAsync 只剩 0 或 1 处（薄包装）；Core.Tests ≥211；format rc=0；app.log 中 F2 成功一条 completed 结果行、失败一条 failed 结果行。
-- 回退点：revert 步骤 3 的清理提交即可恢复步骤 2 行为（无数据迁移，历史格式不变）。
+- 未来判据：同上隔离门禁和当轮完整测试；CaptureFullScreenPngAsync 只剩0或1处薄包装；日志与新取消/提交契约一致；真实交互由主人验收，静态搜索不替代运行证据。此步未派实现，不运行 App/smoke。
+- 回退纪律：按记录定向撤销清理增量；当前未授权提交，不以假定存在的清理提交为回退依据。
 
 ## 5. 未决（5 条，含推荐答案）
 
